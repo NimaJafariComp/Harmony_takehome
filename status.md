@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M3 - Safe planning core with fake LLM |
-| Current task | M3.1 - Implement attention lifecycle and dedupe |
-| Required task progress | 14 / 58 complete |
+| Current task | M3.2 - Implement stockout detector |
+| Required task progress | 15 / 58 complete |
 | Acceptance criteria progress | 2 / 14 satisfied; 7 in progress |
-| Last validated commit | `e1724c6` |
-| Last completed-task push | `e1724c6` to `origin/main` |
+| Last validated commit | `eff7a1c` |
+| Last completed-task push | `eff7a1c` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -80,7 +80,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M3.1 Implement attention lifecycle and dedupe | `in_progress` | AC-04 | - |
+| M3.1 Implement attention lifecycle and dedupe | `complete` | AC-04 | Test: `tests/test_attention_lifecycle.py` - PASS (6).<br>Evidence: a canonical key binds detector, part, production order, inventory version, and start date; PostgreSQL atomically creates or reuses one attention item, writes every duplicate attempt to audit, and permits only forward lifecycle transitions.<br>Commit: `eff7a1c` pushed to `origin/main`. |
 | M3.2 Implement stockout detector | `not_started` | AC-04 | - |
 | M3.3 Build authorized context bundle | `not_started` | AC-05 | - |
 | M3.4 Implement candidate filtering | `not_started` | AC-05 | - |
@@ -157,7 +157,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, test-harness, and local reset/seed evidence are passing; final delivery verification remains M8. |
 | AC-02 Seed model and edge cases | `complete` | The deterministic local-only seed is exhaustively asserted to contain both scenarios, roles/scopes, authorized mailboxes, a partial changed delayed PO, superseded/current shipment updates, eligible/too-slow/wrong-part suppliers, backup availability, and quality coverage/no-coverage cases. |
 | AC-03 Provider authorization boundary | `complete` | Real PostgreSQL provider assertions prove Dana's authorized purchasing context is visible while Quinn cannot read purchasing ERP/mail/calendar data and Avery cannot read Dana's mailbox or calendar; providers additionally enforce actor context, scopes, plant visibility, record types, and record IDs. |
-| AC-04 Proactive detection and dedupe | `in_progress` | Durable attention dedupe-key uniqueness is enforced; lifecycle ownership and proactive detectors remain M3. |
+| AC-04 Proactive detection and dedupe | `in_progress` | A canonical Scenario A key and atomic PostgreSQL attention lifecycle now deduplicate equivalent triggers and audit each attempt; stockout-risk calculation and proactive trigger emission remain M3.2. |
 | AC-05 Authorized safe planning | `not_started` | - |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | Immutable actor, plan, approval, source-version, and policy-version contracts are established; gate enforcement remains M3-M4. |
 | AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
@@ -202,4 +202,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M2.7 | Completed scoped PostgreSQL ERP, mail, and calendar providers. | Test: `tests/test_scoped_providers.py` - PASS (3), including a seeded PostgreSQL empty-filter regression; seeded Compose provider assertion - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (32 tests, 97.79% coverage). | `c3837da` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M2.8 | Started end-to-end seed and provider-boundary regression coverage. | Test: `tests/test_seed.py::test_reset_and_seed_create_repeatable_scenario_and_edge_case_data` - RED because the quality actor can currently read a purchasing PO through the ERP provider. | `42ddab4` pushed to `origin/main`. |
 | 2026-08-25 | M2.8 | Completed scenario fixture and provider-boundary regression coverage. | Test: `tests/test_seed.py::test_reset_and_seed_create_repeatable_scenario_and_edge_case_data` - PASS (1); `make test-critical`, `uv lock --check`, and Compose config - PASS; full 32-test suite, format, lint, and type checks - PASS (97.79% coverage); `make migrate` and `make demo` - PASS. | `e1724c6` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M3.1 | Started durable attention-item lifecycle and deduplication coverage. | Test: `tests/test_attention_lifecycle.py` - RED because the Scenario A trigger, attention adapter, lifecycle policy, and atomic audit persistence do not exist. | Pending RED checkpoint. |
+| 2026-08-25 | M3.1 | Started durable attention-item lifecycle and deduplication coverage. | Test: `tests/test_attention_lifecycle.py` - RED because the Scenario A trigger, attention adapter, lifecycle policy, and atomic audit persistence do not exist. | `8d570cd` pushed to `origin/main`. |
+| 2026-08-25 | M3.1 | Completed durable attention lifecycle and deduplication. | Test: `tests/test_attention_lifecycle.py` - PASS (6); `make test-critical` - PASS (2); formatting, lint, type checks, lock, and Compose config - PASS; all 38 tests passed in non-integration/integration batches at 96.97% coverage; `make migrate` and `make demo` - PASS. | `eff7a1c` pushed to `origin/main`; status completion record pending this commit. |
