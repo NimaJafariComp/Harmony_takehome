@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -174,3 +175,10 @@ def test_reset_refuses_any_database_other_than_the_local_demo_target() -> None:
 
     with pytest.raises(SeedSafetyError, match="local demo database"):
         reset_database("postgresql+psycopg://agent:agent@db:5432/customer_production")
+
+
+def test_demo_clock_starts_on_the_seeded_scenario_date() -> None:
+    """The future mutable clock has one explicit, deterministic initial instant."""
+    from enterprise_agent.seed import DEMO_CLOCK_START
+
+    assert DEMO_CLOCK_START == datetime(2026, 8, 24, 9, tzinfo=UTC)
