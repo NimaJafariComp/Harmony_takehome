@@ -1,0 +1,41 @@
+"""Contracts for the repository's standard developer commands."""
+
+from __future__ import annotations
+
+import subprocess
+
+
+def run_make(*arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run Make without hiding its output when a target is unavailable."""
+    return subprocess.run(
+        ["make", *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_makefile_exposes_all_standard_validation_targets() -> None:
+    """Every documented developer command has a valid Make target."""
+    result = run_make(
+        "-n",
+        "format-check",
+        "lint",
+        "typecheck",
+        "test",
+        "test-critical",
+        "verify",
+        "migrate",
+        "seed",
+        "demo",
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_critical_test_target_executes_the_critical_suite() -> None:
+    """The focused safety suite can run independently of the full suite."""
+    result = run_make("test-critical")
+
+    assert result.returncode == 0, result.stderr
+    assert "passed" in result.stdout
