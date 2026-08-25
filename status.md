@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M2 - Domain, persistence, seed data, and scoped providers |
-| Current task | M2.3 - Create minimal schema migration |
-| Required task progress | 8 / 58 complete |
+| Current task | M2.4 - Add integrity constraints and versions |
+| Required task progress | 9 / 58 complete |
 | Acceptance criteria progress | 0 / 14 satisfied; 5 in progress |
-| Last validated commit | `d490053` |
-| Last completed-task push | `d490053` to `origin/main` |
+| Last validated commit | `bcdf41d` |
+| Last completed-task push | `bcdf41d` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -69,7 +69,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|---|---|
 | M2.1 Define domain contracts | `complete` | AC-02, AC-06 | Test: `tests/test_domain_contracts.py` - PASS (3 tests).<br>Evidence: typed IDs, validated money/date values, immutable actor/evidence/plan/approval/workflow/tool/task/audit contracts, and source-version bindings are available to later adapters and gates.<br>Commit: `fcafe13` pushed to `origin/main`. |
 | M2.2 Define ports | `complete` | AC-03, AC-12 | Test: `tests/test_ports.py` - PASS.<br>Evidence: ERP, mail, calendar, identity, clock, audit, scheduler, and LLM protocols have explicit typed contracts and are independently fakeable without concrete dependencies.<br>Commit: `d490053` pushed to `origin/main`. |
-| M2.3 Create minimal schema migration | `in_progress` | AC-01, AC-02 | - |
+| M2.3 Create minimal schema migration | `complete` | AC-01, AC-02 | Test: `tests/test_schema_migration.py` - PASS.<br>Evidence: a clean PostgreSQL database has all identity, ERP, communications, agent-state, workflow, scheduler, and audit tables with UUID keys, foreign keys, and planned query indexes.<br>Commit: `bcdf41d` pushed to `origin/main`. |
 | M2.4 Add integrity constraints and versions | `not_started` | AC-04, AC-06, AC-09, AC-10 | - |
 | M2.5 Implement reset and seed | `not_started` | AC-02 | - |
 | M2.6 Implement identity adapter | `not_started` | AC-03, AC-06, AC-07 | - |
@@ -190,4 +190,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M2.1 | Completed immutable core domain contracts. | Test: `tests/test_domain_contracts.py` - PASS (3 tests); `make test-critical` - PASS (1 selected); `make verify` - PASS (18 tests, 99.62% coverage). | `fcafe13` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M2.2 | Started the provider and application-port contract. | Test: `tests/test_ports.py` - RED because the `enterprise_agent.ports` module does not exist yet, as intended. | `331d044` and `21f99e6` RED checkpoints, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M2.2 | Completed provider and control-plane protocol contracts. | Test: `tests/test_ports.py` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (19 tests, 99.69% coverage). | `d490053` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M2.3 | Started the core PostgreSQL schema contract. | Test: `tests/test_schema_migration.py` - RED because the baseline database lacks the required domain tables, foreign keys, and indexes. | RED checkpoint pending test execution and commit. |
+| 2026-08-25 | M2.3 | Started the core PostgreSQL schema contract. | Test: `tests/test_schema_migration.py` - RED because the baseline database lacks the required domain tables, foreign keys, and indexes. | `e98fa7c` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M2.3 | Completed the first durable domain schema migration. | Test: `tests/test_schema_migration.py` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (20 tests, 99.69% coverage). | `bcdf41d` pushed to `origin/main`; status completion record pending this commit. |
