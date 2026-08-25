@@ -93,7 +93,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M4.1 Define tool catalog | `not_started` | AC-06, AC-09 | - |
+| M4.1 Define tool catalog | `in_progress` | AC-06, AC-09 | Test: `tests/test_tool_catalog.py` contract is being added before implementation. |
 | M4.2 Implement `po_reroute:v1` | `not_started` | AC-08 | - |
 | M4.3 Persist workflow and step state | `not_started` | AC-08, AC-09 | - |
 | M4.4 Implement workflow executor | `not_started` | AC-06, AC-08, AC-09 | - |
@@ -218,3 +218,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M3.7 | Completed immutable, hash-bound Scenario A plan and approval persistence. | Test: `tests/test_plan_approvals.py` - PASS (15, direct plan/approval modules 100%); PostgreSQL immutability/CAS contract and schema migration tests - PASS; non-integration suite - PASS (78, 96.01% coverage); `make test-critical` - PASS (8); format, lint, mypy, clean migration, and current demo command - PASS. | `290669a` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M3.8 | Started cross-boundary Scenario A safe-planning verification. | Test: `tests/test_safe_planning.py` critical seeded flow is being added; this verification-only task requires no production-code RED cycle. | Pending test validation. |
 | 2026-08-25 | M3.8 | Completed cross-boundary Scenario A safe-planning verification. | Test: `tests/test_safe_planning.py` - PASS; critical suite - PASS (9); non-integration suite - PASS (78, 96.01% coverage); format, lint, mypy, clean migration, and current demo command - PASS. | `45d314d` pushed to `origin/main`; status completion record pending this commit. |
+| 2026-08-25 | M4.1 | Started the declared tool-catalog contract. | Test: `tests/test_tool_catalog.py` is being added before implementation. | Pending RED checkpoint. |
