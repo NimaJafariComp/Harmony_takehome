@@ -81,7 +81,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M3.1 Implement attention lifecycle and dedupe | `complete` | AC-04 | Test: `tests/test_attention_lifecycle.py` - PASS (6).<br>Evidence: a canonical key binds detector, part, production order, inventory version, and start date; PostgreSQL atomically creates or reuses one attention item, writes every duplicate attempt to audit, and permits only forward lifecycle transitions.<br>Commit: `eff7a1c` pushed to `origin/main`. |
-| M3.2 Implement stockout detector | `not_started` | AC-04 | - |
+| M3.2 Implement stockout detector | `in_progress` | AC-04 | - |
 | M3.3 Build authorized context bundle | `not_started` | AC-05 | - |
 | M3.4 Implement candidate filtering | `not_started` | AC-05 | - |
 | M3.5 Define planning schemas and fake LLM | `not_started` | AC-05 | - |
@@ -204,3 +204,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M2.8 | Completed scenario fixture and provider-boundary regression coverage. | Test: `tests/test_seed.py::test_reset_and_seed_create_repeatable_scenario_and_edge_case_data` - PASS (1); `make test-critical`, `uv lock --check`, and Compose config - PASS; full 32-test suite, format, lint, and type checks - PASS (97.79% coverage); `make migrate` and `make demo` - PASS. | `e1724c6` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M3.1 | Started durable attention-item lifecycle and deduplication coverage. | Test: `tests/test_attention_lifecycle.py` - RED because the Scenario A trigger, attention adapter, lifecycle policy, and atomic audit persistence do not exist. | `8d570cd` pushed to `origin/main`. |
 | 2026-08-25 | M3.1 | Completed durable attention lifecycle and deduplication. | Test: `tests/test_attention_lifecycle.py` - PASS (6); `make test-critical` - PASS (2); formatting, lint, type checks, lock, and Compose config - PASS; all 38 tests passed in non-integration/integration batches at 96.97% coverage; `make migrate` and `make demo` - PASS. | `eff7a1c` pushed to `origin/main`; status completion record pending this commit. |
+| 2026-08-25 | M3.2 | Started proactive stockout-detector coverage. | Test: `tests/test_stockout_detector.py` - RED because the application-level detector and its evidence-to-attention calculation do not exist. | Pending RED checkpoint. |
