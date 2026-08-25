@@ -94,6 +94,7 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "audit_events",
     }
     assert expected_tables.issubset(schema["tables"])
+    assert {"email", "role", "approval_limit_amount"}.issubset(schema["columns"]["users"])
     assert {"part_id", "supplier_id", "status"}.issubset(schema["columns"]["purchase_orders"])
     assert {"plan_hash", "policy_version", "source_versions"}.issubset(schema["columns"]["plans"])
     assert {"payload", "lease_expires_at", "idempotency_key"}.issubset(
