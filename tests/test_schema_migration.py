@@ -36,6 +36,8 @@ def inspect_schema(database_url: str) -> dict[str, Any]:
         "    'columns': {table: sorted(column['name'] for column in inspector.get_columns(table)) for table in tables},\n"
         "    'foreign_keys': {table: sorted(f\"{foreign_key['constrained_columns'][0]}->{foreign_key['referred_table']}\" for foreign_key in inspector.get_foreign_keys(table)) for table in tables},\n"
         "    'indexes': {table: sorted(index['name'] for index in inspector.get_indexes(table)) for table in tables},\n"
+        "    'unique_constraints': {table: sorted(constraint['name'] for constraint in inspector.get_unique_constraints(table) if constraint['name']) for table in tables},\n"
+        "    'check_constraints': {table: sorted(constraint['name'] for constraint in inspector.get_check_constraints(table) if constraint['name']) for table in tables},\n"
         "}\n"
         "print(json.dumps(schema))\n"
     )
@@ -112,3 +114,50 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     )
     assert "ix_scheduled_tasks_status_due_at" in schema["indexes"]["scheduled_tasks"]
     assert "ix_audit_events_run_id_occurred_at" in schema["indexes"]["audit_events"]
+
+
+def test_integrity_migration_enforces_dedupe_idempotency_and_source_versions(
+    disposable_database: str,
+) -> None:
+    """A clean database has the durability guarantees used by later control-plane work."""
+    compose(
+        "--profile",
+        "tools",
+        "run",
+        "--build",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={disposable_database}",
+        "app",
+        "alembic",
+        "upgrade",
+        "head",
+    )
+    schema = inspect_schema(disposable_database)
+
+    assert {"inventory", "production_allocations"}.issubset(schema["tables"])
+    for table in {"suppliers", "purchase_orders", "quality_lots", "inventory", "production_allocations"}:
+        assert "source_version" in schema["columns"][table]
+
+    assert "uq_attention_items_dedupe_key" in schema["unique_constraints"][
+        "attention_items"
+    ]
+    assert "uq_workflow_steps_workflow_instance_id_step_index" in schema[
+        "unique_constraints"
+    ]["workflow_steps"]
+    assert "uq_workflow_steps_idempotency_key" in schema["unique_constraints"][
+        "workflow_steps"
+    ]
+    assert "uq_scheduled_tasks_idempotency_key" in schema["unique_constraints"][
+        "scheduled_tasks"
+    ]
+    assert "uq_inventory_part_id_plant_id" in schema["unique_constraints"]["inventory"]
+    assert "uq_production_allocations_quality_lot_id_production_order_id" in schema[
+        "unique_constraints"
+    ]["production_allocations"]
+    assert "ck_purchase_orders_source_version_positive" in schema["check_constraints"][
+        "purchase_orders"
+    ]
+    assert "ck_production_allocations_source_version_positive" in schema[
+        "check_constraints"
+    ]["production_allocations"]
