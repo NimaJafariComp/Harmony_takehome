@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M2 - Domain, persistence, seed data, and scoped providers |
-| Current task | M2.6 - Implement identity adapter |
-| Required task progress | 11 / 58 complete |
-| Acceptance criteria progress | 0 / 14 satisfied; 8 in progress |
-| Last validated commit | `9018d50` |
-| Last completed-task push | `9018d50` to `origin/main` |
+| Current task | M2.7 - Implement scoped providers |
+| Required task progress | 12 / 58 complete |
+| Acceptance criteria progress | 0 / 14 satisfied; 9 in progress |
+| Last validated commit | `c4a1067` |
+| Last completed-task push | `c4a1067` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -72,7 +72,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M2.3 Create minimal schema migration | `complete` | AC-01, AC-02 | Test: `tests/test_schema_migration.py` - PASS.<br>Evidence: a clean PostgreSQL database has all identity, ERP, communications, agent-state, workflow, scheduler, and audit tables with UUID keys, foreign keys, and planned query indexes.<br>Commit: `bcdf41d` pushed to `origin/main`. |
 | M2.4 Add integrity constraints and versions | `complete` | AC-04, AC-06, AC-09, AC-10 | Test: `tests/test_schema_migration.py::test_integrity_migration_enforces_dedupe_idempotency_and_source_versions` - PASS.<br>Evidence: PostgreSQL enforces attention, workflow-step, and scheduler uniqueness; mutable supplier/PO/lot/inventory/allocation inputs have positive source versions for later freshness gates.<br>Commit: `3722987` pushed to `origin/main`. |
 | M2.5 Implement reset and seed | `complete` | AC-02 | Test: `tests/test_seed.py::test_reset_and_seed_create_repeatable_scenario_and_edge_case_data` - PASS.<br>Evidence: a guarded local-only reset and deterministic seed create both scenarios, the delayed partial PO, current/superseded shipment updates, supplier eligibility traps, backup-routing availability, and quality coverage/no-coverage data; `make seed` succeeds without LLM credentials.<br>Commit: `9018d50` pushed to `origin/main`. |
-| M2.6 Implement identity adapter | `in_progress` | AC-03, AC-06, AC-07 | - |
+| M2.6 Implement identity adapter | `complete` | AC-03, AC-06, AC-07 | Test: `tests/test_identity_adapter.py` - PASS (2).<br>Evidence: one explicit PostgreSQL join resolves immutable actor role, scopes, plant visibility, backup approver, and currency-normalized approval limit; unknown identities fail closed.<br>Commit: `c4a1067` pushed to `origin/main`. |
 | M2.7 Implement scoped providers | `not_started` | AC-03 | - |
 | M2.8 Test seed and provider boundary | `not_started` | AC-02, AC-03 | - |
 
@@ -154,13 +154,13 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, and test-harness evidence are passing; M2.5 must still provide reset/seed behavior. |
-| AC-02 Seed model and edge cases | `in_progress` | A deterministic local-only seed now contains both scenarios, roles/scopes, a partial delayed PO, superseded/current mail, supplier traps, backup availability, and quality coverage/no-coverage cases; provider-level scenario assertions remain M2.6-M2.8. |
-| AC-03 Provider authorization boundary | `in_progress` | Provider methods require an `ActorContext` and scoped query contract; concrete authorization filtering remains M2.6-M2.8. |
+| AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, test-harness, and local reset/seed evidence are passing; final delivery verification remains M8. |
+| AC-02 Seed model and edge cases | `in_progress` | A deterministic local-only seed now contains both scenarios, roles/scopes, a partial delayed PO, superseded/current mail, supplier traps, backup availability, and quality coverage/no-coverage cases; provider-level scenario assertions remain M2.7-M2.8. |
+| AC-03 Provider authorization boundary | `in_progress` | PostgreSQL identity resolution creates scoped actor contexts from seed data; concrete ERP, mail, and calendar query filtering remains M2.7-M2.8. |
 | AC-04 Proactive detection and dedupe | `in_progress` | Durable attention dedupe-key uniqueness is enforced; lifecycle ownership and proactive detectors remain M3. |
 | AC-05 Authorized safe planning | `not_started` | - |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | Immutable actor, plan, approval, source-version, and policy-version contracts are established; gate enforcement remains M3-M4. |
-| AC-07 Backup approval routing | `not_started` | - |
+| AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
 | AC-08 Fixed Scenario A workflow | `not_started` | - |
 | AC-09 Idempotency, compensation, and recovery | `in_progress` | Workflow-step identity and idempotency keys are unique; persisted execution, compensation, and recovery behavior remain M4. |
 | AC-10 Durable scheduler and Tuesday loop | `in_progress` | Scheduled-task idempotency keys are unique; durable claiming and Tuesday receipt behavior remain M5. |
@@ -196,4 +196,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M2.4 | Completed integrity constraints and material-source versioning. | Test: `tests/test_schema_migration.py` - PASS (2); `make test-critical` - PASS (1 selected); `make verify` - PASS (21 tests, 99.69% coverage). | `3722987` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M2.5 | Started deterministic reset and seed contract. | Test: `tests/test_seed.py` - RED because no reset/seed implementation or seeded scenario records exist. | `40edbf4`, `d1a9630`, and `a79410c` RED checkpoints, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M2.5 | Completed guarded reset and deterministic scenario seed. | Test: `tests/test_seed.py` - PASS (4); `make seed` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (27 tests, 98.18% coverage). | `9018d50` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M2.6 | Started seeded identity-adapter contract. | Test: `tests/test_identity_adapter.py` - RED because no PostgreSQL-backed identity adapter exists. | RED checkpoint pending. |
+| 2026-08-25 | M2.6 | Started seeded identity-adapter contract. | Test: `tests/test_identity_adapter.py` - RED because no PostgreSQL-backed identity adapter exists. | `ad87745` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M2.6 | Completed seeded PostgreSQL identity adapter. | Test: `tests/test_identity_adapter.py` - PASS (2); seeded Compose adapter assertion - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (29 tests, 98.28% coverage). | `c4a1067` pushed to `origin/main`; status completion record pending this commit. |
