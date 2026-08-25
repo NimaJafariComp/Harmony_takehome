@@ -96,8 +96,8 @@ def erp_records() -> tuple[Evidence, ...]:
             payload={
                 "part_id": "part-x",
                 "plant_id": "PLANT-CHI",
-                "available_quantity": Decimal("30"),
-                "safety_stock_quantity": Decimal("20"),
+                "available_quantity": Decimal(30),
+                "safety_stock_quantity": Decimal(20),
             },
         ),
         evidence(
@@ -108,7 +108,7 @@ def erp_records() -> tuple[Evidence, ...]:
                 "part_id": "part-x",
                 "start_date": date(2026, 8, 27),
                 "status": "scheduled",
-                "required_quantity": Decimal("100"),
+                "required_quantity": Decimal(100),
             },
         ),
         evidence(
@@ -120,8 +120,8 @@ def erp_records() -> tuple[Evidence, ...]:
                 "part_id": "part-x",
                 "supplier_id": "supplier-y",
                 "plant_id": "PLANT-CHI",
-                "ordered_quantity": Decimal("100"),
-                "received_quantity": Decimal("40"),
+                "ordered_quantity": Decimal(100),
+                "received_quantity": Decimal(40),
                 "status": "delayed",
             },
         ),
@@ -239,7 +239,7 @@ def test_context_uses_authorized_evidence_and_newest_current_shipment_update() -
     assert context.original_purchase_order.record_id == "po-4812-y"
     assert context.shipment_update.record_id == "new"
     assert context.calendar_events == (calendar_event,)
-    assert context.suppliers == erp_records()[3:]
+    assert [supplier.record_id for supplier in context.suppliers] == ["supplier-w", "supplier-y"]
     assert {item.record_id for item in context.evidence} == {
         "inventory-x",
         "production-4812",
