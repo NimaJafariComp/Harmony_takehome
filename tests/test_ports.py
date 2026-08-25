@@ -11,7 +11,6 @@ from enterprise_agent.domain import (
     AttentionStatus,
     AuditEvent,
     AuditEventId,
-    DateRange,
     Evidence,
     EvidenceId,
     RunId,
@@ -205,4 +204,4 @@ def test_application_depends_on_explicit_provider_and_control_plane_ports() -> N
     assert audit.events_for_run(RunId("run-1")) == (event,)
     assert scheduler.claim_due(NOW, limit=1) == (task,)
     assert llm.generate(prompt).output == {"outcome": "manual_review"}
-    assert query.date_range == DateRange(start=NOW.date(), end=NOW.date())
+    assert query.date_range is None
