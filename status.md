@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M3 - Safe planning core with fake LLM |
-| Current task | M3.3 - Build authorized context bundle |
-| Required task progress | 16 / 58 complete |
+| Current task | M3.4 - Implement candidate filtering |
+| Required task progress | 17 / 58 complete |
 | Acceptance criteria progress | 2 / 14 satisfied; 7 in progress |
-| Last validated commit | `8252ed0` |
-| Last completed-task push | `8252ed0` to `origin/main` |
+| Last validated commit | `6fac4d7` |
+| Last completed-task push | `6fac4d7` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -82,7 +82,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|---|---|
 | M3.1 Implement attention lifecycle and dedupe | `complete` | AC-04 | Test: `tests/test_attention_lifecycle.py` - PASS (6).<br>Evidence: a canonical key binds detector, part, production order, inventory version, and start date; PostgreSQL atomically creates or reuses one attention item, writes every duplicate attempt to audit, and permits only forward lifecycle transitions.<br>Commit: `eff7a1c` pushed to `origin/main`. |
 | M3.2 Implement stockout detector | `complete` | AC-04 | Test: `tests/test_stockout_detector.py` - PASS (4).<br>Evidence: scoped inventory and current committed production demand are evaluated against safety stock; only positive shortfalls create durable, source-version-bound Scenario A attention registrations, including the seeded 90-unit risk.<br>Commit: `8252ed0` pushed to `origin/main`. |
-| M3.3 Build authorized context bundle | `in_progress` | AC-05 | - |
+| M3.3 Build authorized context bundle | `complete` | AC-05 | Test: `tests/test_scenario_a_context.py` - PASS (4).<br>Evidence: actor identity is re-resolved through its port; the bundle contains only typed authorized ERP, mail, and next-day calendar evidence with immutable source timestamps and versions, rejects mismatched attention snapshots, and selects only the newest valid PO shipment update.<br>Commit: `6fac4d7` pushed to `origin/main`. |
 | M3.4 Implement candidate filtering | `not_started` | AC-05 | - |
 | M3.5 Define planning schemas and fake LLM | `not_started` | AC-05 | - |
 | M3.6 Implement gate and policy | `not_started` | AC-06 | - |
@@ -158,7 +158,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-02 Seed model and edge cases | `complete` | The deterministic local-only seed is exhaustively asserted to contain both scenarios, roles/scopes, authorized mailboxes, a partial changed delayed PO, superseded/current shipment updates, eligible/too-slow/wrong-part suppliers, backup availability, and quality coverage/no-coverage cases. |
 | AC-03 Provider authorization boundary | `complete` | Real PostgreSQL provider assertions prove Dana's authorized purchasing context is visible while Quinn cannot read purchasing ERP/mail/calendar data and Avery cannot read Dana's mailbox or calendar; providers additionally enforce actor context, scopes, plant visibility, record types, and record IDs. |
 | AC-04 Proactive detection and dedupe | `in_progress` | A scoped deterministic detector now evaluates inventory, safety stock, and current committed production demand before emitting only positive source-version-bound stockout triggers; canonical keys and atomic PostgreSQL attention persistence deduplicate equivalent triggers and audit each attempt. End-to-end safe-planning coverage remains M3.8. |
-| AC-05 Authorized safe planning | `in_progress` | The stockout detector and attention lifecycle provide the typed input boundary; authorized context assembly, candidate filtering, and fake-planner validation remain M3.3-M3.5. |
+| AC-05 Authorized safe planning | `in_progress` | A typed bundle re-resolves actor identity and carries only authorized ERP, mail, and calendar evidence with immutable source timestamps and versions; it fails closed on mismatched detector snapshots or missing current PO shipment truth. Candidate filtering and fake-planner validation remain M3.4-M3.5. |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | Immutable actor, plan, approval, source-version, and policy-version contracts are established; gate enforcement remains M3-M4. |
 | AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
 | AC-08 Fixed Scenario A workflow | `not_started` | - |
@@ -206,4 +206,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M3.1 | Completed durable attention lifecycle and deduplication. | Test: `tests/test_attention_lifecycle.py` - PASS (6); `make test-critical` - PASS (2); formatting, lint, type checks, lock, and Compose config - PASS; all 38 tests passed in non-integration/integration batches at 96.97% coverage; `make migrate` and `make demo` - PASS. | `eff7a1c` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M3.2 | Started proactive stockout-detector coverage. | Test: `tests/test_stockout_detector.py` - RED because the application-level detector and its evidence-to-attention calculation do not exist. | `4ccbbe1` pushed to `origin/main`. |
 | 2026-08-25 | M3.2 | Completed deterministic proactive stockout detection. | Test: `tests/test_stockout_detector.py` - PASS (4), including the seeded PostgreSQL 90-unit shortfall; non-integration suite - PASS (35, 95.97% coverage); `make test-critical` - PASS (3); format, lint, mypy, `make migrate`, and `make demo` - PASS. | `8252ed0` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M3.3 | Started typed authorized Scenario A context coverage. | Test: `tests/test_scenario_a_context.py` - RED because the context assembler and its source-bound bundle do not exist. | Pending RED checkpoint. |
+| 2026-08-25 | M3.3 | Started typed authorized Scenario A context coverage. | Test: `tests/test_scenario_a_context.py` - RED because the context assembler and its source-bound bundle do not exist. | `30dac04` pushed to `origin/main`. |
+| 2026-08-25 | M3.3 | Completed typed authorized Scenario A context assembly. | Test: `tests/test_scenario_a_context.py` - PASS (4), including the seeded PostgreSQL path and newest-valid-shipment selection; non-integration suite - PASS (38, 94.21% coverage); `make test-critical` - PASS (4); format, lint, mypy, `make migrate`, and `make demo` - PASS. | `6fac4d7` pushed to `origin/main`; status completion record pending this commit. |
