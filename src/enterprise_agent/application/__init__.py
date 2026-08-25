@@ -13,12 +13,27 @@ from .context import (
     ScenarioAContextAssembler,
     StaleAttentionEvidenceError,
 )
+from .planning import (
+    EnterWorkflowRecommendation,
+    FakeLLMPort,
+    InvalidScenarioARecommendationError,
+    ManualReviewRecommendation,
+    NoActionRecommendation,
+    ScenarioARecommendation,
+    validate_scenario_a_recommendation,
+)
 from .stockout import StockoutDetection, StockoutDetector, StockoutRisk
 
 __all__ = [
     "AuthorizedContextBundle",
+    "EnterWorkflowRecommendation",
+    "FakeLLMPort",
+    "InvalidScenarioARecommendationError",
+    "ManualReviewRecommendation",
     "MissingScenarioAContextEvidenceError",
+    "NoActionRecommendation",
     "ScenarioAContextAssembler",
+    "ScenarioARecommendation",
     "StaleAttentionEvidenceError",
     "StockoutDetection",
     "StockoutDetector",
@@ -28,4 +43,5 @@ __all__ = [
     "SupplierCandidateResult",
     "SupplierExclusion",
     "SupplierExclusionReason",
+    "validate_scenario_a_recommendation",
 ]
