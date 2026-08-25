@@ -1,5 +1,12 @@
 """Application services that compose domain policy with typed ports."""
 
+from .candidates import (
+    SupplierCandidate,
+    SupplierCandidateFilter,
+    SupplierCandidateResult,
+    SupplierExclusion,
+    SupplierExclusionReason,
+)
 from .context import (
     AuthorizedContextBundle,
     MissingScenarioAContextEvidenceError,
@@ -16,4 +23,9 @@ __all__ = [
     "StockoutDetection",
     "StockoutDetector",
     "StockoutRisk",
+    "SupplierCandidate",
+    "SupplierCandidateFilter",
+    "SupplierCandidateResult",
+    "SupplierExclusion",
+    "SupplierExclusionReason",
 ]

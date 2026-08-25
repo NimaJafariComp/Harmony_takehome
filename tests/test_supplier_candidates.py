@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import pytest
 
+from enterprise_agent.application.context import AuthorizedContextBundle
 from enterprise_agent.domain import (
     ActorContext,
     AttentionId,
@@ -72,10 +73,8 @@ def supplier(
     )
 
 
-def scenario_context(*, suppliers: tuple[Evidence, ...]):
+def scenario_context(*, suppliers: tuple[Evidence, ...]) -> AuthorizedContextBundle:
     """Build an already-authorized Scenario A context that candidate filtering may inspect."""
-    from enterprise_agent.application.context import AuthorizedContextBundle
-
     trigger = ScenarioAStockoutTrigger(
         detector="stockout_detector:v1",
         part_id="part-x",
@@ -149,6 +148,7 @@ def test_filter_allows_only_an_approved_fast_alternate_for_the_part_and_plant() 
     assert [(candidate.supplier_id, candidate.arrival_date) for candidate in result.candidates] == [
         ("supplier-z", date(2026, 8, 25))
     ]
+    assert result.allowed_supplier_ids == frozenset({"supplier-z"})
     assert {exclusion.supplier_id: exclusion.reasons for exclusion in result.exclusions} == {
         "supplier-slow": (SupplierExclusionReason.LEAD_TIME_TOO_LONG,),
         "supplier-wrong-part": (SupplierExclusionReason.WRONG_PART,),
