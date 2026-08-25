@@ -6,7 +6,6 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import cast
 
 import pytest
 
@@ -20,13 +19,15 @@ from enterprise_agent.domain import (
     EvidenceId,
     PlantId,
     RunId,
+    ScenarioAStockoutTrigger,
     Scope,
+    UserId,
 )
 from enterprise_agent.ports import EvidenceQuery
 
 NOW = datetime(2026, 8, 24, 9, tzinfo=UTC)
 ACTOR = ActorContext(
-    user_id=cast("UserId", "00000000-0000-0000-0000-000000000001"),
+    user_id=UserId("00000000-0000-0000-0000-000000000001"),
     role="purchasing_manager",
     scopes=frozenset({Scope("erp:read")}),
     plant_ids=frozenset({PlantId("PLANT-CHI")}),
@@ -103,9 +104,9 @@ class FakeErp:
 class RecordingAttention:
     """Capture emitted triggers while returning a minimal durable registration result."""
 
-    triggers: list[object] = field(default_factory=list)
+    triggers: list[ScenarioAStockoutTrigger] = field(default_factory=list)
 
-    def register(self, trigger: object, run_id: RunId) -> AttentionRegistration:
+    def register(self, trigger: ScenarioAStockoutTrigger, run_id: RunId) -> AttentionRegistration:
         """Record a trigger and return its open attention representation."""
         del run_id
         self.triggers.append(trigger)
@@ -114,13 +115,24 @@ class RecordingAttention:
                 attention_id=AttentionId(f"attention-{len(self.triggers)}"),
                 scenario="scenario_a",
                 cause="projected_stockout",
-                dedupe_key=cast("str", trigger.dedupe_key),
+                dedupe_key=trigger.dedupe_key,
                 status=AttentionStatus.OPEN,
                 created_at=NOW,
-                source_versions=cast("dict[str, int]", trigger.source_versions),
+                source_versions=trigger.source_versions,
             ),
             created=True,
         )
+
+    def transition(
+        self,
+        attention: AttentionItem,
+        target: AttentionStatus,
+        run_id: RunId,
+        occurred_at: datetime,
+    ) -> AttentionItem:
+        """Satisfy the durable attention boundary; detector tests never advance state."""
+        del target, run_id, occurred_at
+        return attention
 
 
 def test_detector_includes_safety_stock_and_all_committed_demand_before_start() -> None:
@@ -148,9 +160,9 @@ def test_detector_includes_safety_stock_and_all_committed_demand_before_start() 
 
     assert len(detections) == 1
     assert detections[0].risk.production_order_id == "production-4812"
-    assert detections[0].risk.committed_demand == Decimal("90")
-    assert detections[0].risk.projected_available == Decimal("-10")
-    assert detections[0].risk.shortfall == Decimal("10")
+    assert detections[0].risk.committed_demand == Decimal(90)
+    assert detections[0].risk.projected_available == Decimal(-10)
+    assert detections[0].risk.shortfall == Decimal(10)
     assert attention.triggers[0].source_versions == {
         "inventory:inventory-x": 4,
         "production_order:production-earlier": 1,
