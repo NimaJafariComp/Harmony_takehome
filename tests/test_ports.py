@@ -34,7 +34,6 @@ from enterprise_agent.ports import (
     StructuredLLMResponse,
 )
 
-
 pytestmark = pytest.mark.unit
 
 NOW = datetime(2026, 9, 2, 14, 30, tzinfo=UTC)
