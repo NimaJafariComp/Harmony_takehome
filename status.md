@@ -61,7 +61,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M1.3 Add PostgreSQL Compose service | `complete` | AC-01 | Test: `uv run pytest --cov=enterprise_agent` - PASS (9 tests, 100% coverage). Validation: Ruff, mypy, Compose config, and live `pg_isready` - PASS. Commit: `eeea5c7` pushed to `origin/main`. |
 | M1.4 Add migration plumbing | `complete` | AC-01 | Test: `tests/test_migrations.py::test_baseline_migration_applies_to_a_clean_compose_database` - PASS.<br>Evidence: a freshly recreated private Compose database upgrades to revision `20260825_0001`; `make migrate` reruns safely at head.<br>Commit: `84e25e4` pushed to `origin/main`. |
 | M1.5 Add command and validation targets | `complete` | AC-01 | Test: `tests/test_make_targets.py` and `make test-critical` - PASS.<br>Evidence: all required targets parse and the critical suite runs independently; `make verify` completes from this checkout without LLM credentials.<br>Commit: `15a355c` pushed to `origin/main`. |
-| M1.6 Establish test harness | `not_started` | AC-01 | - |
+| M1.6 Establish test harness | `in_progress` | AC-01 | - |
 
 ### M2 - Domain, persistence, seed data, and scoped providers
 
@@ -184,3 +184,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M1.4 | Completed Alembic migration plumbing and the empty baseline. | Test: `tests/test_migrations.py::test_baseline_migration_applies_to_a_clean_compose_database` - PASS; full suite (10 tests, 100% coverage), Ruff, mypy, lock check, Compose config, and repeatable `make migrate` - PASS. | `84e25e4` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M1.5 | Started the developer-command contract. | Test: `tests/test_make_targets.py` - RED because the validation and critical-test Make targets do not exist yet, as intended. | `5186cbe` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M1.5 | Completed standard developer commands and the focused critical-test target. | Test: `tests/test_make_targets.py` - PASS (2 tests); `make test-critical` - PASS (1 selected); `make verify` - PASS (12 tests, 100% coverage). | `15a355c` pushed to `origin/main`; status completion record pending this commit. |
+| 2026-08-25 | M1.6 | Started the reusable test-harness contract. | Test: `tests/test_test_harness.py` - RED because the disposable-database fixture is not defined yet, as intended. | RED checkpoint pending test execution and commit. |
