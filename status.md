@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M1 - Foundation |
-| Current task | M1.4 - Add database migration plumbing |
-| Required task progress | 3 / 58 complete |
+| Current task | M1.5 - Add command and validation targets |
+| Required task progress | 4 / 58 complete |
 | Acceptance criteria progress | 0 / 14 satisfied |
-| Last validated commit | `eeea5c7` |
-| Last completed-task push | `eeea5c7` to `origin/main` |
+| Last validated commit | `84e25e4` |
+| Last completed-task push | `84e25e4` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -59,7 +59,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M1.1 Create Python project skeleton | `complete` | AC-01 | Test: `uv run pytest --cov=enterprise_agent tests/test_cli.py` - PASS (2 tests, 100% coverage). Validation: Ruff, mypy, `uv lock --check`, and `uv run enterprise-agent version` - PASS. Commit: `a0389dc` pushed to `origin/main`. |
 | M1.2 Add local runtime configuration | `complete` | AC-01 | Test: `uv run pytest --cov=enterprise_agent tests/test_config.py tests/test_cli.py` - PASS (7 tests, 100% coverage). Validation: Ruff, mypy, lock check, and secret-safe installed `config-check` command - PASS. Commit: `0a9b80e` pushed to `origin/main`. |
 | M1.3 Add PostgreSQL Compose service | `complete` | AC-01 | Test: `uv run pytest --cov=enterprise_agent` - PASS (9 tests, 100% coverage). Validation: Ruff, mypy, Compose config, and live `pg_isready` - PASS. Commit: `eeea5c7` pushed to `origin/main`. |
-| M1.4 Add migration plumbing | `in_progress` | AC-01 | - |
+| M1.4 Add migration plumbing | `complete` | AC-01 | Test: `tests/test_migrations.py::test_baseline_migration_applies_to_a_clean_compose_database` - PASS.<br>Evidence: a freshly recreated private Compose database upgrades to revision `20260825_0001`; `make migrate` reruns safely at head.<br>Commit: `84e25e4` pushed to `origin/main`. |
 | M1.5 Add command and validation targets | `not_started` | AC-01 | - |
 | M1.6 Establish test harness | `not_started` | AC-01 | - |
 
@@ -180,4 +180,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M1.2 | Completed secret-safe runtime configuration and CLI validation. | Test: `uv run pytest --cov=enterprise_agent tests/test_config.py tests/test_cli.py` - PASS (7 tests, 100% coverage); Ruff, mypy, lock, and installed `config-check` command - PASS. | `0a9b80e` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M1.3 | Started the PostgreSQL Compose contract. | Test: `tests/test_compose.py` - RED because `docker-compose.yml` is absent and the example URL does not target the Compose service, as intended. | `7e5a631` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M1.3 | Completed private durable PostgreSQL Compose service. | Test: `uv run pytest --cov=enterprise_agent` - PASS (9 tests, 100% coverage); Ruff, mypy, Compose config, and live `pg_isready` - PASS. | `eeea5c7` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M1.4 | Started the database migration contract. | Test: `tests/test_migrations.py::test_baseline_migration_applies_to_a_clean_compose_database` - RED because the Compose migration runner does not exist yet, as intended. | RED checkpoint pending test execution and commit. |
+| 2026-08-25 | M1.4 | Started the database migration contract. | Test: `tests/test_migrations.py::test_baseline_migration_applies_to_a_clean_compose_database` - RED because the Compose migration runner does not exist yet, as intended. | `6468886` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M1.4 | Completed Alembic migration plumbing and the empty baseline. | Test: `tests/test_migrations.py::test_baseline_migration_applies_to_a_clean_compose_database` - PASS; full suite (10 tests, 100% coverage), Ruff, mypy, lock check, Compose config, and repeatable `make migrate` - PASS. | `84e25e4` pushed to `origin/main`; status completion record pending this commit. |
