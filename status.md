@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M4 - Declared workflow, idempotent tools, and crash recovery |
-| Current task | M4.1 - Define tool catalog |
-| Required task progress | 23 / 58 complete |
-| Acceptance criteria progress | 4 / 14 satisfied; 5 in progress |
-| Last validated commit | `55ca577` |
-| Last completed-task push | `55ca577` to `origin/main` |
+| Current task | M4.3 - Persist workflow and step state |
+| Required task progress | 24 / 58 complete |
+| Acceptance criteria progress | 4 / 14 satisfied; 7 in progress |
+| Last validated commit | `3f01408` |
+| Last completed-task push | `3f01408` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -94,7 +94,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M4.1 Define tool catalog | `complete` | AC-06, AC-09 | Test: `tests/test_tool_catalog.py` - PASS (11; `tools.py` 100% coverage).<br>Validation: `make test-critical` - PASS (11 selected); `make verify` - PASS (101 tests, 96.30% coverage, clean migration).<br>Evidence: the closed catalog declares exactly six reviewed tools with strict Pydantic inputs, per-tool scopes, compensation metadata, opaque workflow-step idempotency keys, and no effect implementation.<br>Commit: `55ca577` pushed to `origin/main`. |
-| M4.2 Implement `po_reroute:v1` | `in_progress` | AC-08 | Test: `tests/test_po_reroute_workflow.py` contract is being added before implementation. |
+| M4.2 Implement `po_reroute:v1` | `complete` | AC-08 | Test: `tests/test_po_reroute_workflow.py` - PASS (4; `workflows.py` 100% coverage).<br>Validation: `make test-critical` - PASS (12 selected); `make verify` - PASS (105 tests, 96.39% coverage, clean migration).<br>Evidence: the immutable `po_reroute:v1` declaration fixes six reviewed steps in order—two read-only guards followed by replacement PO, original PO, notification, and arrival-check tools—and only exact registered name/version resolution is permitted.<br>Commit: `3f01408` pushed to `origin/main`. |
 | M4.3 Persist workflow and step state | `not_started` | AC-08, AC-09 | - |
 | M4.4 Implement workflow executor | `not_started` | AC-06, AC-08, AC-09 | - |
 | M4.5 Implement external-style tool boundaries | `not_started` | AC-09, AC-11 | - |
@@ -161,7 +161,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-05 Authorized safe planning | `complete` | Typed context re-resolves identity and preserves only authorized ERP, mail, and calendar evidence; deterministic filtering, strict schemas, and the fake LLM leave only safe bounded outcomes. The seeded M3.8 run proves the entire authorized path admits only Supplier Z and produces one gate-approved immutable pending plan. |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | The Scenario A gate fails closed on stale evidence, scope, PO parameter/remainder, supplier, pricing, currency-authority, and approval-limit violations. A fresh gate-approved plan is now immutable in PostgreSQL and bound to its policy/source/expiry hash plus pending approval; stale, expired, altered, mismatched, or raced records are unapprovable. The M4.1 catalog declares every tool's required write scope; tool-level execution revalidation remains M4. |
 | AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
-| AC-08 Fixed Scenario A workflow | `not_started` | - |
+| AC-08 Fixed Scenario A workflow | `in_progress` | `po_reroute:v1` now resolves only to its immutable six-step declaration: alternate-supplier and lead-time guards, then replacement PO, original PO, production notification, and arrival-check effects. Durable persistence and execution remain M4. |
 | AC-09 Idempotency, compensation, and recovery | `in_progress` | The M4.1 catalog derives opaque, stable keys from workflow instance, step, declared tool, and canonical typed input, and assigns compensation metadata to every reviewed effect. Persisted execution, compensation, and recovery behavior remain M4. |
 | AC-10 Durable scheduler and Tuesday loop | `in_progress` | Scheduled-task idempotency keys are unique; durable claiming and Tuesday receipt behavior remain M5. |
 | AC-11 Append-only audit reconstruction | `not_started` | - |
@@ -221,3 +221,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M4.1 | Started the declared tool-catalog contract. | Test: `tests/test_tool_catalog.py` is being added before implementation. | Pending RED checkpoint. |
 | 2026-08-25 | M4.1 | Completed the declared, non-executing tool catalog. | Test: `tests/test_tool_catalog.py` - PASS (11; `tools.py` 100% direct coverage); `make test-critical` - PASS (11); `make verify` - PASS (101, 96.30% coverage, migration). | `55ca577` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M4.2 | Started the fixed `po_reroute:v1` workflow-definition contract. | Test: `tests/test_po_reroute_workflow.py` is being added before implementation. | Pending RED checkpoint. |
+| 2026-08-25 | M4.2 | Completed the immutable `po_reroute:v1` declaration. | Test: `tests/test_po_reroute_workflow.py` - PASS (4; `workflows.py` 100% direct coverage); `make test-critical` - PASS (12); `make verify` - PASS (105, 96.39% coverage, migration). | `3f01408` pushed to `origin/main`; status completion record pending this commit. |
