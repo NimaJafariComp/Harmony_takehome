@@ -47,8 +47,20 @@ from .tools import (
     build_tool_idempotency_key,
     tool_definition,
 )
+from .workflows import (
+    DECLARED_WORKFLOWS,
+    PO_REROUTE_V1,
+    WorkflowDefinition,
+    WorkflowNotDeclaredError,
+    WorkflowStepDefinition,
+    WorkflowStepName,
+    declared_workflow,
+    workflow_for_recommendation,
+)
 
 __all__ = [
+    "DECLARED_WORKFLOWS",
+    "PO_REROUTE_V1",
     "TOOL_CATALOG",
     "AuthorizedContextBundle",
     "CompensationAction",
@@ -86,9 +98,15 @@ __all__ = [
     "ToolDefinition",
     "ToolName",
     "ToolNotDeclaredError",
+    "WorkflowDefinition",
+    "WorkflowNotDeclaredError",
+    "WorkflowStepDefinition",
+    "WorkflowStepName",
     "authorize_tool",
     "build_tool_idempotency_key",
+    "declared_workflow",
     "recompute_plan_hash",
     "tool_definition",
     "validate_scenario_a_recommendation",
+    "workflow_for_recommendation",
 ]
