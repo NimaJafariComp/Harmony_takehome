@@ -216,12 +216,12 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
     assert first_seed["scenario_a"]["shipment_updates"] == [
         {
             "message_key": "shipment-update-po-4812-y-v1",
-            "received_at": "2026-08-24 08:00:00+00:00",
+            "received_at": "2026-08-24 08:00:00+00",
             "superseded_by": "shipment-update-po-4812-y-v2",
         },
         {
             "message_key": "shipment-update-po-4812-y-v2",
-            "received_at": "2026-08-24 09:00:00+00:00",
+            "received_at": "2026-08-24 09:00:00+00",
             "superseded_by": None,
         },
     ]
