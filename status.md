@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M2 - Domain, persistence, seed data, and scoped providers |
-| Current task | M2.7 - Implement scoped providers |
-| Required task progress | 12 / 58 complete |
+| Current task | M2.8 - Test seed and provider boundary |
+| Required task progress | 13 / 58 complete |
 | Acceptance criteria progress | 0 / 14 satisfied; 9 in progress |
-| Last validated commit | `c4a1067` |
-| Last completed-task push | `c4a1067` to `origin/main` |
+| Last validated commit | `c3837da` |
+| Last completed-task push | `c3837da` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -73,7 +73,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M2.4 Add integrity constraints and versions | `complete` | AC-04, AC-06, AC-09, AC-10 | Test: `tests/test_schema_migration.py::test_integrity_migration_enforces_dedupe_idempotency_and_source_versions` - PASS.<br>Evidence: PostgreSQL enforces attention, workflow-step, and scheduler uniqueness; mutable supplier/PO/lot/inventory/allocation inputs have positive source versions for later freshness gates.<br>Commit: `3722987` pushed to `origin/main`. |
 | M2.5 Implement reset and seed | `complete` | AC-02 | Test: `tests/test_seed.py::test_reset_and_seed_create_repeatable_scenario_and_edge_case_data` - PASS.<br>Evidence: a guarded local-only reset and deterministic seed create both scenarios, the delayed partial PO, current/superseded shipment updates, supplier eligibility traps, backup-routing availability, and quality coverage/no-coverage data; `make seed` succeeds without LLM credentials.<br>Commit: `9018d50` pushed to `origin/main`. |
 | M2.6 Implement identity adapter | `complete` | AC-03, AC-06, AC-07 | Test: `tests/test_identity_adapter.py` - PASS (2).<br>Evidence: one explicit PostgreSQL join resolves immutable actor role, scopes, plant visibility, backup approver, and currency-normalized approval limit; unknown identities fail closed.<br>Commit: `c4a1067` pushed to `origin/main`. |
-| M2.7 Implement scoped providers | `in_progress` | AC-03 | - |
+| M2.7 Implement scoped providers | `complete` | AC-03 | Test: `tests/test_scoped_providers.py` - PASS (3).<br>Evidence: fixed PostgreSQL provider queries enforce actor scope, plant, mailbox-recipient, calendar-owner, record-type, and optional-ID boundaries before evidence construction; unsupported types fail closed.<br>Commit: `c3837da` pushed to `origin/main`. |
 | M2.8 Test seed and provider boundary | `not_started` | AC-02, AC-03 | - |
 
 ### M3 - Safe planning core with fake LLM
@@ -155,8 +155,8 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Criterion | Status | Evidence |
 |---|---|---|
 | AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, test-harness, and local reset/seed evidence are passing; final delivery verification remains M8. |
-| AC-02 Seed model and edge cases | `in_progress` | A deterministic local-only seed now contains both scenarios, roles/scopes, a partial delayed PO, superseded/current mail, supplier traps, backup availability, and quality coverage/no-coverage cases; provider-level scenario assertions remain M2.7-M2.8. |
-| AC-03 Provider authorization boundary | `in_progress` | PostgreSQL identity resolution creates scoped actor contexts from seed data; concrete ERP, mail, and calendar query filtering remains M2.7-M2.8. |
+| AC-02 Seed model and edge cases | `in_progress` | A deterministic local-only seed now contains both scenarios, roles/scopes, authorized mailboxes, a partial delayed PO, superseded/current mail, supplier traps, backup availability, and quality coverage/no-coverage cases; exhaustive scenario assertions remain M2.8. |
+| AC-03 Provider authorization boundary | `in_progress` | PostgreSQL identity, ERP, mail, and calendar adapters enforce actor context, scopes, plant visibility, mailbox recipient, and calendar ownership inside provider queries; cross-provider authorization regression coverage remains M2.8. |
 | AC-04 Proactive detection and dedupe | `in_progress` | Durable attention dedupe-key uniqueness is enforced; lifecycle ownership and proactive detectors remain M3. |
 | AC-05 Authorized safe planning | `not_started` | - |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | Immutable actor, plan, approval, source-version, and policy-version contracts are established; gate enforcement remains M3-M4. |
@@ -198,4 +198,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M2.5 | Completed guarded reset and deterministic scenario seed. | Test: `tests/test_seed.py` - PASS (4); `make seed` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (27 tests, 98.18% coverage). | `9018d50` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M2.6 | Started seeded identity-adapter contract. | Test: `tests/test_identity_adapter.py` - RED because no PostgreSQL-backed identity adapter exists. | `ad87745` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M2.6 | Completed seeded PostgreSQL identity adapter. | Test: `tests/test_identity_adapter.py` - PASS (2); seeded Compose adapter assertion - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (29 tests, 98.28% coverage). | `c4a1067` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M2.7 | Started scoped ERP, mail, and calendar provider contracts. | Test: `tests/test_scoped_providers.py` and updated schema contract - RED because no provider adapters or user-mailbox column exist. | RED checkpoint pending. |
+| 2026-08-25 | M2.7 | Started scoped ERP, mail, and calendar provider contracts. | Test: `tests/test_scoped_providers.py` and updated schema contract - RED because no provider adapters or user-mailbox column exist. | `74c1633` and `3a98971` RED checkpoints, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M2.7 | Completed scoped PostgreSQL ERP, mail, and calendar providers. | Test: `tests/test_scoped_providers.py` - PASS (3), including a seeded PostgreSQL empty-filter regression; seeded Compose provider assertion - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (32 tests, 97.79% coverage). | `c3837da` pushed to `origin/main`; status completion record pending this commit. |
