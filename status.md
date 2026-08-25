@@ -67,7 +67,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M2.1 Define domain contracts | `not_started` | AC-02, AC-06 | - |
+| M2.1 Define domain contracts | `in_progress` | AC-02, AC-06 | - |
 | M2.2 Define ports | `not_started` | AC-03, AC-12 | - |
 | M2.3 Create minimal schema migration | `not_started` | AC-01, AC-02 | - |
 | M2.4 Add integrity constraints and versions | `not_started` | AC-04, AC-06, AC-09, AC-10 | - |
@@ -186,3 +186,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M1.5 | Completed standard developer commands and the focused critical-test target. | Test: `tests/test_make_targets.py` - PASS (2 tests); `make test-critical` - PASS (1 selected); `make verify` - PASS (12 tests, 100% coverage). | `15a355c` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M1.6 | Started the reusable test-harness contract. | Test: `tests/test_test_harness.py` and `tests/test_async_harness.py` - RED because the disposable-database fixture and async marker/plugin support are absent, as intended. | `57cb9d8` and `1f2033c` RED checkpoints, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M1.6 | Completed the reusable test harness with async support and isolated database fixtures. | Test: focused harness tests - PASS (4); unit layer - PASS (9); integration layer - PASS (2); contract layer - PASS (4); `make test-critical` - PASS (1 selected); `make verify` - PASS (15 tests, 100% coverage). | `3fe46b7` pushed to `origin/main`; status completion record pending this commit. |
+| 2026-08-25 | M2.1 | Started the stable domain-contract boundary. | Test: `tests/test_domain_contracts.py` - RED because the `enterprise_agent.domain` contract package does not exist yet, as intended. | RED checkpoint pending test execution and commit. |
