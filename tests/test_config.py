@@ -51,6 +51,7 @@ def test_config_check_reports_safe_selected_profile(monkeypatch: pytest.MonkeyPa
     assert "test-openai-secret" not in result.stdout
 
 
+@pytest.mark.critical
 def test_config_check_reports_missing_key_without_exposing_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

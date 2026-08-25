@@ -31,6 +31,9 @@ enterprise-agent = "enterprise_agent.cli:main"
 
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-config", "--strict-markers"]
+markers = [
+  "critical: focused safety regression required after behavior-changing tasks",
+]
 testpaths = ["tests"]
 
 [tool.coverage.run]

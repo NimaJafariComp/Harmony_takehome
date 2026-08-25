@@ -42,4 +42,7 @@ def test_example_database_url_targets_compose_service() -> None:
     """The documented application connection targets the internal DB hostname."""
     contents = Path(".env.example").read_text(encoding="utf-8")
 
-    assert "DATABASE_URL=postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent" in contents
+    assert (
+        "DATABASE_URL=postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent"
+        in contents
+    )
