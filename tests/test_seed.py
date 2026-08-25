@@ -61,7 +61,7 @@ def inspect_seed(database_url: str) -> dict[str, Any]:
         "        'scenario_a': {\n"
         "            'production': rows(\"SELECT order_number, required_quantity::text, start_date::text FROM production_orders WHERE order_number = '4812'\"),\n"
         "            'purchase_order': rows(\"SELECT po.po_number, supplier.supplier_code, po.status, po.received_quantity::text, po.expected_receipt_date::text, po.source_version FROM purchase_orders po JOIN suppliers supplier ON supplier.id = po.supplier_id WHERE po.po_number = 'PO-4812-Y'\"),\n"
-        "            'suppliers': rows(\"SELECT supplier_code, approved, lead_time_days, unit_price::text, source_version FROM suppliers ORDER BY supplier_code\"),\n"
+        "            'suppliers': rows(\"SELECT suppliers.supplier_code, parts.part_number, suppliers.approved, suppliers.lead_time_days, suppliers.unit_price::text, suppliers.source_version FROM suppliers JOIN parts ON parts.id = suppliers.part_id ORDER BY suppliers.supplier_code\"),\n"
         "            'shipment_updates': rows(\"SELECT message_key, received_at::text, payload->>'superseded_by' AS superseded_by FROM messages WHERE purchase_order_id = (SELECT id FROM purchase_orders WHERE po_number = 'PO-4812-Y') ORDER BY received_at\"),\n"
         "            'inventory': rows(\"SELECT available_quantity::text, safety_stock_quantity::text, source_version FROM inventory WHERE part_id = (SELECT id FROM parts WHERE part_number = 'PART-X')\"),\n"
         "            'out_of_office': rows(\"SELECT users.display_name, starts_at::text, ends_at::text FROM calendar_events JOIN users ON users.id = calendar_events.user_id WHERE event_type = 'out_of_office'\"),\n"
@@ -114,6 +114,53 @@ def assert_unfiltered_erp_inventory_is_queryable(database_url: str) -> None:
     )
 
 
+def assert_seeded_provider_boundaries(database_url: str) -> None:
+    """Prove realistic seed data passes only through the owning provider boundaries."""
+    command = (
+        "from os import environ\n"
+        "from enterprise_agent.adapters import (\n"
+        "    PostgresCalendarAdapter,\n"
+        "    PostgresErpAdapter,\n"
+        "    PostgresIdentityAdapter,\n"
+        "    PostgresMailAdapter,\n"
+        ")\n"
+        "from enterprise_agent.domain import UserId\n"
+        "from enterprise_agent.ports import EvidenceQuery\n"
+        "database_url = environ['DATABASE_URL']\n"
+        "identity = PostgresIdentityAdapter(database_url)\n"
+        "erp = PostgresErpAdapter(database_url)\n"
+        "mail = PostgresMailAdapter(database_url)\n"
+        "calendar = PostgresCalendarAdapter(database_url)\n"
+        "dana = identity.actor_for(UserId('00000000-0000-0000-0000-000000000001'))\n"
+        "quinn = identity.actor_for(UserId('00000000-0000-0000-0000-000000000003'))\n"
+        "avery = identity.actor_for(UserId('00000000-0000-0000-0000-000000000002'))\n"
+        "procurement = erp.query(dana, EvidenceQuery(record_types=frozenset({'inventory', 'purchase_order', 'production_order', 'supplier'})))\n"
+        "assert {(item.record_type, item.payload.get('po_number')) for item in procurement if item.record_type == 'purchase_order'} == {('purchase_order', 'PO-4812-Y'), ('purchase_order', 'PO-NOISE-77')}\n"
+        "assert {item.payload['supplier_code'] for item in procurement if item.record_type == 'supplier'} == {'SUP-SLOW', 'SUP-W', 'SUP-Y', 'SUP-Z'}\n"
+        "updates = mail.query(dana, EvidenceQuery(record_types=frozenset({'message'}), record_ids=frozenset({'00000000-0000-0000-0000-000000000801', '00000000-0000-0000-0000-000000000802'})))\n"
+        "assert [item.payload['message_key'] for item in updates] == ['shipment-update-po-4812-y-v1', 'shipment-update-po-4812-y-v2']\n"
+        "assert updates[-1].payload['payload']['current'] is True\n"
+        "assert len(calendar.query(dana, EvidenceQuery(record_types=frozenset({'calendar_event'})))) == 1\n"
+        "assert erp.query(quinn, EvidenceQuery(record_types=frozenset({'purchase_order'}), record_ids=frozenset({'00000000-0000-0000-0000-000000000401'}))) == ()\n"
+        "assert mail.query(quinn, EvidenceQuery(record_types=frozenset({'message'}))) == ()\n"
+        "assert calendar.query(quinn, EvidenceQuery(record_types=frozenset({'calendar_event'}))) == ()\n"
+        "assert mail.query(avery, EvidenceQuery(record_types=frozenset({'message'}))) == ()\n"
+        "assert calendar.query(avery, EvidenceQuery(record_types=frozenset({'calendar_event'}))) == ()\n"
+    )
+    compose(
+        "--profile",
+        "tools",
+        "run",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={database_url}",
+        "app",
+        "python",
+        "-c",
+        command,
+    )
+
+
 @pytest.mark.integration
 def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
     disposable_database: str,
@@ -135,6 +182,7 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
 
     reset_and_seed(disposable_database)
     assert_unfiltered_erp_inventory_is_queryable(disposable_database)
+    assert_seeded_provider_boundaries(disposable_database)
     first_seed = inspect_seed(disposable_database)
     reset_and_seed(disposable_database)
     second_seed = inspect_seed(disposable_database)
@@ -165,21 +213,55 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
             "supplier_code": "SUP-Y",
         }
     ]
-    assert first_seed["scenario_a"]["shipment_updates"][-1]["message_key"] == (
-        "shipment-update-po-4812-y-v2"
-    )
-    assert first_seed["scenario_a"]["shipment_updates"][0]["superseded_by"] == (
-        "shipment-update-po-4812-y-v2"
-    )
+    assert first_seed["scenario_a"]["shipment_updates"] == [
+        {
+            "message_key": "shipment-update-po-4812-y-v1",
+            "received_at": "2026-08-24 08:00:00+00:00",
+            "superseded_by": "shipment-update-po-4812-y-v2",
+        },
+        {
+            "message_key": "shipment-update-po-4812-y-v2",
+            "received_at": "2026-08-24 09:00:00+00:00",
+            "superseded_by": None,
+        },
+    ]
     assert first_seed["scenario_a"]["inventory"] == [
         {"available_quantity": "30.000", "safety_stock_quantity": "20.000", "source_version": 4}
     ]
-    assert {supplier["supplier_code"] for supplier in first_seed["scenario_a"]["suppliers"]} == {
-        "SUP-SLOW",
-        "SUP-W",
-        "SUP-Y",
-        "SUP-Z",
-    }
+    assert first_seed["scenario_a"]["suppliers"] == [
+        {
+            "approved": True,
+            "lead_time_days": 8,
+            "part_number": "PART-X",
+            "source_version": 1,
+            "supplier_code": "SUP-SLOW",
+            "unit_price": "11.00",
+        },
+        {
+            "approved": True,
+            "lead_time_days": 1,
+            "part_number": "PART-NOISE",
+            "source_version": 1,
+            "supplier_code": "SUP-W",
+            "unit_price": "5.00",
+        },
+        {
+            "approved": True,
+            "lead_time_days": 4,
+            "part_number": "PART-X",
+            "source_version": 1,
+            "supplier_code": "SUP-Y",
+            "unit_price": "14.00",
+        },
+        {
+            "approved": True,
+            "lead_time_days": 1,
+            "part_number": "PART-X",
+            "source_version": 1,
+            "supplier_code": "SUP-Z",
+            "unit_price": "18.00",
+        },
+    ]
     assert first_seed["scenario_a"]["out_of_office"][0]["display_name"] == "Dana Buyer"
     assert first_seed["scenario_b"]["allocations"] == [
         {
@@ -192,6 +274,26 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
             "allocated_quantity": "200.000",
             "lot_number": "LOT-QUALITY-NO-COVER",
             "order_number": "Q-7002",
+            "status": "held",
+        },
+    ]
+    assert first_seed["scenario_b"]["lots"] == [
+        {
+            "lot_number": "LOT-QUALITY-GOOD",
+            "quantity": "120.000",
+            "source_version": 1,
+            "status": "released",
+        },
+        {
+            "lot_number": "LOT-QUALITY-HELD",
+            "quantity": "80.000",
+            "source_version": 3,
+            "status": "held",
+        },
+        {
+            "lot_number": "LOT-QUALITY-NO-COVER",
+            "quantity": "200.000",
+            "source_version": 2,
             "status": "held",
         },
     ]
