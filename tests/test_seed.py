@@ -6,6 +6,7 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -182,3 +183,24 @@ def test_demo_clock_starts_on_the_seeded_scenario_date() -> None:
     from enterprise_agent.seed import DEMO_CLOCK_START
 
     assert DEMO_CLOCK_START == datetime(2026, 8, 24, 9, tzinfo=UTC)
+
+
+def test_reset_and_seed_execute_one_safe_transaction_each(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reset truncates the local target and seed inserts its fixed dataset atomically."""
+    from enterprise_agent import seed
+
+    engine = MagicMock()
+    connection = MagicMock()
+    engine.begin.return_value.__enter__.return_value = connection
+    monkeypatch.setattr(seed, "create_engine", lambda _: engine)
+
+    database_url = "postgresql+psycopg://agent:agent@db:5432/enterprise_agent"
+    seed.reset_database(database_url)
+    seed.seed_database(database_url)
+
+    assert engine.begin.call_count == 2
+    assert engine.dispose.call_count == 2
+    assert "TRUNCATE TABLE" in str(connection.execute.call_args_list[0].args[0])
+    assert connection.execute.call_count == len(seed.SEED_ROWS) + 1
