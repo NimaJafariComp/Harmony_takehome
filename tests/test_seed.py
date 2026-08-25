@@ -88,6 +88,32 @@ def inspect_seed(database_url: str) -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(result.stdout))
 
 
+def assert_unfiltered_erp_inventory_is_queryable(database_url: str) -> None:
+    """Exercise PostgreSQL's common unfiltered provider path against the seeded database."""
+    command = (
+        "from os import environ\n"
+        "from enterprise_agent.adapters import PostgresErpAdapter, PostgresIdentityAdapter\n"
+        "from enterprise_agent.domain import UserId\n"
+        "from enterprise_agent.ports import EvidenceQuery\n"
+        "database_url = environ['DATABASE_URL']\n"
+        "actor = PostgresIdentityAdapter(database_url).actor_for(UserId('00000000-0000-0000-0000-000000000001'))\n"
+        "evidence = PostgresErpAdapter(database_url).query(actor, EvidenceQuery(record_types=frozenset({'inventory'})))\n"
+        "assert len(evidence) == 1\n"
+    )
+    compose(
+        "--profile",
+        "tools",
+        "run",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={database_url}",
+        "app",
+        "python",
+        "-c",
+        command,
+    )
+
+
 @pytest.mark.integration
 def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
     disposable_database: str,
@@ -108,6 +134,7 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
     )
 
     reset_and_seed(disposable_database)
+    assert_unfiltered_erp_inventory_is_queryable(disposable_database)
     first_seed = inspect_seed(disposable_database)
     reset_and_seed(disposable_database)
     second_seed = inspect_seed(disposable_database)

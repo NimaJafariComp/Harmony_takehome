@@ -106,6 +106,7 @@ SEED_ROWS = (
         values={
             "id": ID_AVERY,
             "display_name": "Avery Backup",
+            "email": "avery.backup@example.com",
             "role": "purchasing_director",
             "backup_approver_id": None,
             "approval_limit_amount": Decimal("50000.00"),
@@ -119,6 +120,7 @@ SEED_ROWS = (
         values={
             "id": ID_DANA,
             "display_name": "Dana Buyer",
+            "email": "dana.buyer@example.com",
             "role": "purchasing_manager",
             "backup_approver_id": ID_AVERY,
             "approval_limit_amount": Decimal("10000.00"),
@@ -132,6 +134,7 @@ SEED_ROWS = (
         values={
             "id": ID_QUINN,
             "display_name": "Quinn Quality",
+            "email": "quinn.quality@example.com",
             "role": "quality_manager",
             "backup_approver_id": None,
             "approval_limit_amount": Decimal("5000.00"),
@@ -145,6 +148,7 @@ SEED_ROWS = (
         values={
             "id": ID_PRIYA,
             "display_name": "Priya Production",
+            "email": "priya.production@example.com",
             "role": "production_supervisor",
             "backup_approver_id": None,
             "approval_limit_amount": Decimal("0.00"),
