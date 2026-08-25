@@ -1,5 +1,8 @@
 """Concrete infrastructure adapters that implement provider-neutral ports."""
 
+from enterprise_agent.domain import InvalidAttentionTransitionError
+
+from .attention import PostgresAttentionAdapter
 from .identity import IdentityNotFoundError, PostgresIdentityAdapter
 from .providers import (
     PostgresCalendarAdapter,
@@ -10,6 +13,8 @@ from .providers import (
 
 __all__ = [
     "IdentityNotFoundError",
+    "InvalidAttentionTransitionError",
+    "PostgresAttentionAdapter",
     "PostgresCalendarAdapter",
     "PostgresErpAdapter",
     "PostgresIdentityAdapter",

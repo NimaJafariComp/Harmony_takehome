@@ -1,5 +1,11 @@
 """Public stable domain contracts for the enterprise-agent harness."""
 
+from .attention import (
+    AttentionRegistration,
+    InvalidAttentionTransitionError,
+    ScenarioAStockoutTrigger,
+    require_attention_transition,
+)
 from .contracts import (
     ActorContext,
     Approval,
@@ -38,17 +44,20 @@ __all__ = [
     "ApprovalStatus",
     "AttentionId",
     "AttentionItem",
+    "AttentionRegistration",
     "AttentionStatus",
     "AuditEvent",
     "AuditEventId",
     "DateRange",
     "Evidence",
     "EvidenceId",
+    "InvalidAttentionTransitionError",
     "Money",
     "Plan",
     "PlanId",
     "PlantId",
     "RunId",
+    "ScenarioAStockoutTrigger",
     "ScheduledTask",
     "ScheduledTaskId",
     "ScheduledTaskStatus",
@@ -60,4 +69,5 @@ __all__ = [
     "WorkflowId",
     "WorkflowState",
     "WorkflowStatus",
+    "require_attention_transition",
 ]

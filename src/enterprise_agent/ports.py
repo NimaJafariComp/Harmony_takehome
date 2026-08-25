@@ -11,10 +11,13 @@ from typing import Protocol, runtime_checkable
 from enterprise_agent.domain import (
     ActorContext,
     AttentionItem,
+    AttentionRegistration,
+    AttentionStatus,
     AuditEvent,
     DateRange,
     Evidence,
     RunId,
+    ScenarioAStockoutTrigger,
     ScheduledTask,
     ScheduledTaskId,
     UserId,
@@ -96,6 +99,25 @@ class IdentityPort(Protocol):
 
     def actor_for(self, user_id: UserId) -> ActorContext:
         """Return the current identity, scopes, plants, backup, and approval limits."""
+        ...
+
+
+@runtime_checkable
+class AttentionPort(Protocol):
+    """Create and advance durable, deduplicated business-attention items."""
+
+    def register(self, trigger: ScenarioAStockoutTrigger, run_id: RunId) -> AttentionRegistration:
+        """Persist one detector attempt and return its unique attention item."""
+        ...
+
+    def transition(
+        self,
+        attention: AttentionItem,
+        target: AttentionStatus,
+        run_id: RunId,
+        occurred_at: datetime,
+    ) -> AttentionItem:
+        """Advance one attention item only from its known current state."""
         ...
 
 

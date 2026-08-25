@@ -165,6 +165,7 @@ class AttentionItem:
     status: AttentionStatus
     created_at: datetime
     source_versions: Mapping[str, int]
+    resolved_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "source_versions", _freeze_mapping(self.source_versions))

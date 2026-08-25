@@ -9,16 +9,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from enterprise_agent.domain import AttentionId, AttentionItem, AttentionStatus, RunId
+from enterprise_agent.domain import (
+    AttentionId,
+    AttentionItem,
+    AttentionStatus,
+    InvalidAttentionTransitionError,
+    RunId,
+    ScenarioAStockoutTrigger,
+)
 
 NOW = datetime(2026, 8, 24, 9, tzinfo=UTC)
 ATTENTION_ID = "00000000-0000-0000-0000-000000000a01"
 
 
-def stockout_trigger() -> object:
+def stockout_trigger() -> ScenarioAStockoutTrigger:
     """Build the immutable Scenario A signal that later detector code will submit."""
-    from enterprise_agent.domain import ScenarioAStockoutTrigger
-
     return ScenarioAStockoutTrigger(
         detector="stockout_detector:v1",
         part_id="00000000-0000-0000-0000-000000000101",
@@ -80,8 +85,6 @@ def test_stockout_trigger_key_is_stable_and_tracks_every_risk_input() -> None:
 
 def test_stockout_trigger_rejects_an_unversioned_inventory_signal() -> None:
     """A stockout signal without a positive inventory version cannot be deduplicated safely."""
-    from enterprise_agent.domain import ScenarioAStockoutTrigger
-
     with pytest.raises(ValueError, match="inventory version"):
         ScenarioAStockoutTrigger(
             detector="stockout_detector:v1",
@@ -165,7 +168,7 @@ def test_attention_adapter_allows_only_forward_lifecycle_transitions(
     )
 
     assert pending.status is AttentionStatus.PENDING_APPROVAL
-    with pytest.raises(attention.InvalidAttentionTransitionError, match="not allowed"):
+    with pytest.raises(InvalidAttentionTransitionError, match="not allowed"):
         adapter.transition(
             pending,
             AttentionStatus.OPEN,
@@ -186,6 +189,7 @@ def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
     return result
 
 
+@pytest.mark.critical
 @pytest.mark.integration
 def test_postgres_attention_adapter_deduplicates_attempts_and_persists_audit_evidence(
     disposable_database: str,
