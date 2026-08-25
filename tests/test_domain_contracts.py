@@ -8,6 +8,7 @@ from typing import cast
 import pytest
 
 from enterprise_agent.domain import (
+    ActorContext,
     Approval,
     ApprovalId,
     ApprovalStatus,
@@ -35,9 +36,7 @@ from enterprise_agent.domain import (
     WorkflowId,
     WorkflowState,
     WorkflowStatus,
-    ActorContext,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -52,7 +51,7 @@ def test_money_and_date_range_are_validated_value_objects() -> None:
     with pytest.raises(ValueError, match="non-negative"):
         Money(amount=Decimal("-0.01"), currency="USD")
     with pytest.raises(ValueError, match="three uppercase letters"):
-        Money(amount=Decimal("1"), currency="US")
+        Money(amount=Decimal(1), currency="US")
     with pytest.raises(ValueError, match="must not precede"):
         DateRange(start=date(2026, 9, 9), end=date(2026, 9, 2))
 
@@ -65,7 +64,7 @@ def test_planning_contracts_bind_actor_evidence_plan_and_approval_immutably() ->
         scopes=frozenset({Scope("erp:po:read"), Scope("erp:po:create")}),
         plant_ids=frozenset({PlantId("plant-a")}),
         backup_approver_id=UserId("alex"),
-        approval_limits={"usd": Decimal("25000")},
+        approval_limits={"usd": Decimal(25000)},
     )
     evidence = Evidence(
         evidence_id=EvidenceId("evidence-delay-email"),
@@ -110,13 +109,13 @@ def test_planning_contracts_bind_actor_evidence_plan_and_approval_immutably() ->
         expires_at=plan.expires_at,
     )
 
-    assert actor.approval_limit_for("USD") == Decimal("25000")
+    assert actor.approval_limit_for("USD") == Decimal(25000)
     assert evidence.payload["arrival_date"] == "2026-09-08"
     assert approval.plan_hash == plan.plan_hash
     with pytest.raises(FrozenInstanceError):
-        actor.role = "other"
+        actor.__setattr__("role", "other")
     with pytest.raises(TypeError):
-        cast(dict[str, Decimal], actor.approval_limits)["USD"] = Decimal("1")
+        cast(dict[str, Decimal], actor.approval_limits)["USD"] = Decimal(1)
 
 
 def test_operational_contracts_capture_workflow_scheduler_and_audit_state() -> None:
