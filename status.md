@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M2 - Domain, persistence, seed data, and scoped providers |
-| Current task | M2.4 - Add integrity constraints and versions |
-| Required task progress | 9 / 58 complete |
-| Acceptance criteria progress | 0 / 14 satisfied; 5 in progress |
-| Last validated commit | `bcdf41d` |
-| Last completed-task push | `bcdf41d` to `origin/main` |
+| Current task | M2.5 - Implement reset and seed |
+| Required task progress | 10 / 58 complete |
+| Acceptance criteria progress | 0 / 14 satisfied; 8 in progress |
+| Last validated commit | `3722987` |
+| Last completed-task push | `3722987` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -70,7 +70,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M2.1 Define domain contracts | `complete` | AC-02, AC-06 | Test: `tests/test_domain_contracts.py` - PASS (3 tests).<br>Evidence: typed IDs, validated money/date values, immutable actor/evidence/plan/approval/workflow/tool/task/audit contracts, and source-version bindings are available to later adapters and gates.<br>Commit: `fcafe13` pushed to `origin/main`. |
 | M2.2 Define ports | `complete` | AC-03, AC-12 | Test: `tests/test_ports.py` - PASS.<br>Evidence: ERP, mail, calendar, identity, clock, audit, scheduler, and LLM protocols have explicit typed contracts and are independently fakeable without concrete dependencies.<br>Commit: `d490053` pushed to `origin/main`. |
 | M2.3 Create minimal schema migration | `complete` | AC-01, AC-02 | Test: `tests/test_schema_migration.py` - PASS.<br>Evidence: a clean PostgreSQL database has all identity, ERP, communications, agent-state, workflow, scheduler, and audit tables with UUID keys, foreign keys, and planned query indexes.<br>Commit: `bcdf41d` pushed to `origin/main`. |
-| M2.4 Add integrity constraints and versions | `in_progress` | AC-04, AC-06, AC-09, AC-10 | - |
+| M2.4 Add integrity constraints and versions | `complete` | AC-04, AC-06, AC-09, AC-10 | Test: `tests/test_schema_migration.py::test_integrity_migration_enforces_dedupe_idempotency_and_source_versions` - PASS.<br>Evidence: PostgreSQL enforces attention, workflow-step, and scheduler uniqueness; mutable supplier/PO/lot/inventory/allocation inputs have positive source versions for later freshness gates.<br>Commit: `3722987` pushed to `origin/main`. |
 | M2.5 Implement reset and seed | `not_started` | AC-02 | - |
 | M2.6 Implement identity adapter | `not_started` | AC-03, AC-06, AC-07 | - |
 | M2.7 Implement scoped providers | `not_started` | AC-03 | - |
@@ -157,13 +157,13 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, and test-harness evidence are passing; M2.5 must still provide reset/seed behavior. |
 | AC-02 Seed model and edge cases | `in_progress` | Typed records for the seed model are validated; deterministic scenario/edge seed data remains M2.5-M2.8. |
 | AC-03 Provider authorization boundary | `in_progress` | Provider methods require an `ActorContext` and scoped query contract; concrete authorization filtering remains M2.6-M2.8. |
-| AC-04 Proactive detection and dedupe | `not_started` | - |
+| AC-04 Proactive detection and dedupe | `in_progress` | Durable attention dedupe-key uniqueness is enforced; lifecycle ownership and proactive detectors remain M3. |
 | AC-05 Authorized safe planning | `not_started` | - |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | Immutable actor, plan, approval, source-version, and policy-version contracts are established; gate enforcement remains M3-M4. |
 | AC-07 Backup approval routing | `not_started` | - |
 | AC-08 Fixed Scenario A workflow | `not_started` | - |
-| AC-09 Idempotency, compensation, and recovery | `not_started` | - |
-| AC-10 Durable scheduler and Tuesday loop | `not_started` | - |
+| AC-09 Idempotency, compensation, and recovery | `in_progress` | Workflow-step identity and idempotency keys are unique; persisted execution, compensation, and recovery behavior remain M4. |
+| AC-10 Durable scheduler and Tuesday loop | `in_progress` | Scheduled-task idempotency keys are unique; durable claiming and Tuesday receipt behavior remain M5. |
 | AC-11 Append-only audit reconstruction | `not_started` | - |
 | AC-12 Scenario B free-form path | `in_progress` | The reusable scoped-provider, planner, audit, and scheduler boundaries are established; Scenario B behavior remains M6. |
 | AC-13 Three-provider contract | `not_started` | - |
@@ -192,4 +192,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M2.2 | Completed provider and control-plane protocol contracts. | Test: `tests/test_ports.py` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (19 tests, 99.69% coverage). | `d490053` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M2.3 | Started the core PostgreSQL schema contract. | Test: `tests/test_schema_migration.py` - RED because the baseline database lacks the required domain tables, foreign keys, and indexes. | `e98fa7c` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M2.3 | Completed the first durable domain schema migration. | Test: `tests/test_schema_migration.py` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (20 tests, 99.69% coverage). | `bcdf41d` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M2.4 | Started integrity and source-version migration contract. | Test: `tests/test_schema_migration.py::test_integrity_migration_enforces_dedupe_idempotency_and_source_versions` - RED because the current schema has no inventory/allocation tables, source-version columns, or unique integrity constraints. | RED checkpoint pending. |
+| 2026-08-25 | M2.4 | Started integrity and source-version migration contract. | Test: `tests/test_schema_migration.py::test_integrity_migration_enforces_dedupe_idempotency_and_source_versions` - RED because the current schema has no inventory/allocation tables, source-version columns, or unique integrity constraints. | `c44cb4a` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M2.4 | Completed integrity constraints and material-source versioning. | Test: `tests/test_schema_migration.py` - PASS (2); `make test-critical` - PASS (1 selected); `make verify` - PASS (21 tests, 99.69% coverage). | `3722987` pushed to `origin/main`; status completion record pending this commit. |
