@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M1 - Foundation |
-| Current task | M1.1 - Create the Python project skeleton |
-| Required task progress | 0 / 58 complete |
+| Current task | M1.2 - Add local runtime configuration |
+| Required task progress | 1 / 58 complete |
 | Acceptance criteria progress | 0 / 14 satisfied |
-| Last validated commit | `2a4fec1` |
-| Last completed-task push | `2a4fec1` to `origin/main` |
+| Last validated commit | `a0389dc` |
+| Last completed-task push | `a0389dc` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -56,7 +56,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M1.1 Create Python project skeleton | `in_progress` | AC-01 | Test: `tests/test_cli.py::test_version_command_reports_package_version` - RED (expected missing `enterprise_agent.cli`). |
+| M1.1 Create Python project skeleton | `complete` | AC-01 | Test: `uv run pytest --cov=enterprise_agent tests/test_cli.py` - PASS (2 tests, 100% coverage). Validation: Ruff, mypy, `uv lock --check`, and `uv run enterprise-agent version` - PASS. Commit: `a0389dc` pushed to `origin/main`. |
 | M1.2 Add local runtime configuration | `not_started` | AC-01 | - |
 | M1.3 Add PostgreSQL Compose service | `not_started` | AC-01 | - |
 | M1.4 Add migration plumbing | `not_started` | AC-01 | - |
@@ -174,4 +174,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Date (UTC) | Task | Change | Validation / evidence | Commit / push |
 |---|---|---|---|---|
 | 2026-08-25 | M0.1 | Created task register, acceptance criteria, universal test policy, and status protocol; removed local planning artifacts from Git tracking. | Validation: plan/status task count and Markdown diff checks - PASS. | `2a4fec1` pushed to `origin/main`; test-policy status update committed and pushed with this ledger entry. |
-| 2026-08-25 | M1.1 | Started the Python package and CLI contract. | Test: `tests/test_cli.py::test_version_command_reports_package_version` - RED due solely to missing `enterprise_agent.cli`, as intended. | RED checkpoint pending local commit. |
+| 2026-08-25 | M1.1 | Started the Python package and CLI contract. | Test: `tests/test_cli.py::test_version_command_reports_package_version` - RED due solely to missing `enterprise_agent.cli`, as intended. | `3858187` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M1.1 | Completed the Python package skeleton and installed CLI version command. | Test: `uv run pytest --cov=enterprise_agent tests/test_cli.py` - PASS (2 tests, 100% coverage); Ruff, mypy, lock, and installed-command checks - PASS. | `a0389dc` pushed to `origin/main`; status completion record pending this commit. |
