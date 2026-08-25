@@ -99,6 +99,26 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert {"approver_id", "plan_hash", "policy_version", "source_versions"}.issubset(
         schema["columns"]["plans"]
     )
+    assert {
+        "definition_name",
+        "definition_version",
+        "status",
+        "current_step",
+        "lease_owner",
+        "lease_expires_at",
+    }.issubset(schema["columns"]["workflow_instances"])
+    assert {
+        "step_index",
+        "step_name",
+        "tool_name",
+        "input",
+        "result",
+        "error",
+        "attempt_count",
+        "idempotency_key",
+        "lease_owner",
+        "lease_expires_at",
+    }.issubset(schema["columns"]["workflow_steps"])
     assert {"payload", "lease_expires_at", "idempotency_key"}.issubset(
         schema["columns"]["scheduled_tasks"]
     )
@@ -150,6 +170,7 @@ def test_integrity_migration_enforces_dedupe_idempotency_and_source_versions(
         assert "source_version" in schema["columns"][table]
 
     assert "uq_attention_items_dedupe_key" in schema["unique_constraints"]["attention_items"]
+    assert "uq_workflow_instances_plan_id" in schema["unique_constraints"]["workflow_instances"]
     assert (
         "uq_workflow_steps_workflow_instance_id_step_index"
         in schema["unique_constraints"]["workflow_steps"]
@@ -168,4 +189,12 @@ def test_integrity_migration_enforces_dedupe_idempotency_and_source_versions(
     assert (
         "ck_production_allocations_source_version_positive"
         in schema["check_constraints"]["production_allocations"]
+    )
+    assert (
+        "ck_workflow_instances_current_step_non_negative"
+        in schema["check_constraints"]["workflow_instances"]
+    )
+    assert (
+        "ck_workflow_steps_attempt_count_non_negative"
+        in schema["check_constraints"]["workflow_steps"]
     )
