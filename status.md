@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M2 - Domain, persistence, seed data, and scoped providers |
-| Current task | M2.2 - Define ports |
-| Required task progress | 7 / 58 complete |
-| Acceptance criteria progress | 0 / 14 satisfied; 3 in progress |
-| Last validated commit | `fcafe13` |
-| Last completed-task push | `fcafe13` to `origin/main` |
+| Current task | M2.3 - Create minimal schema migration |
+| Required task progress | 8 / 58 complete |
+| Acceptance criteria progress | 0 / 14 satisfied; 5 in progress |
+| Last validated commit | `d490053` |
+| Last completed-task push | `d490053` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -68,7 +68,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M2.1 Define domain contracts | `complete` | AC-02, AC-06 | Test: `tests/test_domain_contracts.py` - PASS (3 tests).<br>Evidence: typed IDs, validated money/date values, immutable actor/evidence/plan/approval/workflow/tool/task/audit contracts, and source-version bindings are available to later adapters and gates.<br>Commit: `fcafe13` pushed to `origin/main`. |
-| M2.2 Define ports | `in_progress` | AC-03, AC-12 | - |
+| M2.2 Define ports | `complete` | AC-03, AC-12 | Test: `tests/test_ports.py` - PASS.<br>Evidence: ERP, mail, calendar, identity, clock, audit, scheduler, and LLM protocols have explicit typed contracts and are independently fakeable without concrete dependencies.<br>Commit: `d490053` pushed to `origin/main`. |
 | M2.3 Create minimal schema migration | `not_started` | AC-01, AC-02 | - |
 | M2.4 Add integrity constraints and versions | `not_started` | AC-04, AC-06, AC-09, AC-10 | - |
 | M2.5 Implement reset and seed | `not_started` | AC-02 | - |
@@ -156,7 +156,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|---|
 | AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, and test-harness evidence are passing; M2.5 must still provide reset/seed behavior. |
 | AC-02 Seed model and edge cases | `in_progress` | Typed records for the seed model are validated; deterministic scenario/edge seed data remains M2.5-M2.8. |
-| AC-03 Provider authorization boundary | `not_started` | - |
+| AC-03 Provider authorization boundary | `in_progress` | Provider methods require an `ActorContext` and scoped query contract; concrete authorization filtering remains M2.6-M2.8. |
 | AC-04 Proactive detection and dedupe | `not_started` | - |
 | AC-05 Authorized safe planning | `not_started` | - |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | Immutable actor, plan, approval, source-version, and policy-version contracts are established; gate enforcement remains M3-M4. |
@@ -165,7 +165,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-09 Idempotency, compensation, and recovery | `not_started` | - |
 | AC-10 Durable scheduler and Tuesday loop | `not_started` | - |
 | AC-11 Append-only audit reconstruction | `not_started` | - |
-| AC-12 Scenario B free-form path | `not_started` | - |
+| AC-12 Scenario B free-form path | `in_progress` | The reusable scoped-provider, planner, audit, and scheduler boundaries are established; Scenario B behavior remains M6. |
 | AC-13 Three-provider contract | `not_started` | - |
 | AC-14 Demo, documentation, and transcript | `not_started` | - |
 
@@ -188,4 +188,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M1.6 | Completed the reusable test harness with async support and isolated database fixtures. | Test: focused harness tests - PASS (4); unit layer - PASS (9); integration layer - PASS (2); contract layer - PASS (4); `make test-critical` - PASS (1 selected); `make verify` - PASS (15 tests, 100% coverage). | `3fe46b7` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M2.1 | Started the stable domain-contract boundary. | Test: `tests/test_domain_contracts.py` - RED because the `enterprise_agent.domain` contract package does not exist yet, as intended. | `e14abb4` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M2.1 | Completed immutable core domain contracts. | Test: `tests/test_domain_contracts.py` - PASS (3 tests); `make test-critical` - PASS (1 selected); `make verify` - PASS (18 tests, 99.62% coverage). | `fcafe13` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M2.2 | Started the provider and application-port contract. | Test: `tests/test_ports.py` - RED because the `enterprise_agent.ports` module does not exist yet, as intended. | RED checkpoint pending test execution and commit. |
+| 2026-08-25 | M2.2 | Started the provider and application-port contract. | Test: `tests/test_ports.py` - RED because the `enterprise_agent.ports` module does not exist yet, as intended. | `331d044` and `21f99e6` RED checkpoints, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M2.2 | Completed provider and control-plane protocol contracts. | Test: `tests/test_ports.py` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (19 tests, 99.69% coverage). | `d490053` pushed to `origin/main`; status completion record pending this commit. |
