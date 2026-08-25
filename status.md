@@ -34,8 +34,8 @@ Recommended commit types are `feat`, `fix`, `test`, `docs`, `build`, `chore`, an
 | Current task | M1.1 - Create the Python project skeleton |
 | Required task progress | 0 / 58 complete |
 | Acceptance criteria progress | 0 / 14 satisfied |
-| Last validated commit | None |
-| Last push | None |
+| Last validated commit | `2a4fec1` |
+| Last push | `2a4fec1` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -161,4 +161,4 @@ Recommended commit types are `feat`, `fix`, `test`, `docs`, `build`, `chore`, an
 
 | Date (UTC) | Task | Change | Validation / evidence | Commit / push |
 |---|---|---|---|---|
-| 2026-08-25 | Planning | Created task register, acceptance criteria, and status protocol. | Reviewed requirements and local delivery plan. | Pending initial tracking commit. |
+| 2026-08-25 | M0.1 | Created task register, acceptance criteria, and status protocol; removed local planning artifacts from Git tracking. | Staged diff passed whitespace validation; local plan/PDF files remain ignored and present. | `2a4fec1` pushed to `origin/main`. |
