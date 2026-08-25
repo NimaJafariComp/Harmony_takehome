@@ -18,12 +18,24 @@ Use only these task states:
 After completing each task:
 
 1. Run the task's focused validation and fix failures.
-2. Update the matching row below with its state, concise evidence, and the acceptance criteria it advances.
+2. Update the matching row below with its state, named focused test or validation command, passing result, and the acceptance criteria it advances.
 3. Append a dated row to the activity log; do not delete prior entries.
 4. Commit the completed task using `type(scope): summary [Task-ID]`.
 5. Push the commit only after its validation passes. Never push credentials, `.env`, local plans, or assignment PDFs.
 
 Recommended commit types are `feat`, `fix`, `test`, `docs`, `build`, `chore`, and `refactor`. If a task changes behavior and tests, keep the code and its focused tests in one commit.
+
+### Required task-evidence format
+
+Every task register entry uses its `Evidence / commit` cell in this format when completed:
+
+```text
+Test: tests/path/test_name.py::test_name or `make target` - PASS
+Evidence: one-sentence behavior proved
+Commit: <short SHA> pushed to origin/main
+```
+
+For a documentation-only task, replace `Test:` with `Validation:` and name the checked command, link, or transcript section. A task without this evidence stays `in_progress`, even if its code appears complete.
 
 ## Current delivery dashboard
 
@@ -161,4 +173,4 @@ Recommended commit types are `feat`, `fix`, `test`, `docs`, `build`, `chore`, an
 
 | Date (UTC) | Task | Change | Validation / evidence | Commit / push |
 |---|---|---|---|---|
-| 2026-08-25 | M0.1 | Created task register, acceptance criteria, and status protocol; removed local planning artifacts from Git tracking. | Staged diff passed whitespace validation; local plan/PDF files remain ignored and present. | `2a4fec1` pushed to `origin/main`. |
+| 2026-08-25 | M0.1 | Created task register, acceptance criteria, universal test policy, and status protocol; removed local planning artifacts from Git tracking. | Validation: plan/status task count and Markdown diff checks - PASS. | `2a4fec1` pushed to `origin/main`; test-policy status update committed and pushed with this ledger entry. |
