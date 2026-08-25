@@ -3,6 +3,7 @@
 *.pdf
 
 # Local Python environments and test artifacts.
+.env
 .venv/
 __pycache__/
 .coverage

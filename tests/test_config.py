@@ -30,6 +30,15 @@ def test_missing_selected_provider_key_is_identified_without_exposing_a_value() 
     assert "test-openai-secret" not in str(error.value)
 
 
+def test_unsupported_profile_is_rejected() -> None:
+    """Only the planned provider profiles can be selected."""
+    environment = configured_openai_environment()
+    environment["LLM_PROFILE"] = "unknown"
+
+    with pytest.raises(ConfigurationError, match="LLM_PROFILE must be one of"):
+        load_settings(environment)
+
+
 def test_config_check_reports_safe_selected_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI validates configuration without exposing credentials."""
     for name, value in configured_openai_environment().items():
@@ -40,6 +49,21 @@ def test_config_check_reports_safe_selected_profile(monkeypatch: pytest.MonkeyPa
     assert result.exit_code == 0
     assert "profile: openai" in result.stdout
     assert "test-openai-secret" not in result.stdout
+
+
+def test_config_check_reports_missing_key_without_exposing_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configuration errors name missing variables but never credential values."""
+    for name, value in configured_openai_environment().items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("OPENAI_API_KEY")
+
+    result = CliRunner().invoke(cli.app, ["config-check"])
+
+    assert result.exit_code == 1
+    assert "OPENAI_API_KEY" in result.stderr
+    assert "test-openai-secret" not in result.stderr
 
 
 def test_env_example_documents_all_runtime_variables() -> None:
