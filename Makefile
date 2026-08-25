@@ -25,7 +25,7 @@ verify:
 
 migrate:
 	docker compose up --wait db
-	docker compose --profile tools run --rm app alembic upgrade head
+	docker compose --profile tools run --build --rm app alembic upgrade head
 
 seed:
 	@echo "Seed command is not available until M2."

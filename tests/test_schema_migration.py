@@ -8,7 +8,6 @@ from typing import Any, cast
 
 import pytest
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -63,6 +62,7 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "--profile",
         "tools",
         "run",
+        "--build",
         "--rm",
         "-e",
         f"DATABASE_URL={disposable_database}",
@@ -92,12 +92,8 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "audit_events",
     }
     assert expected_tables.issubset(schema["tables"])
-    assert {"part_id", "supplier_id", "status"}.issubset(
-        schema["columns"]["purchase_orders"]
-    )
-    assert {"plan_hash", "policy_version", "source_versions"}.issubset(
-        schema["columns"]["plans"]
-    )
+    assert {"part_id", "supplier_id", "status"}.issubset(schema["columns"]["purchase_orders"])
+    assert {"plan_hash", "policy_version", "source_versions"}.issubset(schema["columns"]["plans"])
     assert {"payload", "lease_expires_at", "idempotency_key"}.issubset(
         schema["columns"]["scheduled_tasks"]
     )
@@ -111,6 +107,8 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert "ix_purchase_orders_part_id_status" in schema["indexes"]["purchase_orders"]
     assert "ix_messages_purchase_order_id_received_at" in schema["indexes"]["messages"]
     assert "ix_attention_items_status_created_at" in schema["indexes"]["attention_items"]
-    assert "ix_workflow_steps_workflow_instance_id_step_index" in schema["indexes"]["workflow_steps"]
+    assert (
+        "ix_workflow_steps_workflow_instance_id_step_index" in schema["indexes"]["workflow_steps"]
+    )
     assert "ix_scheduled_tasks_status_due_at" in schema["indexes"]["scheduled_tasks"]
     assert "ix_audit_events_run_id_occurred_at" in schema["indexes"]["audit_events"]

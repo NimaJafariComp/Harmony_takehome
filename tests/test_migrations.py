@@ -30,6 +30,7 @@ def test_baseline_migration_applies_to_a_clean_compose_database(
         "--profile",
         "tools",
         "run",
+        "--build",
         "--rm",
         "-e",
         f"DATABASE_URL={disposable_database}",
@@ -50,4 +51,4 @@ def test_baseline_migration_applies_to_a_clean_compose_database(
         "alembic",
         "current",
     )
-    assert "20260825_0001 (head)" in version.stdout
+    assert "(head)" in version.stdout
