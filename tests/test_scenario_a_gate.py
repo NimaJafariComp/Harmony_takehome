@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -51,14 +52,15 @@ def _evidence(
 def _actor(
     *,
     scopes: frozenset[Scope] | None = None,
-    approval_limit: Decimal = Decimal("10000.00"),
+    approval_limit: Decimal | None = Decimal("10000.00"),
 ) -> ActorContext:
     """Build the purchasing actor whose permissions and limit the gate must enforce."""
     return ActorContext(
         user_id=UserId("00000000-0000-0000-0000-000000000001"),
         role="purchasing_manager",
         scopes=scopes
-        or frozenset(
+        if scopes is not None
+        else frozenset(
             {
                 Scope("erp:read"),
                 Scope("mail:read"),
@@ -68,7 +70,7 @@ def _actor(
         ),
         plant_ids=frozenset({PlantId("PLANT-CHI")}),
         backup_approver_id=UserId("00000000-0000-0000-0000-000000000002"),
-        approval_limits={"USD": approval_limit},
+        approval_limits={} if approval_limit is None else {"USD": approval_limit},
     )
 
 
@@ -118,8 +120,8 @@ def _context(*, actor: ActorContext | None = None) -> AuthorizedContextBundle:
                 "part_id": "part-x",
                 "supplier_id": "supplier-y",
                 "status": "delayed",
-                "ordered_quantity": Decimal("100"),
-                "received_quantity": Decimal("40"),
+                "ordered_quantity": Decimal(100),
+                "received_quantity": Decimal(40),
             },
         ),
         suppliers=(
@@ -131,7 +133,7 @@ def _context(*, actor: ActorContext | None = None) -> AuthorizedContextBundle:
                     "plant_id": "PLANT-CHI",
                     "approved": True,
                     "lead_time_days": 4,
-                    "unit_price": Decimal("14"),
+                    "unit_price": Decimal(14),
                     "currency": "USD",
                 },
             ),
@@ -143,7 +145,7 @@ def _context(*, actor: ActorContext | None = None) -> AuthorizedContextBundle:
                     "plant_id": "PLANT-CHI",
                     "approved": True,
                     "lead_time_days": 1,
-                    "unit_price": Decimal("18"),
+                    "unit_price": Decimal(18),
                     "currency": "USD",
                 },
             ),
@@ -164,7 +166,7 @@ def _recommendation(**overrides: object) -> EnterWorkflowRecommendation:
         "workflow_name": "po_reroute",
         "workflow_version": 1,
         "supplier_id": "supplier-z",
-        "quantity": Decimal("60"),
+        "quantity": Decimal(60),
         "original_purchase_order_id": "po-4812-y",
         "production_order_id": "production-4812",
         "rationale": "The approved alternate can meet production.",
@@ -173,6 +175,34 @@ def _recommendation(**overrides: object) -> EnterWorkflowRecommendation:
     return EnterWorkflowRecommendation(**values)  # type: ignore[arg-type]
 
 
+def _with_original_purchase_order_payload(
+    context: AuthorizedContextBundle, **overrides: object
+) -> AuthorizedContextBundle:
+    """Return the same context with one controlled original-PO evidence change."""
+    purchase_order = context.original_purchase_order
+    return replace(
+        context,
+        original_purchase_order=replace(
+            purchase_order,
+            payload={**purchase_order.payload, **overrides},
+        ),
+    )
+
+
+def _with_supplier_payload(
+    context: AuthorizedContextBundle, **overrides: object
+) -> AuthorizedContextBundle:
+    """Return the same context with controlled pricing metadata on the allowed supplier."""
+    suppliers = tuple(
+        replace(supplier, payload={**supplier.payload, **overrides})
+        if supplier.record_id == "supplier-z"
+        else supplier
+        for supplier in context.suppliers
+    )
+    return replace(context, suppliers=suppliers)
+
+
+@pytest.mark.critical
 def test_gate_holds_a_valid_reroute_for_human_approval_without_executing_it() -> None:
     """A fully compliant proposal is only made approval-pending and binds its $1,080 value."""
     from enterprise_agent.application.gate import GateStatus, ScenarioAGate
@@ -188,7 +218,7 @@ def test_gate_holds_a_valid_reroute_for_human_approval_without_executing_it() ->
     assert decision.approval_required is True
     assert decision.denial_reasons == ()
     assert decision.estimated_value is not None
-    assert decision.estimated_value.amount == Decimal("1080")
+    assert decision.estimated_value.amount == Decimal(1080)
     assert decision.estimated_value.currency == "USD"
     assert decision.candidate is not None
     assert decision.candidate.supplier_id == "supplier-z"
@@ -200,7 +230,7 @@ def test_gate_holds_a_valid_reroute_for_human_approval_without_executing_it() ->
         ({"supplier_id": "supplier-y"}, "INELIGIBLE_SUPPLIER"),
         ({"original_purchase_order_id": "po-other"}, "ORIGINAL_PURCHASE_ORDER_MISMATCH"),
         ({"production_order_id": "production-other"}, "PRODUCTION_ORDER_MISMATCH"),
-        ({"quantity": Decimal("59")}, "QUANTITY_MISMATCH"),
+        ({"quantity": Decimal(59)}, "QUANTITY_MISMATCH"),
     ],
 )
 def test_gate_denies_workflow_parameters_outside_the_context_bound_reroute(
@@ -247,7 +277,7 @@ def test_gate_denies_a_reroute_that_exceeds_the_actors_currency_limit() -> None:
     """A $1,080 replacement cannot be sent for approval through a $1,000 authority."""
     from enterprise_agent.application.gate import GateDenialReason, GateStatus, ScenarioAGate
 
-    context = _context(actor=_actor(approval_limit=Decimal("1000")))
+    context = _context(actor=_actor(approval_limit=Decimal(1000)))
     decision = ScenarioAGate().evaluate(
         context,
         _recommendation(),
@@ -256,6 +286,86 @@ def test_gate_denies_a_reroute_that_exceeds_the_actors_currency_limit() -> None:
 
     assert decision.status is GateStatus.DENIED
     assert decision.denial_reasons == (GateDenialReason.APPROVAL_LIMIT_EXCEEDED,)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "cancelled"},
+        {"ordered_quantity": "not-a-quantity"},
+        {"received_quantity": Decimal(100)},
+    ],
+)
+def test_gate_denies_closed_or_malformed_or_fully_received_original_purchase_orders(
+    overrides: dict[str, object],
+) -> None:
+    """A non-reroutable original PO cannot become a replacement order by model suggestion."""
+    from enterprise_agent.application.gate import GateDenialReason, GateStatus, ScenarioAGate
+
+    context = _with_original_purchase_order_payload(_context(), **overrides)
+    decision = ScenarioAGate().evaluate(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+    )
+
+    assert decision.status is GateStatus.DENIED
+    assert GateDenialReason.PURCHASE_ORDER_NOT_REROUTABLE in decision.denial_reasons
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unit_price": "not-a-price"},
+        {"unit_price": Decimal("NaN")},
+        {"currency": "US"},
+    ],
+)
+def test_gate_denies_missing_or_invalid_supplier_pricing(
+    overrides: dict[str, object],
+) -> None:
+    """A viable supplier with unusable value evidence cannot be presented for approval."""
+    from enterprise_agent.application.gate import GateDenialReason, GateStatus, ScenarioAGate
+
+    context = _with_supplier_payload(_context(), **overrides)
+    decision = ScenarioAGate().evaluate(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+    )
+
+    assert decision.status is GateStatus.DENIED
+    assert decision.denial_reasons == (GateDenialReason.INVALID_SUPPLIER_PRICING,)
+
+
+def test_gate_denies_reroutes_without_an_authority_limit_for_the_supplier_currency() -> None:
+    """A price in an unapproved currency is never silently allowed to bypass its policy limit."""
+    from enterprise_agent.application.gate import GateDenialReason, GateStatus, ScenarioAGate
+
+    context = _context(actor=_actor(approval_limit=None))
+    decision = ScenarioAGate().evaluate(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+    )
+
+    assert decision.status is GateStatus.DENIED
+    assert decision.denial_reasons == (GateDenialReason.MISSING_APPROVAL_LIMIT,)
+
+
+def test_gate_denies_context_that_cannot_prove_the_original_supplier_identity() -> None:
+    """Malformed PO supplier evidence causes deterministic candidate filtering to fail closed."""
+    from enterprise_agent.application.gate import GateDenialReason, GateStatus, ScenarioAGate
+
+    context = _with_original_purchase_order_payload(_context(), supplier_id="")
+    decision = ScenarioAGate().evaluate(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+    )
+
+    assert decision.status is GateStatus.DENIED
+    assert GateDenialReason.INELIGIBLE_SUPPLIER in decision.denial_reasons
 
 
 @pytest.mark.parametrize(

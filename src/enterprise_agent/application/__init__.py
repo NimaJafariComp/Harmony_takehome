@@ -13,6 +13,7 @@ from .context import (
     ScenarioAContextAssembler,
     StaleAttentionEvidenceError,
 )
+from .gate import GateDecision, GateDenialReason, GateStatus, ScenarioAGate
 from .planning import (
     EnterWorkflowRecommendation,
     FakeLLMPort,
@@ -28,11 +29,15 @@ __all__ = [
     "AuthorizedContextBundle",
     "EnterWorkflowRecommendation",
     "FakeLLMPort",
+    "GateDecision",
+    "GateDenialReason",
+    "GateStatus",
     "InvalidScenarioARecommendationError",
     "ManualReviewRecommendation",
     "MissingScenarioAContextEvidenceError",
     "NoActionRecommendation",
     "ScenarioAContextAssembler",
+    "ScenarioAGate",
     "ScenarioARecommendation",
     "StaleAttentionEvidenceError",
     "StockoutDetection",
