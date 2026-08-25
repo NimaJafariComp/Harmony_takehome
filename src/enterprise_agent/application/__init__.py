@@ -47,6 +47,12 @@ from .tools import (
     build_tool_idempotency_key,
     tool_definition,
 )
+from .workflow_executor import (
+    ScenarioAWorkflowExecutor,
+    WorkflowClaimLostError,
+    WorkflowExecutionRejectedError,
+    WorkflowExternalStepPendingError,
+)
 from .workflow_state import WorkflowStateInitializationError, WorkflowStateService
 from .workflows import (
     DECLARED_WORKFLOWS,
@@ -85,6 +91,7 @@ __all__ = [
     "ScenarioAContextAssembler",
     "ScenarioAGate",
     "ScenarioARecommendation",
+    "ScenarioAWorkflowExecutor",
     "ScheduleArrivalCheckInput",
     "StaleAttentionEvidenceError",
     "StockoutDetection",
@@ -99,7 +106,10 @@ __all__ = [
     "ToolDefinition",
     "ToolName",
     "ToolNotDeclaredError",
+    "WorkflowClaimLostError",
     "WorkflowDefinition",
+    "WorkflowExecutionRejectedError",
+    "WorkflowExternalStepPendingError",
     "WorkflowNotDeclaredError",
     "WorkflowStateInitializationError",
     "WorkflowStateService",

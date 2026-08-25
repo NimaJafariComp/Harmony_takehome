@@ -19,6 +19,7 @@ from enterprise_agent.domain import (
     DateRange,
     Evidence,
     Plan,
+    PlanId,
     RunId,
     ScenarioAStockoutTrigger,
     ScheduledTask,
@@ -138,6 +139,10 @@ class PlanApprovalPort(Protocol):
         """Load the exact plan and approval pair needed for a pre-decision validation."""
         ...
 
+    def load_for_plan(self, plan_id: PlanId) -> tuple[Plan, Approval] | None:
+        """Load the only plan/approval binding that controls a workflow instance."""
+        ...
+
     def approve(
         self,
         approval_id: ApprovalId,
@@ -158,6 +163,28 @@ class WorkflowStatePort(Protocol):
 
     def load(self, workflow_id: WorkflowId) -> WorkflowStateSnapshot | None:
         """Load one workflow and its ordered steps for a later claim or transition."""
+        ...
+
+    def claim(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        claimed_at: datetime,
+        lease_expires_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Atomically claim one pending, expired, or owner-renewed runnable workflow."""
+        ...
+
+    def complete_guard_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Atomically complete exactly the currently declared next read-only guard step."""
         ...
 
 

@@ -151,6 +151,12 @@ class MemoryPlanApprovalStore:
     def load(self, approval_id: ApprovalId) -> tuple[Plan, Approval] | None:
         return self.records.get(approval_id)
 
+    def load_for_plan(self, plan_id: PlanId) -> tuple[Plan, Approval] | None:
+        return next(
+            (record for record in self.records.values() if record[0].plan_id == plan_id),
+            None,
+        )
+
     def approve(
         self,
         approval_id: ApprovalId,
@@ -321,6 +327,31 @@ def test_postgres_adapter_returns_no_record_for_an_unknown_approval(
     adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
 
     assert adapter.load(ApprovalId("00000000-0000-0000-0000-000000000899")) is None
+
+
+@pytest.mark.parametrize("has_record", [True, False])
+def test_postgres_adapter_loads_the_plan_binding_used_by_a_workflow(
+    monkeypatch: pytest.MonkeyPatch, has_record: bool
+) -> None:
+    """Execution resolves approval by durable plan ID and never synthesizes a missing record."""
+    from enterprise_agent.adapters import plan_approvals
+
+    plan = _stored_plan()
+    approval = _stored_approval(plan, status=ApprovalStatus.APPROVED)
+    engine = MagicMock()
+    result = MagicMock()
+    result.mappings.return_value.one_or_none.return_value = (
+        _joined_row(plan, approval) if has_record else None
+    )
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value = result
+    monkeypatch.setattr(plan_approvals, "create_engine", lambda _: engine)
+    adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
+
+    binding = adapter.load_for_plan(plan.plan_id)
+
+    assert binding == ((plan, approval) if has_record else None)
+    assert connection.execute.call_args.args[1] == {"plan_id": str(plan.plan_id)}
 
 
 @pytest.mark.parametrize("returned_row", [None, "approved"])

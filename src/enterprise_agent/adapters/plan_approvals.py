@@ -68,6 +68,33 @@ SELECT_PLAN_AND_APPROVAL = text("""
     JOIN plans ON plans.id = approvals.plan_id
     WHERE approvals.id = CAST(:approval_id AS UUID)
 """)
+SELECT_PLAN_AND_APPROVAL_FOR_PLAN = text("""
+    SELECT
+        plans.id AS plan_id,
+        plans.attention_id,
+        plans.actor_id,
+        plans.approver_id AS plan_approver_id,
+        plans.intent,
+        plans.workflow_name,
+        plans.workflow_version,
+        plans.parameters,
+        plans.source_versions,
+        plans.policy_version,
+        plans.plan_hash AS persisted_plan_hash,
+        plans.created_at AS plan_created_at,
+        plans.expires_at AS plan_expires_at,
+        approvals.id AS approval_id,
+        approvals.plan_hash AS approval_plan_hash,
+        approvals.requester_id,
+        approvals.approver_id AS approval_approver_id,
+        approvals.status AS approval_status,
+        approvals.requested_at,
+        approvals.expires_at AS approval_expires_at,
+        approvals.decided_at
+    FROM approvals
+    JOIN plans ON plans.id = approvals.plan_id
+    WHERE approvals.plan_id = CAST(:plan_id AS UUID)
+""")
 APPROVE_PENDING = text("""
     UPDATE approvals
     SET status = :approved_status, decided_at = :decided_at
@@ -98,6 +125,21 @@ class PostgresPlanApprovalAdapter:
         with self._engine.connect() as connection:
             row = (
                 connection.execute(SELECT_PLAN_AND_APPROVAL, {"approval_id": str(approval_id)})
+                .mappings()
+                .one_or_none()
+            )
+        if row is None:
+            return None
+        return _plan_from_row(row), _approval_from_join_row(row)
+
+    def load_for_plan(self, plan_id: PlanId) -> tuple[Plan, Approval] | None:
+        """Load the unique plan/approval binding that authorizes one workflow instance."""
+        with self._engine.connect() as connection:
+            row = (
+                connection.execute(
+                    SELECT_PLAN_AND_APPROVAL_FOR_PLAN,
+                    {"plan_id": str(plan_id)},
+                )
                 .mappings()
                 .one_or_none()
             )

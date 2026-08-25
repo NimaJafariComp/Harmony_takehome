@@ -161,10 +161,14 @@ SEED_ROWS = (
         _scope_row(ID_DANA, scope)
         for scope in (
             "calendar:read",
+            "erp:po:cancel",
+            "erp:po:create",
             "erp:po:read",
             "erp:po:reroute",
             "erp:read",
             "mail:read",
+            "production:notify",
+            "scheduler:write",
         )
     ),
     *(

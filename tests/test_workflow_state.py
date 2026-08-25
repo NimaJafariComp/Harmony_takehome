@@ -54,6 +54,26 @@ class MemoryWorkflowStateStore:
     def load(self, workflow_id: WorkflowId) -> Any | None:
         return self.snapshots.get(workflow_id)
 
+    def claim(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        claimed_at: datetime,
+        lease_expires_at: datetime,
+    ) -> Any | None:
+        return None
+
+    def complete_guard_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        completed_at: datetime,
+    ) -> Any | None:
+        return None
+
 
 def staged_snapshot() -> Any:
     """Stage a fresh pending workflow once for adapter-mapping contract tests."""
@@ -200,6 +220,139 @@ def test_postgres_adapter_serializes_and_restores_a_complete_snapshot(
     assert transaction.execute.call_args_list[1].args[1]["step_index"] == 1
     assert loaded == snapshot
     assert adapter.load(WorkflowId("00000000-0000-0000-0000-000000000999")) is None
+
+
+def _workflow_row(snapshot: Any) -> dict[str, object]:
+    """Serialize one test snapshot workflow into the adapter's selected-row shape."""
+    workflow = snapshot.workflow
+    return {
+        "id": str(workflow.workflow_id),
+        "plan_id": str(workflow.plan_id),
+        "definition_name": workflow.definition_name,
+        "definition_version": workflow.definition_version,
+        "status": workflow.status.value,
+        "current_step": workflow.current_step,
+        "started_at": workflow.started_at,
+        "completed_at": workflow.completed_at,
+        "last_error": workflow.last_error,
+        "lease_owner": workflow.lease_owner,
+        "lease_expires_at": workflow.lease_expires_at,
+        "created_at": workflow.created_at,
+        "updated_at": workflow.updated_at,
+    }
+
+
+def _step_rows(snapshot: Any) -> list[dict[str, object]]:
+    """Serialize a test snapshot's ordered steps into the adapter's selected-row shape."""
+    return [
+        {
+            "id": str(step.step_id),
+            "workflow_instance_id": str(step.workflow_id),
+            "step_index": step.step_index,
+            "step_name": step.step_name,
+            "tool_name": step.tool_name,
+            "status": step.status.value,
+            "idempotency_key": step.idempotency_key,
+            "input": dict(step.input),
+            "result": None if step.result is None else dict(step.result),
+            "error": step.error,
+            "attempt_count": step.attempt_count,
+            "started_at": step.started_at,
+            "completed_at": step.completed_at,
+            "lease_owner": step.lease_owner,
+            "lease_expires_at": step.lease_expires_at,
+            "created_at": step.created_at,
+            "updated_at": step.updated_at,
+        }
+        for step in snapshot.steps
+    ]
+
+
+def test_postgres_adapter_claims_and_advances_only_one_leased_pending_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The persistence boundary uses CAS predicates for claims and exact-next guard completion."""
+    from enterprise_agent.adapters import workflow_state
+    from enterprise_agent.domain import WorkflowStatus, WorkflowStepStatus
+
+    snapshot = staged_snapshot()
+    claimed_at = NOW + timedelta(minutes=1)
+    lease_expires_at = NOW + timedelta(minutes=6)
+    claimed_snapshot = replace(
+        snapshot,
+        workflow=replace(
+            snapshot.workflow,
+            status=WorkflowStatus.RUNNING,
+            started_at=claimed_at,
+            lease_owner="worker-a",
+            lease_expires_at=lease_expires_at,
+            updated_at=claimed_at,
+        ),
+    )
+    completed_at = NOW + timedelta(minutes=2)
+    completed_steps = list(claimed_snapshot.steps)
+    completed_steps[0] = replace(
+        completed_steps[0],
+        status=WorkflowStepStatus.SUCCEEDED,
+        attempt_count=1,
+        started_at=completed_at,
+        completed_at=completed_at,
+        result={"guard": "confirmed"},
+        updated_at=completed_at,
+    )
+    completed_snapshot = replace(
+        claimed_snapshot,
+        workflow=replace(claimed_snapshot.workflow, current_step=1, updated_at=completed_at),
+        steps=tuple(completed_steps),
+    )
+    claim_result = MagicMock()
+    claim_result.scalar_one_or_none.return_value = str(snapshot.workflow.workflow_id)
+    completed_result = MagicMock()
+    completed_result.scalar_one_or_none.return_value = str(snapshot.steps[0].step_id)
+    advanced_result = MagicMock()
+    advanced_result.scalar_one_or_none.return_value = str(snapshot.workflow.workflow_id)
+    lost_result = MagicMock()
+    lost_result.scalar_one_or_none.return_value = None
+    engine = MagicMock()
+    transaction = engine.begin.return_value.__enter__.return_value
+    transaction.execute.side_effect = [
+        claim_result,
+        mapping_result(one_or_none=_workflow_row(claimed_snapshot)),
+        mapping_result(all_rows=_step_rows(claimed_snapshot)),
+        completed_result,
+        advanced_result,
+        mapping_result(one_or_none=_workflow_row(completed_snapshot)),
+        mapping_result(all_rows=_step_rows(completed_snapshot)),
+        lost_result,
+    ]
+    monkeypatch.setattr(workflow_state, "create_engine", lambda _: engine)
+    adapter = workflow_state.PostgresWorkflowStateAdapter("postgresql+psycopg://ignored")
+
+    claimed = adapter.claim(
+        snapshot.workflow.workflow_id,
+        worker_id="worker-a",
+        claimed_at=claimed_at,
+        lease_expires_at=lease_expires_at,
+    )
+    completed = adapter.complete_guard_step(
+        snapshot.workflow.workflow_id,
+        worker_id="worker-a",
+        expected_step_index=1,
+        completed_at=completed_at,
+    )
+    lost = adapter.claim(
+        snapshot.workflow.workflow_id,
+        worker_id="worker-b",
+        claimed_at=claimed_at,
+        lease_expires_at=lease_expires_at,
+    )
+
+    assert claimed == claimed_snapshot
+    assert completed == completed_snapshot
+    assert lost is None
+    assert transaction.execute.call_args_list[0].args[1]["worker_id"] == "worker-a"
+    assert transaction.execute.call_args_list[3].args[1]["expected_step_index"] == 1
+    assert transaction.execute.call_args_list[3].args[1]["result"] == '{"guard": "confirmed"}'
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:

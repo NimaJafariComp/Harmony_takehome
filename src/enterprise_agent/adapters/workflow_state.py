@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import cast
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine, RowMapping
+from sqlalchemy.engine import Connection, Engine, RowMapping
 
 from enterprise_agent.domain import (
     PlanId,
@@ -57,6 +57,57 @@ SELECT_STEPS = text("""
     WHERE workflow_instance_id = CAST(:workflow_id AS UUID)
     ORDER BY step_index ASC
 """)
+CLAIM_WORKFLOW = text("""
+    UPDATE workflow_instances
+    SET status = :running_status,
+        lease_owner = :worker_id,
+        lease_expires_at = :lease_expires_at,
+        started_at = COALESCE(started_at, :claimed_at),
+        updated_at = :claimed_at
+    WHERE id = CAST(:workflow_id AS UUID)
+      AND (
+          status = :pending_status
+          OR (
+              status = :running_status
+              AND (
+                  (lease_owner = :worker_id AND lease_expires_at > :claimed_at)
+                  OR lease_expires_at <= :claimed_at
+              )
+          )
+      )
+    RETURNING id
+""")
+COMPLETE_GUARD_STEP = text("""
+    UPDATE workflow_steps AS step
+    SET status = :succeeded_status,
+        attempt_count = step.attempt_count + 1,
+        started_at = COALESCE(step.started_at, :completed_at),
+        completed_at = :completed_at,
+        result = CAST(:result AS JSONB),
+        updated_at = :completed_at
+    FROM workflow_instances AS workflow
+    WHERE step.workflow_instance_id = workflow.id
+      AND workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :running_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :completed_at
+      AND workflow.current_step = :previous_step_index
+      AND step.step_index = :expected_step_index
+      AND step.tool_name IS NULL
+      AND step.status = :pending_status
+    RETURNING step.id
+""")
+ADVANCE_WORKFLOW_AFTER_GUARD = text("""
+    UPDATE workflow_instances
+    SET current_step = :expected_step_index,
+        updated_at = :completed_at
+    WHERE id = CAST(:workflow_id AS UUID)
+      AND status = :running_status
+      AND lease_owner = :worker_id
+      AND lease_expires_at > :completed_at
+      AND current_step = :previous_step_index
+    RETURNING id
+""")
 
 
 class PostgresWorkflowStateAdapter:
@@ -76,20 +127,79 @@ class PostgresWorkflowStateAdapter:
     def load(self, workflow_id: WorkflowId) -> WorkflowStateSnapshot | None:
         """Load one workflow and all stored steps in declared order for later execution work."""
         with self._engine.connect() as connection:
-            workflow_row = (
-                connection.execute(SELECT_WORKFLOW, {"workflow_id": str(workflow_id)})
-                .mappings()
-                .one_or_none()
-            )
-            if workflow_row is None:
+            return _load_snapshot(connection, workflow_id)
+
+    def claim(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        claimed_at: datetime,
+        lease_expires_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Claim one runnable workflow using a database compare-and-swap plus lease expiry."""
+        with self._engine.begin() as connection:
+            claimed = connection.execute(
+                CLAIM_WORKFLOW,
+                {
+                    "workflow_id": str(workflow_id),
+                    "worker_id": worker_id,
+                    "claimed_at": claimed_at,
+                    "lease_expires_at": lease_expires_at,
+                    "pending_status": WorkflowStatus.PENDING.value,
+                    "running_status": WorkflowStatus.RUNNING.value,
+                },
+            ).scalar_one_or_none()
+            if claimed is None:
                 return None
-            step_rows = (
-                connection.execute(SELECT_STEPS, {"workflow_id": str(workflow_id)}).mappings().all()
-            )
-        return WorkflowStateSnapshot(
-            workflow=_workflow_from_row(workflow_row),
-            steps=tuple(_step_from_row(row) for row in step_rows),
-        )
+            return _load_snapshot(connection, workflow_id)
+
+    def complete_guard_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Advance exactly one leased pending guard and then its workflow cursor atomically."""
+        with self._engine.begin() as connection:
+            parameters = {
+                "workflow_id": str(workflow_id),
+                "worker_id": worker_id,
+                "expected_step_index": expected_step_index,
+                "previous_step_index": expected_step_index - 1,
+                "completed_at": completed_at,
+                "pending_status": WorkflowStepStatus.PENDING.value,
+                "succeeded_status": WorkflowStepStatus.SUCCEEDED.value,
+                "running_status": WorkflowStatus.RUNNING.value,
+                "result": json.dumps({"guard": "confirmed"}, sort_keys=True),
+            }
+            completed = connection.execute(COMPLETE_GUARD_STEP, parameters).scalar_one_or_none()
+            if completed is None:
+                return None
+            advanced = connection.execute(
+                ADVANCE_WORKFLOW_AFTER_GUARD, parameters
+            ).scalar_one_or_none()
+            if advanced is None:
+                raise RuntimeError("workflow cursor was lost while completing a declared guard")
+            return _load_snapshot(connection, workflow_id)
+
+
+def _load_snapshot(connection: Connection, workflow_id: WorkflowId) -> WorkflowStateSnapshot | None:
+    """Read one workflow and ordered steps from an existing transactional connection."""
+    workflow_row = (
+        connection.execute(SELECT_WORKFLOW, {"workflow_id": str(workflow_id)})
+        .mappings()
+        .one_or_none()
+    )
+    if workflow_row is None:
+        return None
+    step_rows = connection.execute(SELECT_STEPS, {"workflow_id": str(workflow_id)}).mappings().all()
+    return WorkflowStateSnapshot(
+        workflow=_workflow_from_row(workflow_row),
+        steps=tuple(_step_from_row(row) for row in step_rows),
+    )
 
 
 def _workflow_parameters(workflow: WorkflowState) -> dict[str, object]:
