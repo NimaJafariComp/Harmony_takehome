@@ -150,3 +150,48 @@ def test_scoped_providers_reject_unknown_record_types_before_querying(
         adapter.query(actor("erp:read"), EvidenceQuery(record_types=frozenset({"all_tables"})))
 
     assert engine.connect.call_count == 0
+
+
+@pytest.mark.integration
+def test_seeded_erp_provider_allows_an_empty_optional_record_id_filter(
+    disposable_database: str,
+) -> None:
+    """The common unfiltered ERP request executes against PostgreSQL without type errors."""
+    from test_seed import compose, reset_and_seed
+
+    compose(
+        "--profile",
+        "tools",
+        "run",
+        "--build",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={disposable_database}",
+        "app",
+        "alembic",
+        "upgrade",
+        "head",
+    )
+    reset_and_seed(disposable_database)
+    command = (
+        "from os import environ\n"
+        "from enterprise_agent.adapters import PostgresErpAdapter, PostgresIdentityAdapter\n"
+        "from enterprise_agent.domain import UserId\n"
+        "from enterprise_agent.ports import EvidenceQuery\n"
+        "database_url = environ['DATABASE_URL']\n"
+        "actor = PostgresIdentityAdapter(database_url).actor_for(UserId('00000000-0000-0000-0000-000000000001'))\n"
+        "evidence = PostgresErpAdapter(database_url).query(actor, EvidenceQuery(record_types=frozenset({'inventory'})))\n"
+        "assert len(evidence) == 1\n"
+    )
+    compose(
+        "--profile",
+        "tools",
+        "run",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={disposable_database}",
+        "app",
+        "python",
+        "-c",
+        command,
+    )
