@@ -18,6 +18,7 @@ EvidenceId = NewType("EvidenceId", str)
 PlanId = NewType("PlanId", str)
 ApprovalId = NewType("ApprovalId", str)
 WorkflowId = NewType("WorkflowId", str)
+WorkflowStepId = NewType("WorkflowStepId", str)
 ToolInvocationId = NewType("ToolInvocationId", str)
 ScheduledTaskId = NewType("ScheduledTaskId", str)
 AuditEventId = NewType("AuditEventId", str)
@@ -61,6 +62,17 @@ class ToolInvocationStatus(StrEnum):
 
 class WorkflowStatus(StrEnum):
     """Durable state of a declared workflow instance."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    COMPENSATING = "compensating"
+    COMPENSATED = "compensated"
+
+
+class WorkflowStepStatus(StrEnum):
+    """Durable lifecycle state for one ordered workflow guard or effect."""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -222,6 +234,46 @@ class WorkflowState:
     started_at: datetime | None
     completed_at: datetime | None
     last_error: str | None
+    lease_owner: str | None
+    lease_expires_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WorkflowStepState:
+    """Durable state and provenance for one declared workflow step."""
+
+    step_id: WorkflowStepId
+    workflow_id: WorkflowId
+    step_index: int
+    step_name: str
+    tool_name: str | None
+    status: WorkflowStepStatus
+    idempotency_key: str | None
+    input: Mapping[str, object]
+    result: Mapping[str, object] | None
+    error: str | None
+    attempt_count: int
+    started_at: datetime | None
+    completed_at: datetime | None
+    lease_owner: str | None
+    lease_expires_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "input", _freeze_mapping(self.input))
+        if self.result is not None:
+            object.__setattr__(self, "result", _freeze_mapping(self.result))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WorkflowStateSnapshot:
+    """One workflow instance together with its complete ordered durable step state."""
+
+    workflow: WorkflowState
+    steps: tuple[WorkflowStepState, ...]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

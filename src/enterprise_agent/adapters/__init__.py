@@ -11,6 +11,7 @@ from .providers import (
     PostgresMailAdapter,
     UnsupportedEvidenceTypeError,
 )
+from .workflow_state import PostgresWorkflowStateAdapter
 
 __all__ = [
     "IdentityNotFoundError",
@@ -21,5 +22,6 @@ __all__ = [
     "PostgresIdentityAdapter",
     "PostgresMailAdapter",
     "PostgresPlanApprovalAdapter",
+    "PostgresWorkflowStateAdapter",
     "UnsupportedEvidenceTypeError",
 ]

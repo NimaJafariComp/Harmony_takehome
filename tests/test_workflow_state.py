@@ -70,7 +70,6 @@ def staged_snapshot() -> Any:
 def test_staging_persists_the_declared_pending_workflow_and_all_six_steps() -> None:
     """Staging stores the immutable plan snapshot only; it neither claims nor executes a step."""
     from enterprise_agent.application.workflow_state import WorkflowStateService
-
     from enterprise_agent.domain import WorkflowStatus, WorkflowStepStatus
 
     store = MemoryWorkflowStateStore()
@@ -106,8 +105,25 @@ def test_staging_rejects_a_plan_without_a_declared_workflow() -> None:
 
     with pytest.raises(WorkflowStateInitializationError, match="declared workflow"):
         WorkflowStateService(store).stage(without_definition, created_at=NOW)
+    with pytest.raises(WorkflowStateInitializationError, match="declared workflow"):
+        WorkflowStateService(store).stage(
+            replace(workflow_plan(), workflow_name="unreviewed_workflow"),
+            created_at=NOW,
+        )
 
     assert store.snapshots == {}
+
+
+def test_staging_generates_a_workflow_id_when_no_durable_id_is_supplied() -> None:
+    """The service owns opaque instance identity while callers may still inject it for tests."""
+    from enterprise_agent.application.workflow_state import WorkflowStateService
+
+    snapshot = WorkflowStateService(MemoryWorkflowStateStore()).stage(
+        workflow_plan(),
+        created_at=NOW,
+    )
+
+    assert snapshot.workflow.workflow_id
 
 
 def mapping_result(

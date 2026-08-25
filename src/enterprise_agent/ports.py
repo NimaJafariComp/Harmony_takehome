@@ -24,6 +24,8 @@ from enterprise_agent.domain import (
     ScheduledTask,
     ScheduledTaskId,
     UserId,
+    WorkflowId,
+    WorkflowStateSnapshot,
 )
 
 
@@ -143,6 +145,19 @@ class PlanApprovalPort(Protocol):
         decided_at: datetime,
     ) -> Approval | None:
         """Atomically approve one still-pending, still-unexpired plan-hash binding."""
+        ...
+
+
+@runtime_checkable
+class WorkflowStatePort(Protocol):
+    """Persist and retrieve the complete durable state of one declared workflow instance."""
+
+    def create(self, snapshot: WorkflowStateSnapshot) -> None:
+        """Store one plan-bound workflow and every declared initial step atomically."""
+        ...
+
+    def load(self, workflow_id: WorkflowId) -> WorkflowStateSnapshot | None:
+        """Load one workflow and its ordered steps for a later claim or transition."""
         ...
 
 

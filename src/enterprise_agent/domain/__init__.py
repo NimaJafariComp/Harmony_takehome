@@ -34,7 +34,11 @@ from .contracts import (
     UserId,
     WorkflowId,
     WorkflowState,
+    WorkflowStateSnapshot,
     WorkflowStatus,
+    WorkflowStepId,
+    WorkflowStepState,
+    WorkflowStepStatus,
 )
 
 __all__ = [
@@ -68,6 +72,10 @@ __all__ = [
     "UserId",
     "WorkflowId",
     "WorkflowState",
+    "WorkflowStateSnapshot",
     "WorkflowStatus",
+    "WorkflowStepId",
+    "WorkflowStepState",
+    "WorkflowStepStatus",
     "require_attention_transition",
 ]

@@ -47,6 +47,7 @@ from .tools import (
     build_tool_idempotency_key,
     tool_definition,
 )
+from .workflow_state import WorkflowStateInitializationError, WorkflowStateService
 from .workflows import (
     DECLARED_WORKFLOWS,
     PO_REROUTE_V1,
@@ -100,6 +101,8 @@ __all__ = [
     "ToolNotDeclaredError",
     "WorkflowDefinition",
     "WorkflowNotDeclaredError",
+    "WorkflowStateInitializationError",
+    "WorkflowStateService",
     "WorkflowStepDefinition",
     "WorkflowStepName",
     "authorize_tool",

@@ -35,7 +35,11 @@ from enterprise_agent.domain import (
     UserId,
     WorkflowId,
     WorkflowState,
+    WorkflowStateSnapshot,
     WorkflowStatus,
+    WorkflowStepId,
+    WorkflowStepState,
+    WorkflowStepStatus,
 )
 
 pytestmark = pytest.mark.unit
@@ -131,7 +135,31 @@ def test_operational_contracts_capture_workflow_scheduler_and_audit_state() -> N
         started_at=NOW,
         completed_at=None,
         last_error=None,
+        lease_owner=None,
+        lease_expires_at=None,
+        created_at=NOW,
+        updated_at=NOW,
     )
+    step = WorkflowStepState(
+        step_id=WorkflowStepId("workflow-step-3"),
+        workflow_id=workflow.workflow_id,
+        step_index=3,
+        step_name="create_replacement_po",
+        tool_name="create_replacement_po",
+        status=WorkflowStepStatus.SUCCEEDED,
+        idempotency_key="workflow-reroute:3",
+        input={"supplier_id": "supplier-z"},
+        result={"replacement_po_id": "po-9"},
+        error=None,
+        attempt_count=1,
+        started_at=NOW,
+        completed_at=NOW,
+        lease_owner=None,
+        lease_expires_at=None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    snapshot = WorkflowStateSnapshot(workflow=workflow, steps=(step,))
     invocation = ToolInvocation(
         invocation_id=ToolInvocationId("tool-create-po"),
         workflow_id=workflow.workflow_id,
@@ -172,6 +200,7 @@ def test_operational_contracts_capture_workflow_scheduler_and_audit_state() -> N
     )
 
     assert workflow.current_step == 3
+    assert snapshot.steps[0].result == {"replacement_po_id": "po-9"}
     assert invocation.status is ToolInvocationStatus.SUCCEEDED
     assert task.status is ScheduledTaskStatus.PENDING
     assert event.evidence_ids == (EvidenceId("evidence-delay-email"),)
