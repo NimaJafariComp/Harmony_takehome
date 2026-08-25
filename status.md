@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M2 - Domain, persistence, seed data, and scoped providers |
-| Current task | M2.5 - Implement reset and seed |
-| Required task progress | 10 / 58 complete |
+| Current task | M2.6 - Implement identity adapter |
+| Required task progress | 11 / 58 complete |
 | Acceptance criteria progress | 0 / 14 satisfied; 8 in progress |
-| Last validated commit | `3722987` |
-| Last completed-task push | `3722987` to `origin/main` |
+| Last validated commit | `9018d50` |
+| Last completed-task push | `9018d50` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -71,7 +71,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M2.2 Define ports | `complete` | AC-03, AC-12 | Test: `tests/test_ports.py` - PASS.<br>Evidence: ERP, mail, calendar, identity, clock, audit, scheduler, and LLM protocols have explicit typed contracts and are independently fakeable without concrete dependencies.<br>Commit: `d490053` pushed to `origin/main`. |
 | M2.3 Create minimal schema migration | `complete` | AC-01, AC-02 | Test: `tests/test_schema_migration.py` - PASS.<br>Evidence: a clean PostgreSQL database has all identity, ERP, communications, agent-state, workflow, scheduler, and audit tables with UUID keys, foreign keys, and planned query indexes.<br>Commit: `bcdf41d` pushed to `origin/main`. |
 | M2.4 Add integrity constraints and versions | `complete` | AC-04, AC-06, AC-09, AC-10 | Test: `tests/test_schema_migration.py::test_integrity_migration_enforces_dedupe_idempotency_and_source_versions` - PASS.<br>Evidence: PostgreSQL enforces attention, workflow-step, and scheduler uniqueness; mutable supplier/PO/lot/inventory/allocation inputs have positive source versions for later freshness gates.<br>Commit: `3722987` pushed to `origin/main`. |
-| M2.5 Implement reset and seed | `in_progress` | AC-02 | - |
+| M2.5 Implement reset and seed | `complete` | AC-02 | Test: `tests/test_seed.py::test_reset_and_seed_create_repeatable_scenario_and_edge_case_data` - PASS.<br>Evidence: a guarded local-only reset and deterministic seed create both scenarios, the delayed partial PO, current/superseded shipment updates, supplier eligibility traps, backup-routing availability, and quality coverage/no-coverage data; `make seed` succeeds without LLM credentials.<br>Commit: `9018d50` pushed to `origin/main`. |
 | M2.6 Implement identity adapter | `not_started` | AC-03, AC-06, AC-07 | - |
 | M2.7 Implement scoped providers | `not_started` | AC-03 | - |
 | M2.8 Test seed and provider boundary | `not_started` | AC-02, AC-03 | - |
@@ -155,7 +155,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Criterion | Status | Evidence |
 |---|---|---|
 | AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, and test-harness evidence are passing; M2.5 must still provide reset/seed behavior. |
-| AC-02 Seed model and edge cases | `in_progress` | Typed records for the seed model are validated; deterministic scenario/edge seed data remains M2.5-M2.8. |
+| AC-02 Seed model and edge cases | `in_progress` | A deterministic local-only seed now contains both scenarios, roles/scopes, a partial delayed PO, superseded/current mail, supplier traps, backup availability, and quality coverage/no-coverage cases; provider-level scenario assertions remain M2.6-M2.8. |
 | AC-03 Provider authorization boundary | `in_progress` | Provider methods require an `ActorContext` and scoped query contract; concrete authorization filtering remains M2.6-M2.8. |
 | AC-04 Proactive detection and dedupe | `in_progress` | Durable attention dedupe-key uniqueness is enforced; lifecycle ownership and proactive detectors remain M3. |
 | AC-05 Authorized safe planning | `not_started` | - |
@@ -194,4 +194,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M2.3 | Completed the first durable domain schema migration. | Test: `tests/test_schema_migration.py` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (20 tests, 99.69% coverage). | `bcdf41d` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M2.4 | Started integrity and source-version migration contract. | Test: `tests/test_schema_migration.py::test_integrity_migration_enforces_dedupe_idempotency_and_source_versions` - RED because the current schema has no inventory/allocation tables, source-version columns, or unique integrity constraints. | `c44cb4a` RED checkpoint, pushed to `origin/main` with the GREEN task completion. |
 | 2026-08-25 | M2.4 | Completed integrity constraints and material-source versioning. | Test: `tests/test_schema_migration.py` - PASS (2); `make test-critical` - PASS (1 selected); `make verify` - PASS (21 tests, 99.69% coverage). | `3722987` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M2.5 | Started deterministic reset and seed contract. | Test: `tests/test_seed.py` - RED because no reset/seed implementation or seeded scenario records exist. | RED checkpoint pending. |
+| 2026-08-25 | M2.5 | Started deterministic reset and seed contract. | Test: `tests/test_seed.py` - RED because no reset/seed implementation or seeded scenario records exist. | `40edbf4`, `d1a9630`, and `a79410c` RED checkpoints, pushed to `origin/main` with the GREEN task completion. |
+| 2026-08-25 | M2.5 | Completed guarded reset and deterministic scenario seed. | Test: `tests/test_seed.py` - PASS (4); `make seed` - PASS; `make test-critical` - PASS (1 selected); `make verify` - PASS (27 tests, 98.18% coverage). | `9018d50` pushed to `origin/main`; status completion record pending this commit. |
