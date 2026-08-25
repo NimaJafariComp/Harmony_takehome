@@ -1,4 +1,18 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent
+    networks:
+      - agent_backend
+    profiles:
+      - tools
+
   db:
     image: postgres:16-alpine
     environment:

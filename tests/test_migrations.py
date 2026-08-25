@@ -19,6 +19,7 @@ def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 def reset_database() -> None:
     """Return the running Compose database to a clean state for this test."""
+    compose("up", "-d", "--wait", "db")
     compose(
         "exec",
         "-T",
