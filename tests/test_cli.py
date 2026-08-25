@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from enterprise_agent import cli
+from enterprise_agent.seed import SeedSafetyError
 
 pytestmark = pytest.mark.unit
 
@@ -28,3 +29,47 @@ def test_main_invokes_cli_application(monkeypatch: pytest.MonkeyPatch) -> None:
     cli.main()
 
     assert invoked == [True]
+
+
+def test_reset_and_seed_commands_need_only_database_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local data commands do not require any selected LLM profile or credential."""
+    called_urls: list[str] = []
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "reset_database", called_urls.append)
+    monkeypatch.setattr(cli, "seed_database", called_urls.append)
+
+    runner = CliRunner()
+    reset_result = runner.invoke(cli.app, ["reset"])
+    seed_result = runner.invoke(cli.app, ["seed"])
+
+    assert reset_result.exit_code == 0
+    assert reset_result.stdout == "database: reset\n"
+    assert seed_result.exit_code == 0
+    assert seed_result.stdout == "database: seeded\n"
+    assert called_urls == [
+        "postgresql+psycopg://agent:agent@db:5432/enterprise_agent",
+        "postgresql+psycopg://agent:agent@db:5432/enterprise_agent",
+    ]
+
+
+def test_reset_command_reports_guard_failures_and_missing_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI preserves reset safety errors and rejects absent database configuration."""
+    runner = CliRunner()
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/not_demo")
+
+    def reject(_: str) -> None:
+        raise SeedSafetyError("reset is restricted to the local demo database")
+
+    monkeypatch.setattr(cli, "reset_database", reject)
+    rejected_result = runner.invoke(cli.app, ["reset"])
+    monkeypatch.delenv("DATABASE_URL")
+    missing_result = runner.invoke(cli.app, ["seed"])
+
+    assert rejected_result.exit_code == 1
+    assert "database: reset refused" in rejected_result.stderr
+    assert missing_result.exit_code == 1
+    assert "DATABASE_URL is required" in missing_result.stderr

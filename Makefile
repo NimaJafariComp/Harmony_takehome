@@ -27,8 +27,9 @@ migrate:
 	docker compose up --wait db
 	docker compose --profile tools run --build --rm app alembic upgrade head
 
-seed:
-	@echo "Seed command is not available until M2."
+seed: migrate
+	docker compose --profile tools run --build --rm app enterprise-agent reset
+	docker compose --profile tools run --build --rm app enterprise-agent seed
 
 demo:
 	@echo "Demo command is not available until M8."
