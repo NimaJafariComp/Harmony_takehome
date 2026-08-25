@@ -35,7 +35,7 @@ Recommended commit types are `feat`, `fix`, `test`, `docs`, `build`, `chore`, an
 | Required task progress | 0 / 58 complete |
 | Acceptance criteria progress | 0 / 14 satisfied |
 | Last validated commit | `2a4fec1` |
-| Last push | `2a4fec1` to `origin/main` |
+| Last completed-task push | `2a4fec1` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
