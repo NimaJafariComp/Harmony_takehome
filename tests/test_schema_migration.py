@@ -136,28 +136,32 @@ def test_integrity_migration_enforces_dedupe_idempotency_and_source_versions(
     schema = inspect_schema(disposable_database)
 
     assert {"inventory", "production_allocations"}.issubset(schema["tables"])
-    for table in {"suppliers", "purchase_orders", "quality_lots", "inventory", "production_allocations"}:
+    for table in (
+        "suppliers",
+        "purchase_orders",
+        "quality_lots",
+        "inventory",
+        "production_allocations",
+    ):
         assert "source_version" in schema["columns"][table]
 
-    assert "uq_attention_items_dedupe_key" in schema["unique_constraints"][
-        "attention_items"
-    ]
-    assert "uq_workflow_steps_workflow_instance_id_step_index" in schema[
-        "unique_constraints"
-    ]["workflow_steps"]
-    assert "uq_workflow_steps_idempotency_key" in schema["unique_constraints"][
-        "workflow_steps"
-    ]
-    assert "uq_scheduled_tasks_idempotency_key" in schema["unique_constraints"][
-        "scheduled_tasks"
-    ]
+    assert "uq_attention_items_dedupe_key" in schema["unique_constraints"]["attention_items"]
+    assert (
+        "uq_workflow_steps_workflow_instance_id_step_index"
+        in schema["unique_constraints"]["workflow_steps"]
+    )
+    assert "uq_workflow_steps_idempotency_key" in schema["unique_constraints"]["workflow_steps"]
+    assert "uq_scheduled_tasks_idempotency_key" in schema["unique_constraints"]["scheduled_tasks"]
     assert "uq_inventory_part_id_plant_id" in schema["unique_constraints"]["inventory"]
-    assert "uq_production_allocations_quality_lot_id_production_order_id" in schema[
-        "unique_constraints"
-    ]["production_allocations"]
-    assert "ck_purchase_orders_source_version_positive" in schema["check_constraints"][
-        "purchase_orders"
-    ]
-    assert "ck_production_allocations_source_version_positive" in schema[
-        "check_constraints"
-    ]["production_allocations"]
+    assert (
+        "uq_production_allocations_quality_lot_id_production_order_id"
+        in schema["unique_constraints"]["production_allocations"]
+    )
+    assert (
+        "ck_purchase_orders_source_version_positive"
+        in schema["check_constraints"]["purchase_orders"]
+    )
+    assert (
+        "ck_production_allocations_source_version_positive"
+        in schema["check_constraints"]["production_allocations"]
+    )
