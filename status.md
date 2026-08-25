@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M3 - Safe planning core with fake LLM |
-| Current task | M3.5 - Define planning schemas and fake LLM |
-| Required task progress | 18 / 58 complete |
+| Current task | M3.6 - Implement gate and policy |
+| Required task progress | 19 / 58 complete |
 | Acceptance criteria progress | 2 / 14 satisfied; 7 in progress |
-| Last validated commit | `a60655c` |
-| Last completed-task push | `a60655c` to `origin/main` |
+| Last validated commit | `68da3e3` |
+| Last completed-task push | `68da3e3` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -84,7 +84,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M3.2 Implement stockout detector | `complete` | AC-04 | Test: `tests/test_stockout_detector.py` - PASS (4).<br>Evidence: scoped inventory and current committed production demand are evaluated against safety stock; only positive shortfalls create durable, source-version-bound Scenario A attention registrations, including the seeded 90-unit risk.<br>Commit: `8252ed0` pushed to `origin/main`. |
 | M3.3 Build authorized context bundle | `complete` | AC-05 | Test: `tests/test_scenario_a_context.py` - PASS (4).<br>Evidence: actor identity is re-resolved through its port; the bundle contains only typed authorized ERP, mail, and next-day calendar evidence with immutable source timestamps and versions, rejects mismatched attention snapshots, and selects only the newest valid PO shipment update.<br>Commit: `6fac4d7` pushed to `origin/main`. |
 | M3.4 Implement candidate filtering | `complete` | AC-05 | Test: `tests/test_supplier_candidates.py` - PASS (4).<br>Evidence: deterministic policy admits only approved, visible plant/part-matching alternates that arrive by production start; it rejects the original supplier, too-slow, wrong-part/plant, unapproved, and malformed suppliers while retaining every exclusion reason.<br>Commit: `a60655c` pushed to `origin/main`. |
-| M3.5 Define planning schemas and fake LLM | `in_progress` | AC-05 | - |
+| M3.5 Define planning schemas and fake LLM | `complete` | AC-05 | Test: `tests/test_planning_schemas.py` - PASS (7).<br>Evidence: strict Pydantic schemas permit only explainable `NO_ACTION`, `MANUAL_REVIEW`, or positive-quantity `ENTER_WORKFLOW(po_reroute:v1)` outcomes; the scenario-keyed fake LLM is deterministic and returns safe manual review when unconfigured.<br>Commit: `68da3e3` pushed to `origin/main`. |
 | M3.6 Implement gate and policy | `not_started` | AC-06 | - |
 | M3.7 Implement immutable plan and approval records | `not_started` | AC-06 | - |
 | M3.8 Test safe planning | `not_started` | AC-04, AC-05, AC-06 | - |
@@ -158,7 +158,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-02 Seed model and edge cases | `complete` | The deterministic local-only seed is exhaustively asserted to contain both scenarios, roles/scopes, authorized mailboxes, a partial changed delayed PO, superseded/current shipment updates, eligible/too-slow/wrong-part suppliers, backup availability, and quality coverage/no-coverage cases. |
 | AC-03 Provider authorization boundary | `complete` | Real PostgreSQL provider assertions prove Dana's authorized purchasing context is visible while Quinn cannot read purchasing ERP/mail/calendar data and Avery cannot read Dana's mailbox or calendar; providers additionally enforce actor context, scopes, plant visibility, record types, and record IDs. |
 | AC-04 Proactive detection and dedupe | `in_progress` | A scoped deterministic detector now evaluates inventory, safety stock, and current committed production demand before emitting only positive source-version-bound stockout triggers; canonical keys and atomic PostgreSQL attention persistence deduplicate equivalent triggers and audit each attempt. End-to-end safe-planning coverage remains M3.8. |
-| AC-05 Authorized safe planning | `in_progress` | A typed bundle re-resolves actor identity and carries only authorized ERP, mail, and calendar evidence with immutable source timestamps and versions; deterministic policy supplies the planner only approved, visible, part/plant-matching alternates that can meet production, while retaining exclusion reasons. Fake-planner validation remains M3.5. |
+| AC-05 Authorized safe planning | `in_progress` | A typed bundle re-resolves actor identity and carries only authorized ERP, mail, and calendar evidence with immutable source timestamps and versions; deterministic policy supplies only approved, visible, part/plant-matching alternates that can meet production, while retaining exclusion reasons. Strict schemas and a deterministic fake permit only three declared Scenario A outcomes; code-enforced gate behavior remains M3.6. |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | Immutable actor, plan, approval, source-version, and policy-version contracts are established; gate enforcement remains M3-M4. |
 | AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
 | AC-08 Fixed Scenario A workflow | `not_started` | - |
@@ -210,4 +210,5 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M3.3 | Completed typed authorized Scenario A context assembly. | Test: `tests/test_scenario_a_context.py` - PASS (4), including the seeded PostgreSQL path and newest-valid-shipment selection; non-integration suite - PASS (38, 94.21% coverage); `make test-critical` - PASS (4); format, lint, mypy, `make migrate`, and `make demo` - PASS. | `6fac4d7` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M3.4 | Started deterministic supplier-candidate filtering coverage. | Test: `tests/test_supplier_candidates.py` - RED because the candidate filter and auditable exclusion contracts do not exist. | `0cef445` pushed to `origin/main`. |
 | 2026-08-25 | M3.4 | Completed deterministic supplier-candidate filtering. | Test: `tests/test_supplier_candidates.py` - PASS (4), including seeded Supplier Z-only eligibility; non-integration suite - PASS (41, 94.46% coverage); `make test-critical` - PASS (5); format, lint, mypy, `make migrate`, and `make demo` - PASS. | `a60655c` pushed to `origin/main`; status completion record pending this commit. |
-| 2026-08-25 | M3.5 | Started bounded Scenario A planning-schema and fake-LLM coverage. | Test: `tests/test_planning_schemas.py` - RED because the recommendation schemas, parser, and deterministic fake adapter do not exist. | Pending RED checkpoint. |
+| 2026-08-25 | M3.5 | Started bounded Scenario A planning-schema and fake-LLM coverage. | Test: `tests/test_planning_schemas.py` - RED because the recommendation schemas, parser, and deterministic fake adapter do not exist. | `2d36767` pushed to `origin/main`. |
+| 2026-08-25 | M3.5 | Completed bounded Scenario A recommendation schemas and deterministic fake LLM. | Test: `tests/test_planning_schemas.py` - PASS (7), including seeded authorized-context and Supplier Z recommendation flow; non-integration suite - PASS (47, 94.79% coverage); `make test-critical` - PASS (6); format, lint, mypy, lock, `make migrate`, and `make demo` - PASS. | `68da3e3` pushed to `origin/main`; status completion record pending this commit. |
