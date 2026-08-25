@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M3 - Safe planning core with fake LLM |
-| Current task | M3.7 - Implement immutable plan and approval records |
-| Required task progress | 20 / 58 complete |
+| Current task | M3.8 - Test safe planning behavior |
+| Required task progress | 21 / 58 complete |
 | Acceptance criteria progress | 2 / 14 satisfied; 7 in progress |
-| Last validated commit | `dd4d21e` |
-| Last completed-task push | `dd4d21e` to `origin/main` |
+| Last validated commit | `290669a` |
+| Last completed-task push | `290669a` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -86,7 +86,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M3.4 Implement candidate filtering | `complete` | AC-05 | Test: `tests/test_supplier_candidates.py` - PASS (4).<br>Evidence: deterministic policy admits only approved, visible plant/part-matching alternates that arrive by production start; it rejects the original supplier, too-slow, wrong-part/plant, unapproved, and malformed suppliers while retaining every exclusion reason.<br>Commit: `a60655c` pushed to `origin/main`. |
 | M3.5 Define planning schemas and fake LLM | `complete` | AC-05 | Test: `tests/test_planning_schemas.py` - PASS (7).<br>Evidence: strict Pydantic schemas permit only explainable `NO_ACTION`, `MANUAL_REVIEW`, or positive-quantity `ENTER_WORKFLOW(po_reroute:v1)` outcomes; the scenario-keyed fake LLM is deterministic and returns safe manual review when unconfigured.<br>Commit: `68da3e3` pushed to `origin/main`. |
 | M3.6 Implement gate and policy | `complete` | AC-06 | Test: `tests/test_scenario_a_gate.py` - PASS (17 tests; gate module 100% line and branch coverage).<br>Evidence: the non-executing gate rechecks exact source versions, required read/write scopes, PO IDs and remainder, supplier eligibility, price/currency, and approval limit; only a valid reroute becomes pending human approval.<br>Commit: `dd4d21e` pushed to `origin/main`. |
-| M3.7 Implement immutable plan and approval records | `in_progress` | AC-06 | Contract test in progress; no acceptance claim until immutable persistence and stale-plan validation pass. |
+| M3.7 Implement immutable plan and approval records | `complete` | AC-06 | Test: `tests/test_plan_approvals.py` - PASS (15 tests; plan/approval modules 100% line and branch coverage).<br>Evidence: fresh gate-approved intent is atomically persisted with a deterministic hash binding original approver, workflow parameters, source versions, policy version, and expiry; stale, expired, mismatched, tampered, and raced plans cannot be approved.<br>Commit: `290669a` pushed to `origin/main`. |
 | M3.8 Test safe planning | `not_started` | AC-04, AC-05, AC-06 | - |
 
 ### M4 - Declared workflow, idempotent tools, and crash recovery
@@ -159,7 +159,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-03 Provider authorization boundary | `complete` | Real PostgreSQL provider assertions prove Dana's authorized purchasing context is visible while Quinn cannot read purchasing ERP/mail/calendar data and Avery cannot read Dana's mailbox or calendar; providers additionally enforce actor context, scopes, plant visibility, record types, and record IDs. |
 | AC-04 Proactive detection and dedupe | `in_progress` | A scoped deterministic detector now evaluates inventory, safety stock, and current committed production demand before emitting only positive source-version-bound stockout triggers; canonical keys and atomic PostgreSQL attention persistence deduplicate equivalent triggers and audit each attempt. End-to-end safe-planning coverage remains M3.8. |
 | AC-05 Authorized safe planning | `in_progress` | A typed bundle re-resolves actor identity and carries only authorized ERP, mail, and calendar evidence with immutable source timestamps and versions; deterministic policy supplies only approved, visible, part/plant-matching alternates that can meet production, while retaining exclusion reasons. Strict schemas and a deterministic fake permit only three declared Scenario A outcomes; code-enforced gate behavior remains M3.6. |
-| AC-06 Gate, scope, policy, and approval | `in_progress` | The Scenario A gate now fails closed on stale evidence, missing context/reroute scope, PO parameter/remainder mismatch, ineligible supplier, invalid pricing, missing currency authority, and approval-limit excess; no gate result executes a write, and the only valid action is pending human approval. Immutable plan and approval persistence remain M3.7. |
+| AC-06 Gate, scope, policy, and approval | `in_progress` | The Scenario A gate fails closed on stale evidence, scope, PO parameter/remainder, supplier, pricing, currency-authority, and approval-limit violations. A fresh gate-approved plan is now immutable in PostgreSQL and bound to its policy/source/expiry hash plus pending approval; stale, expired, altered, mismatched, or raced records are unapprovable. Tool-level revalidation remains M4. |
 | AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
 | AC-08 Fixed Scenario A workflow | `not_started` | - |
 | AC-09 Idempotency, compensation, and recovery | `in_progress` | Workflow-step identity and idempotency keys are unique; persisted execution, compensation, and recovery behavior remain M4. |
@@ -215,3 +215,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M3.6 | Started Scenario A gate and policy enforcement. | Test: `tests/test_scenario_a_gate.py` contract is being added before implementation. | Pending RED checkpoint. |
 | 2026-08-25 | M3.6 | Completed non-executing Scenario A policy and approval gate. | Test: `tests/test_scenario_a_gate.py` - PASS (17, direct gate 100%); non-integration suite - PASS (64, 95.58% coverage); `make test-critical` - PASS (7); format, lint, mypy, clean migration, and current demo command - PASS. | `dd4d21e` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M3.7 | Started immutable Scenario A plan and approval persistence. | Test: `tests/test_plan_approvals.py` contract is being added before implementation. | Pending RED checkpoint. |
+| 2026-08-25 | M3.7 | Completed immutable, hash-bound Scenario A plan and approval persistence. | Test: `tests/test_plan_approvals.py` - PASS (15, direct plan/approval modules 100%); PostgreSQL immutability/CAS contract and schema migration tests - PASS; non-integration suite - PASS (78, 96.01% coverage); `make test-critical` - PASS (8); format, lint, mypy, clean migration, and current demo command - PASS. | `290669a` pushed to `origin/main`; status completion record pending this commit. |
