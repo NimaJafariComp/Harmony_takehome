@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: enterprise_agent
+      POSTGRES_PASSWORD: enterprise_agent
+      POSTGRES_USER: enterprise_agent
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enterprise_agent -d enterprise_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agent_backend
+
+volumes:
+  postgres_data:
+
+networks:
+  agent_backend:
+    internal: true
