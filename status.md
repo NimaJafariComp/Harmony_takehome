@@ -44,10 +44,10 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Overall status | `in_progress` |
 | Current milestone | M4 - Declared workflow, idempotent tools, and crash recovery |
 | Current task | M4.1 - Define tool catalog |
-| Required task progress | 22 / 58 complete |
+| Required task progress | 23 / 58 complete |
 | Acceptance criteria progress | 4 / 14 satisfied; 5 in progress |
-| Last validated commit | `45d314d` |
-| Last completed-task push | `45d314d` to `origin/main` |
+| Last validated commit | `55ca577` |
+| Last completed-task push | `55ca577` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -93,7 +93,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M4.1 Define tool catalog | `in_progress` | AC-06, AC-09 | Test: `tests/test_tool_catalog.py` contract is being added before implementation. |
+| M4.1 Define tool catalog | `complete` | AC-06, AC-09 | Test: `tests/test_tool_catalog.py` - PASS (11; `tools.py` 100% coverage).<br>Validation: `make test-critical` - PASS (11 selected); `make verify` - PASS (101 tests, 96.30% coverage, clean migration).<br>Evidence: the closed catalog declares exactly six reviewed tools with strict Pydantic inputs, per-tool scopes, compensation metadata, opaque workflow-step idempotency keys, and no effect implementation.<br>Commit: `55ca577` pushed to `origin/main`. |
 | M4.2 Implement `po_reroute:v1` | `not_started` | AC-08 | - |
 | M4.3 Persist workflow and step state | `not_started` | AC-08, AC-09 | - |
 | M4.4 Implement workflow executor | `not_started` | AC-06, AC-08, AC-09 | - |
@@ -159,10 +159,10 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-03 Provider authorization boundary | `complete` | Real PostgreSQL provider assertions prove Dana's authorized purchasing context is visible while Quinn cannot read purchasing ERP/mail/calendar data and Avery cannot read Dana's mailbox or calendar; providers additionally enforce actor context, scopes, plant visibility, record types, and record IDs. |
 | AC-04 Proactive detection and dedupe | `complete` | Unit and seeded PostgreSQL contracts prove the scoped detector emits only positive, source-version-bound stockout risks; canonical keys atomically deduplicate repeats and retain audit attempts. The M3.8 end-to-end test proves the duplicate Scenario A trigger reaches the same one pending approval. |
 | AC-05 Authorized safe planning | `complete` | Typed context re-resolves identity and preserves only authorized ERP, mail, and calendar evidence; deterministic filtering, strict schemas, and the fake LLM leave only safe bounded outcomes. The seeded M3.8 run proves the entire authorized path admits only Supplier Z and produces one gate-approved immutable pending plan. |
-| AC-06 Gate, scope, policy, and approval | `in_progress` | The Scenario A gate fails closed on stale evidence, scope, PO parameter/remainder, supplier, pricing, currency-authority, and approval-limit violations. A fresh gate-approved plan is now immutable in PostgreSQL and bound to its policy/source/expiry hash plus pending approval; stale, expired, altered, mismatched, or raced records are unapprovable. Tool-level revalidation remains M4. |
+| AC-06 Gate, scope, policy, and approval | `in_progress` | The Scenario A gate fails closed on stale evidence, scope, PO parameter/remainder, supplier, pricing, currency-authority, and approval-limit violations. A fresh gate-approved plan is now immutable in PostgreSQL and bound to its policy/source/expiry hash plus pending approval; stale, expired, altered, mismatched, or raced records are unapprovable. The M4.1 catalog declares every tool's required write scope; tool-level execution revalidation remains M4. |
 | AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
 | AC-08 Fixed Scenario A workflow | `not_started` | - |
-| AC-09 Idempotency, compensation, and recovery | `in_progress` | Workflow-step identity and idempotency keys are unique; persisted execution, compensation, and recovery behavior remain M4. |
+| AC-09 Idempotency, compensation, and recovery | `in_progress` | The M4.1 catalog derives opaque, stable keys from workflow instance, step, declared tool, and canonical typed input, and assigns compensation metadata to every reviewed effect. Persisted execution, compensation, and recovery behavior remain M4. |
 | AC-10 Durable scheduler and Tuesday loop | `in_progress` | Scheduled-task idempotency keys are unique; durable claiming and Tuesday receipt behavior remain M5. |
 | AC-11 Append-only audit reconstruction | `not_started` | - |
 | AC-12 Scenario B free-form path | `in_progress` | The reusable scoped-provider, planner, audit, and scheduler boundaries are established; Scenario B behavior remains M6. |
@@ -219,3 +219,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M3.8 | Started cross-boundary Scenario A safe-planning verification. | Test: `tests/test_safe_planning.py` critical seeded flow is being added; this verification-only task requires no production-code RED cycle. | Pending test validation. |
 | 2026-08-25 | M3.8 | Completed cross-boundary Scenario A safe-planning verification. | Test: `tests/test_safe_planning.py` - PASS; critical suite - PASS (9); non-integration suite - PASS (78, 96.01% coverage); format, lint, mypy, clean migration, and current demo command - PASS. | `45d314d` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M4.1 | Started the declared tool-catalog contract. | Test: `tests/test_tool_catalog.py` is being added before implementation. | Pending RED checkpoint. |
+| 2026-08-25 | M4.1 | Completed the declared, non-executing tool catalog. | Test: `tests/test_tool_catalog.py` - PASS (11; `tools.py` 100% direct coverage); `make test-critical` - PASS (11); `make verify` - PASS (101, 96.30% coverage, migration). | `55ca577` pushed to `origin/main`; status completion record pending this commit. |
