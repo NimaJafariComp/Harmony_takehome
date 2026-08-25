@@ -5,6 +5,10 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 
 def rendered_compose_configuration() -> dict[str, Any]:
     """Render Compose configuration exactly as Docker will interpret it."""

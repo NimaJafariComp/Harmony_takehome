@@ -8,6 +8,8 @@ from typer.testing import CliRunner
 from enterprise_agent import cli
 from enterprise_agent.config import ConfigurationError, load_settings
 
+pytestmark = pytest.mark.unit
+
 
 def configured_openai_environment() -> dict[str, str]:
     """Return a complete non-secret environment for the OpenAI profile."""

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 
 def run_make(*arguments: str) -> subprocess.CompletedProcess[str]:
     """Run Make without hiding its output when a target is unavailable."""

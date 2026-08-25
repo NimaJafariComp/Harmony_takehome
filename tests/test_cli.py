@@ -5,6 +5,8 @@ from typer.testing import CliRunner
 
 from enterprise_agent import cli
 
+pytestmark = pytest.mark.unit
+
 
 def test_version_command_reports_package_version() -> None:
     """The CLI exposes the package version for diagnostics."""

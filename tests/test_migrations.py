@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
     """Run a Compose command and expose useful diagnostics on failure."""
@@ -17,44 +21,18 @@ def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
     return result
 
 
-def reset_database() -> None:
-    """Return the running Compose database to a clean state for this test."""
-    compose("up", "-d", "--wait", "db")
-    compose(
-        "exec",
-        "-T",
-        "db",
-        "psql",
-        "-U",
-        "enterprise_agent",
-        "-d",
-        "postgres",
-        "-c",
-        "DROP DATABASE IF EXISTS enterprise_agent WITH (FORCE)",
-    )
-    compose(
-        "exec",
-        "-T",
-        "db",
-        "psql",
-        "-U",
-        "enterprise_agent",
-        "-d",
-        "postgres",
-        "-c",
-        "CREATE DATABASE enterprise_agent",
-    )
-
-
-def test_baseline_migration_applies_to_a_clean_compose_database() -> None:
+def test_baseline_migration_applies_to_a_clean_compose_database(
+    disposable_database: str,
+) -> None:
     """The private migration runner must upgrade an empty database to baseline."""
-    reset_database()
 
     compose(
         "--profile",
         "tools",
         "run",
         "--rm",
+        "-e",
+        f"DATABASE_URL={disposable_database}",
         "app",
         "alembic",
         "upgrade",
@@ -62,16 +40,14 @@ def test_baseline_migration_applies_to_a_clean_compose_database() -> None:
     )
 
     version = compose(
-        "exec",
-        "-T",
-        "db",
-        "psql",
-        "-U",
-        "enterprise_agent",
-        "-d",
-        "enterprise_agent",
-        "-At",
-        "-c",
-        "SELECT version_num FROM alembic_version",
+        "--profile",
+        "tools",
+        "run",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={disposable_database}",
+        "app",
+        "alembic",
+        "current",
     )
-    assert version.stdout.strip() == "20260825_0001"
+    assert "20260825_0001 (head)" in version.stdout
