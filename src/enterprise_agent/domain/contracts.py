@@ -178,6 +178,7 @@ class Plan:
     plan_id: PlanId
     attention_id: AttentionId
     actor_id: UserId
+    approver_id: UserId
     intent: str
     workflow_name: str | None
     workflow_version: int | None

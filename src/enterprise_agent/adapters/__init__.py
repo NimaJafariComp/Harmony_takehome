@@ -4,6 +4,7 @@ from enterprise_agent.domain import InvalidAttentionTransitionError
 
 from .attention import PostgresAttentionAdapter
 from .identity import IdentityNotFoundError, PostgresIdentityAdapter
+from .plan_approvals import PostgresPlanApprovalAdapter
 from .providers import (
     PostgresCalendarAdapter,
     PostgresErpAdapter,
@@ -19,5 +20,6 @@ __all__ = [
     "PostgresErpAdapter",
     "PostgresIdentityAdapter",
     "PostgresMailAdapter",
+    "PostgresPlanApprovalAdapter",
     "UnsupportedEvidenceTypeError",
 ]

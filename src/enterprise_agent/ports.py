@@ -10,12 +10,15 @@ from typing import Protocol, runtime_checkable
 
 from enterprise_agent.domain import (
     ActorContext,
+    Approval,
+    ApprovalId,
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
     AuditEvent,
     DateRange,
     Evidence,
+    Plan,
     RunId,
     ScenarioAStockoutTrigger,
     ScheduledTask,
@@ -118,6 +121,28 @@ class AttentionPort(Protocol):
         occurred_at: datetime,
     ) -> AttentionItem:
         """Advance one attention item only from its known current state."""
+        ...
+
+
+@runtime_checkable
+class PlanApprovalPort(Protocol):
+    """Persist immutable plans and atomically advance only their bound approval records."""
+
+    def create_pending(self, plan: Plan, approval: Approval) -> None:
+        """Store one immutable plan and its pending approval in the same transaction."""
+        ...
+
+    def load(self, approval_id: ApprovalId) -> tuple[Plan, Approval] | None:
+        """Load the exact plan and approval pair needed for a pre-decision validation."""
+        ...
+
+    def approve(
+        self,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decided_at: datetime,
+    ) -> Approval | None:
+        """Atomically approve one still-pending, still-unexpired plan-hash binding."""
         ...
 
 

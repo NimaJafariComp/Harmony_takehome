@@ -96,7 +96,9 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert expected_tables.issubset(schema["tables"])
     assert {"email", "role", "approval_limit_amount"}.issubset(schema["columns"]["users"])
     assert {"part_id", "supplier_id", "status"}.issubset(schema["columns"]["purchase_orders"])
-    assert {"plan_hash", "policy_version", "source_versions"}.issubset(schema["columns"]["plans"])
+    assert {"approver_id", "plan_hash", "policy_version", "source_versions"}.issubset(
+        schema["columns"]["plans"]
+    )
     assert {"payload", "lease_expires_at", "idempotency_key"}.issubset(
         schema["columns"]["scheduled_tasks"]
     )
@@ -105,6 +107,7 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         schema["foreign_keys"]["purchase_orders"]
     )
     assert "attention_id->attention_items" in schema["foreign_keys"]["plans"]
+    assert "approver_id->users" in schema["foreign_keys"]["plans"]
     assert "plan_id->plans" in schema["foreign_keys"]["workflow_instances"]
     assert "workflow_instance_id->workflow_instances" in schema["foreign_keys"]["workflow_steps"]
     assert "ix_purchase_orders_part_id_status" in schema["indexes"]["purchase_orders"]

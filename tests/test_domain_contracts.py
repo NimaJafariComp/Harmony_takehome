@@ -88,6 +88,7 @@ def test_planning_contracts_bind_actor_evidence_plan_and_approval_immutably() ->
         plan_id=PlanId("plan-reroute"),
         attention_id=attention.attention_id,
         actor_id=actor.user_id,
+        approver_id=UserId("dana"),
         intent="enter_workflow",
         workflow_name="po_reroute",
         workflow_version=1,

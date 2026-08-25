@@ -7,12 +7,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 import pytest
 
+from enterprise_agent.application.approvals import ScenarioAApprovalService
 from enterprise_agent.application.context import AuthorizedContextBundle
 from enterprise_agent.application.gate import GateDecision, GateStatus
-from enterprise_agent.application.planning import EnterWorkflowRecommendation
+from enterprise_agent.application.planning import (
+    EnterWorkflowRecommendation,
+    ScenarioARecommendation,
+)
 from enterprise_agent.domain import (
     ActorContext,
     Approval,
@@ -123,7 +128,7 @@ class RecordingGate:
     def evaluate(
         self,
         context: AuthorizedContextBundle,
-        recommendation: EnterWorkflowRecommendation,
+        recommendation: ScenarioARecommendation,
         *,
         current_source_versions: Mapping[str, int],
     ) -> GateDecision:
@@ -171,6 +176,19 @@ class MemoryPlanApprovalStore:
         return approved
 
 
+class CasLostPlanApprovalStore(MemoryPlanApprovalStore):
+    """Simulate another worker winning the persistent approval compare-and-swap race."""
+
+    def approve(
+        self,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decided_at: datetime,
+    ) -> Approval | None:
+        self.approve_calls += 1
+        return None
+
+
 def _pending_decision() -> GateDecision:
     """Return the sole gate outcome permitted to create a write-capable approval record."""
     return GateDecision(
@@ -182,10 +200,155 @@ def _pending_decision() -> GateDecision:
     )
 
 
-def _service() -> tuple[object, MemoryPlanApprovalStore, RecordingGate]:
-    """Build the application service with deterministic control-plane collaborators."""
-    from enterprise_agent.application.approvals import ScenarioAApprovalService
+def _stored_plan() -> Plan:
+    """Build one fully hash-bound plan record for PostgreSQL adapter mapping tests."""
+    from enterprise_agent.application.approvals import recompute_plan_hash
 
+    plan = Plan(
+        plan_id=PlanId("00000000-0000-0000-0000-000000000701"),
+        attention_id=AttentionId("00000000-0000-0000-0000-000000000601"),
+        actor_id=UserId("00000000-0000-0000-0000-000000000001"),
+        approver_id=UserId("00000000-0000-0000-0000-000000000001"),
+        intent="enter_workflow",
+        workflow_name="po_reroute",
+        workflow_version=1,
+        parameters={"quantity": "60", "supplier_id": "supplier-z"},
+        source_versions={"erp:purchase_order:po-4812-y": 2},
+        policy_version="scenario_a_policy:v1",
+        plan_hash="",
+        created_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+    return replace(plan, plan_hash=recompute_plan_hash(plan))
+
+
+def _stored_approval(plan: Plan, *, status: ApprovalStatus = ApprovalStatus.PENDING) -> Approval:
+    """Build the approval whose binding must exactly match the supplied immutable plan."""
+    return Approval(
+        approval_id=ApprovalId("00000000-0000-0000-0000-000000000801"),
+        plan_id=plan.plan_id,
+        plan_hash=plan.plan_hash,
+        requester_id=plan.actor_id,
+        approver_id=plan.approver_id,
+        status=status,
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+        decided_at=None if status is ApprovalStatus.PENDING else NOW + timedelta(minutes=1),
+    )
+
+
+def _joined_row(plan: Plan, approval: Approval) -> dict[str, object]:
+    """Return the named SQL mapping shape owned by the plan/approval adapter's join query."""
+    return {
+        "plan_id": str(plan.plan_id),
+        "attention_id": str(plan.attention_id),
+        "actor_id": str(plan.actor_id),
+        "plan_approver_id": str(plan.approver_id),
+        "intent": plan.intent,
+        "workflow_name": plan.workflow_name,
+        "workflow_version": plan.workflow_version,
+        "parameters": dict(plan.parameters),
+        "source_versions": dict(plan.source_versions),
+        "policy_version": plan.policy_version,
+        "persisted_plan_hash": plan.plan_hash,
+        "plan_created_at": plan.created_at,
+        "plan_expires_at": plan.expires_at,
+        "approval_id": str(approval.approval_id),
+        "approval_plan_hash": approval.plan_hash,
+        "requester_id": str(approval.requester_id),
+        "approval_approver_id": str(approval.approver_id),
+        "approval_status": approval.status.value,
+        "requested_at": approval.requested_at,
+        "approval_expires_at": approval.expires_at,
+        "decided_at": approval.decided_at,
+    }
+
+
+def _approval_row(approval: Approval) -> dict[str, object]:
+    """Return the named SQL mapping shape produced by the approval compare-and-swap update."""
+    return {
+        "id": str(approval.approval_id),
+        "plan_id": str(approval.plan_id),
+        "plan_hash": approval.plan_hash,
+        "requester_id": str(approval.requester_id),
+        "approver_id": str(approval.approver_id),
+        "status": approval.status.value,
+        "requested_at": approval.requested_at,
+        "expires_at": approval.expires_at,
+        "decided_at": approval.decided_at,
+    }
+
+
+def test_postgres_adapter_persists_and_maps_the_atomic_plan_approval_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The adapter sends both immutable records through one transaction and maps loaded values."""
+    from enterprise_agent.adapters import plan_approvals
+
+    plan = _stored_plan()
+    approval = _stored_approval(plan)
+    engine = MagicMock()
+    begin_connection = engine.begin.return_value.__enter__.return_value
+    loaded_result = MagicMock()
+    loaded_result.mappings.return_value.one_or_none.return_value = _joined_row(plan, approval)
+    connect_connection = engine.connect.return_value.__enter__.return_value
+    connect_connection.execute.return_value = loaded_result
+    monkeypatch.setattr(plan_approvals, "create_engine", lambda _: engine)
+    adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
+
+    adapter.create_pending(plan, approval)
+    loaded = adapter.load(approval.approval_id)
+
+    from enterprise_agent.ports import PlanApprovalPort
+
+    assert isinstance(adapter, PlanApprovalPort)
+    assert begin_connection.execute.call_count == 2
+    assert loaded == (plan, approval)
+
+
+def test_postgres_adapter_returns_no_record_for_an_unknown_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An absent approval remains absent at the storage boundary instead of being synthesized."""
+    from enterprise_agent.adapters import plan_approvals
+
+    engine = MagicMock()
+    result = MagicMock()
+    result.mappings.return_value.one_or_none.return_value = None
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value = result
+    monkeypatch.setattr(plan_approvals, "create_engine", lambda _: engine)
+    adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
+
+    assert adapter.load(ApprovalId("00000000-0000-0000-0000-000000000899")) is None
+
+
+@pytest.mark.parametrize("returned_row", [None, "approved"])
+def test_postgres_adapter_approval_compare_and_swap_maps_only_a_returned_row(
+    monkeypatch: pytest.MonkeyPatch, returned_row: str | None
+) -> None:
+    """A concurrent or expired approval race returns no decision instead of falsely succeeding."""
+    from enterprise_agent.adapters import plan_approvals
+
+    plan = _stored_plan()
+    approved = _stored_approval(plan, status=ApprovalStatus.APPROVED)
+    engine = MagicMock()
+    result = MagicMock()
+    result.mappings.return_value.one_or_none.return_value = (
+        None if returned_row is None else _approval_row(approved)
+    )
+    connection = engine.begin.return_value.__enter__.return_value
+    connection.execute.return_value = result
+    monkeypatch.setattr(plan_approvals, "create_engine", lambda _: engine)
+    adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
+
+    outcome = adapter.approve(approved.approval_id, plan.plan_hash, NOW + timedelta(minutes=1))
+
+    assert outcome == (None if returned_row is None else approved)
+
+
+def _service() -> tuple[ScenarioAApprovalService, MemoryPlanApprovalStore, RecordingGate]:
+    """Build the application service with deterministic control-plane collaborators."""
     store = MemoryPlanApprovalStore()
     gate = RecordingGate(_pending_decision())
     return ScenarioAApprovalService(store, gate=gate), store, gate
@@ -258,9 +421,29 @@ def test_service_refuses_to_persist_a_plan_when_the_gate_did_not_hold_it_for_app
     assert store.create_calls == 0
 
 
+def test_service_refuses_an_already_expired_plan_request_before_calling_the_gate() -> None:
+    """A pending approval can never be created with an invalid or zero-length validity window."""
+    from enterprise_agent.application.approvals import PlanNotApprovableError
+
+    service, store, gate = _service()
+    context = _context()
+
+    with pytest.raises(PlanNotApprovableError, match="expiry"):
+        service.request_pending(
+            context,
+            _recommendation(),
+            current_source_versions=context.source_versions,
+            policy_version="scenario_a_policy:v1",
+            requested_at=NOW,
+            expires_at=NOW,
+        )
+
+    assert store.create_calls == 0
+    assert gate.current_source_versions is None
+
+
 def test_service_approves_only_an_unexpired_hash_and_source_version_match() -> None:
     """The approval decision is a compare-and-swap over the exact approved plan snapshot."""
-    from enterprise_agent.application.approvals import ScenarioAApprovalService
 
     service, store, _ = _service()
     context = _context()
@@ -356,6 +539,76 @@ def test_service_rejects_a_loaded_plan_whose_immutable_content_no_longer_matches
     assert store.approve_calls == 0
 
 
+def test_service_rejects_unknown_non_pending_and_lost_compare_and_swap_approvals() -> None:
+    """Approval races and already-decided requests cannot become duplicate executable authority."""
+    from enterprise_agent.application.approvals import (
+        PlanNotApprovableError,
+        ScenarioAApprovalService,
+    )
+
+    service, store, _ = _service()
+    context = _context()
+    result = service.request_pending(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+        policy_version="scenario_a_policy:v1",
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+
+    with pytest.raises(PlanNotApprovableError, match="does not exist"):
+        service.approve(
+            approval_id=ApprovalId("00000000-0000-0000-0000-000000000899"),
+            expected_plan_hash=result.plan.plan_hash,
+            current_source_versions=context.source_versions,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+
+    stored_plan, stored_approval = store.records[result.approval.approval_id]
+    store.records[result.approval.approval_id] = (
+        stored_plan,
+        replace(stored_approval, status=ApprovalStatus.REJECTED),
+    )
+    with pytest.raises(PlanNotApprovableError, match="no longer pending"):
+        service.approve(
+            approval_id=result.approval.approval_id,
+            expected_plan_hash=result.plan.plan_hash,
+            current_source_versions=context.source_versions,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+
+    race_store = CasLostPlanApprovalStore()
+    race_service = ScenarioAApprovalService(race_store, gate=RecordingGate(_pending_decision()))
+    race_result = race_service.request_pending(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+        policy_version="scenario_a_policy:v1",
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+    with pytest.raises(PlanNotApprovableError, match="atomically"):
+        race_service.approve(
+            approval_id=race_result.approval.approval_id,
+            expected_plan_hash=race_result.plan.plan_hash,
+            current_source_versions=context.source_versions,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+
+    assert race_store.approve_calls == 1
+
+
+def test_plan_hash_rejects_non_canonical_parameter_values() -> None:
+    """A value the canonical serializer cannot represent can never receive an approval hash."""
+    from enterprise_agent.application.approvals import PlanNotApprovableError, recompute_plan_hash
+
+    plan = replace(_stored_plan(), parameters={"unsafe": object()})
+
+    with pytest.raises(PlanNotApprovableError, match="non-canonical"):
+        recompute_plan_hash(plan)
+
+
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
     """Run a Compose command and retain diagnostics if it fails."""
     result = subprocess.run(
@@ -429,6 +682,13 @@ def test_postgres_records_are_hash_bound_immutable_and_approval_cas_is_durable(
         "    pass\n"
         "else:\n"
         "    raise AssertionError('plans must reject direct mutation')\n"
+        "try:\n"
+        "    with create_engine(database_url).begin() as connection:\n"
+        "        connection.execute(text(\"UPDATE approvals SET plan_hash = 'sha256:tampered' WHERE id = CAST(:approval_id AS UUID)\"), {'approval_id': str(result.approval.approval_id)})\n"
+        "except IntegrityError:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise AssertionError('approvals must retain their plan hash binding')\n"
         "with create_engine(database_url).connect() as connection:\n"
         "    assert connection.execute(text('SELECT COUNT(*) FROM plans')).scalar_one() == 1\n"
         "    assert connection.execute(text(\"SELECT status FROM approvals WHERE id = CAST(:approval_id AS UUID)\"), {'approval_id': str(result.approval.approval_id)}).scalar_one() == 'approved'\n"

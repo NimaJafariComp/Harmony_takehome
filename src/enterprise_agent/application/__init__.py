@@ -1,5 +1,11 @@
 """Application services that compose domain policy with typed ports."""
 
+from .approvals import (
+    PendingPlanApproval,
+    PlanNotApprovableError,
+    ScenarioAApprovalService,
+    recompute_plan_hash,
+)
 from .candidates import (
     SupplierCandidate,
     SupplierCandidateFilter,
@@ -36,6 +42,9 @@ __all__ = [
     "ManualReviewRecommendation",
     "MissingScenarioAContextEvidenceError",
     "NoActionRecommendation",
+    "PendingPlanApproval",
+    "PlanNotApprovableError",
+    "ScenarioAApprovalService",
     "ScenarioAContextAssembler",
     "ScenarioAGate",
     "ScenarioARecommendation",
@@ -48,5 +57,6 @@ __all__ = [
     "SupplierCandidateResult",
     "SupplierExclusion",
     "SupplierExclusionReason",
+    "recompute_plan_hash",
     "validate_scenario_a_recommendation",
 ]
