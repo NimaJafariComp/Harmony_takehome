@@ -67,15 +67,26 @@ def test_tool_inputs_are_closed_and_reject_non_actionable_values() -> None:
         production_order_id="production-4812",
         quantity=Decimal(60),
     )
+    scheduled_check = ScheduleArrivalCheckInput(purchase_order_id="po-4812-y", due_at=NOW)
+    allocation = ReallocateLotInput(
+        quality_lot_id="lot-1",
+        from_production_order_id="production-4812",
+        to_production_order_id="production-4813",
+        quantity=Decimal(1),
+    )
 
     assert replacement.quantity == Decimal(60)
+    assert scheduled_check.due_at == NOW
+    assert allocation.to_production_order_id == "production-4813"
     with pytest.raises(ValidationError):
-        CreateReplacementPOInput(
-            original_purchase_order_id="po-4812-y",
-            supplier_id="supplier-z",
-            production_order_id="production-4812",
-            quantity=Decimal(0),
-            unapproved_argument="do this too",
+        CreateReplacementPOInput.model_validate(
+            {
+                "original_purchase_order_id": "po-4812-y",
+                "supplier_id": "supplier-z",
+                "production_order_id": "production-4812",
+                "quantity": Decimal(0),
+                "unapproved_argument": "do this too",
+            }
         )
     with pytest.raises(ValidationError):
         ReallocateLotInput(
@@ -144,6 +155,12 @@ def test_tool_idempotency_key_is_stable_for_a_workflow_step_and_bound_to_its_inp
     assert first != build_tool_idempotency_key(
         workflow_id, 4, ToolName.CREATE_REPLACEMENT_PO, input_value
     )
+    assert first != build_tool_idempotency_key(
+        WorkflowId("00000000-0000-0000-0000-000000000902"),
+        3,
+        ToolName.CREATE_REPLACEMENT_PO,
+        input_value,
+    )
     assert "po-4812-y" not in first
     assert len(first) <= 255
 
@@ -152,13 +169,25 @@ def test_tool_idempotency_rejects_an_undeclared_input_for_the_tool() -> None:
     """A workflow cannot pair an allowed tool name with a schema from another tool."""
     from enterprise_agent.application.tools import (
         CreateReplacementPOInput,
+        NotifyProductionInput,
         ToolName,
         build_tool_idempotency_key,
     )
 
+    workflow_id = WorkflowId("00000000-0000-0000-0000-000000000901")
+    with pytest.raises(TypeError, match="input schema"):
+        build_tool_idempotency_key(
+            workflow_id,
+            3,
+            ToolName.CREATE_REPLACEMENT_PO,
+            NotifyProductionInput(
+                production_order_id="production-4812",
+                message="A replacement purchase order is pending.",
+            ),
+        )
     with pytest.raises(ValueError, match="step index"):
         build_tool_idempotency_key(
-            WorkflowId("00000000-0000-0000-0000-000000000901"),
+            workflow_id,
             0,
             ToolName.CREATE_REPLACEMENT_PO,
             CreateReplacementPOInput(
@@ -168,3 +197,11 @@ def test_tool_idempotency_rejects_an_undeclared_input_for_the_tool() -> None:
                 quantity=Decimal(60),
             ),
         )
+
+
+def test_catalog_rejects_a_tool_name_outside_the_allowlist() -> None:
+    """A caller cannot turn a string into an undeclared capability at runtime."""
+    from enterprise_agent.application.tools import ToolNotDeclaredError, tool_definition
+
+    with pytest.raises(ToolNotDeclaredError, match="not declared"):
+        tool_definition("arbitrary_http_call")
