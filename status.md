@@ -94,7 +94,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M4.1 Define tool catalog | `complete` | AC-06, AC-09 | Test: `tests/test_tool_catalog.py` - PASS (11; `tools.py` 100% coverage).<br>Validation: `make test-critical` - PASS (11 selected); `make verify` - PASS (101 tests, 96.30% coverage, clean migration).<br>Evidence: the closed catalog declares exactly six reviewed tools with strict Pydantic inputs, per-tool scopes, compensation metadata, opaque workflow-step idempotency keys, and no effect implementation.<br>Commit: `55ca577` pushed to `origin/main`. |
-| M4.2 Implement `po_reroute:v1` | `not_started` | AC-08 | - |
+| M4.2 Implement `po_reroute:v1` | `in_progress` | AC-08 | Test: `tests/test_po_reroute_workflow.py` contract is being added before implementation. |
 | M4.3 Persist workflow and step state | `not_started` | AC-08, AC-09 | - |
 | M4.4 Implement workflow executor | `not_started` | AC-06, AC-08, AC-09 | - |
 | M4.5 Implement external-style tool boundaries | `not_started` | AC-09, AC-11 | - |
@@ -220,3 +220,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M3.8 | Completed cross-boundary Scenario A safe-planning verification. | Test: `tests/test_safe_planning.py` - PASS; critical suite - PASS (9); non-integration suite - PASS (78, 96.01% coverage); format, lint, mypy, clean migration, and current demo command - PASS. | `45d314d` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M4.1 | Started the declared tool-catalog contract. | Test: `tests/test_tool_catalog.py` is being added before implementation. | Pending RED checkpoint. |
 | 2026-08-25 | M4.1 | Completed the declared, non-executing tool catalog. | Test: `tests/test_tool_catalog.py` - PASS (11; `tools.py` 100% direct coverage); `make test-critical` - PASS (11); `make verify` - PASS (101, 96.30% coverage, migration). | `55ca577` pushed to `origin/main`; status completion record pending this commit. |
+| 2026-08-25 | M4.2 | Started the fixed `po_reroute:v1` workflow-definition contract. | Test: `tests/test_po_reroute_workflow.py` is being added before implementation. | Pending RED checkpoint. |
