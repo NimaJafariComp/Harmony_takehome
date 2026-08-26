@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid5
 
@@ -32,6 +32,8 @@ DEMO_CLOCK_ID = 1
 DEMO_CLOCK_START = datetime(2026, 8, 24, 9, tzinfo=UTC)
 DEMO_TUESDAY = datetime(2026, 8, 25, 9, tzinfo=UTC)
 DEMO_CREATED_AT = datetime(2026, 8, 20, 9, tzinfo=UTC)
+SCENARIO_A_PRODUCTION_START = DEMO_CLOCK_START.date() + timedelta(days=2)
+SCENARIO_A_DELAYED_RECEIPT = DEMO_CLOCK_START.date() + timedelta(days=4)
 PLANT_CHICAGO = "PLANT-CHI"
 
 ID_DANA = UUID("00000000-0000-0000-0000-000000000001")
@@ -310,7 +312,7 @@ SEED_ROWS = (
             "plant_id": PLANT_CHICAGO,
             "supervisor_id": ID_PRIYA,
             "required_quantity": Decimal("100.000"),
-            "start_date": DEMO_TUESDAY.date().replace(day=27),
+            "start_date": SCENARIO_A_PRODUCTION_START,
             "status": "scheduled",
             "created_at": DEMO_CREATED_AT,
             "updated_at": DEMO_CREATED_AT,
@@ -357,7 +359,7 @@ SEED_ROWS = (
             "ordered_quantity": Decimal("100.000"),
             "received_quantity": Decimal("40.000"),
             "status": "delayed",
-            "expected_receipt_date": DEMO_TUESDAY.date(),
+            "expected_receipt_date": SCENARIO_A_DELAYED_RECEIPT,
             "source_version": 2,
             "created_at": DEMO_CREATED_AT,
             "updated_at": DEMO_CLOCK_START,
@@ -490,11 +492,11 @@ SEED_ROWS = (
             "sender": "operations@supplier-y.example",
             "recipient": "dana.buyer@example.com",
             "subject": "PO-4812-Y shipment update",
-            "body": "Current estimate: remaining quantity arrives Tuesday.",
+            "body": "Current estimate: remaining quantity arrives Friday, August 28.",
             "received_at": DEMO_CLOCK_START,
             "payload": {
                 "current": True,
-                "expected_receipt_date": DEMO_TUESDAY.date().isoformat(),
+                "expected_receipt_date": SCENARIO_A_DELAYED_RECEIPT.isoformat(),
                 "shipment_status": "delayed",
             },
         },

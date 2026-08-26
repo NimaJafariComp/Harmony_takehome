@@ -202,11 +202,11 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
         "users": 4,
     }
     assert first_seed["scenario_a"]["production"] == [
-        {"order_number": "4812", "required_quantity": "100.000", "start_date": "2026-08-27"}
+        {"order_number": "4812", "required_quantity": "100.000", "start_date": "2026-08-26"}
     ]
     assert first_seed["scenario_a"]["purchase_order"] == [
         {
-            "expected_receipt_date": "2026-08-25",
+            "expected_receipt_date": "2026-08-28",
             "po_number": "PO-4812-Y",
             "received_quantity": "40.000",
             "source_version": 2,
