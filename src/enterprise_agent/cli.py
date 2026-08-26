@@ -2148,7 +2148,12 @@ def _render_llm_evaluation(
                 ", ".join(observation.expected_outcomes),
                 observation.observed_outcome or "no structured outcome",
                 observation.status.value,
-                ", ".join(f"{name}={state.value}" for name, state in observation.checks.items()),
+                ", ".join(f"{name}={state.value}" for name, state in observation.checks.items())
+                + (
+                    "; mismatched fields: " + ", ".join(observation.reference_mismatches)
+                    if observation.reference_mismatches
+                    else ""
+                ),
             )
             for observation in report.observations
         ),

@@ -125,7 +125,7 @@ class FixedClock:
         return NOW
 
 
-def test_openrouter_adapter_supplies_output_schema_without_provider_fallbacks_and_audits_metadata() -> (
+def test_openrouter_adapter_enforces_native_output_schema_without_provider_fallbacks_and_audits_metadata() -> (
     None
 ):
     """A valid JSON result is validated canonically while routing stays pinned to the chosen model."""
@@ -163,7 +163,6 @@ def test_openrouter_adapter_supplies_output_schema_without_provider_fallbacks_an
     assert "Return only JSON" in messages[0]["content"]
     assert messages[1]["role"] == "user"
     payload = json.loads(cast(str, messages[1]["content"]))
-    output_schema = cast(dict[str, Any], payload.pop("output_schema"))
     assert payload == {
         "purpose": "scenario_a_recommendation",
         "response_schema": "scenario_a_recommendation:v1",
@@ -182,9 +181,13 @@ def test_openrouter_adapter_supplies_output_schema_without_provider_fallbacks_an
             }
         ],
     }
+    response_format = cast(dict[str, Any], request["response_format"])
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["name"] == "scenario_a_recommendation_v1"
+    assert response_format["json_schema"]["strict"] is True
+    output_schema = response_format["json_schema"]["schema"]
     assert output_schema["discriminator"]["propertyName"] == "outcome"
     assert output_schema["$defs"]["ManualReviewRecommendation"]["additionalProperties"] is False
-    assert "response_format" not in request
     assert API_KEY not in json.dumps(request)
     assert audit.events[0].event_type == "llm.completed"
     assert audit.events[0].payload == {
@@ -250,12 +253,12 @@ def test_openrouter_adapter_uses_the_declared_scenario_b_schema() -> None:
     request = transport.requests[0]
     messages = cast(list[dict[str, Any]], request["messages"])
     payload = json.loads(cast(str, messages[1]["content"]))
-    output_schema = cast(dict[str, Any], payload["output_schema"])
+    output_schema = cast(dict[str, Any], request["response_format"])["json_schema"]["schema"]
     assert result.status is LLMGenerationStatus.SUCCEEDED
     assert payload["response_schema"] == "scenario_b_recommendation:v1"
     assert output_schema["discriminator"]["propertyName"] == "outcome"
     assert output_schema["$defs"]["ReallocateLotInput"]["additionalProperties"] is False
-    assert "response_format" not in request
+    assert cast(dict[str, Any], request["response_format"])["json_schema"]["strict"] is True
 
 
 def test_openrouter_adapter_rejects_an_undeclared_schema_without_calling_the_provider() -> None:

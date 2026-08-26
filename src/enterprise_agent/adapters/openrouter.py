@@ -177,12 +177,10 @@ class OpenRouterChatCompletionsAdapter:
 
 
 def _request_for(prompt: PromptEnvelope, *, model: str) -> dict[str, object]:
-    """Build the only provider request without claiming unsupported response-format enforcement."""
-    output_schema = json_schema_for_recommendation(prompt.response_schema)
+    """Build the only provider request with native strict JSON Schema enforcement."""
     prompt_data = {
         "purpose": prompt.purpose,
         "response_schema": prompt.response_schema,
-        "output_schema": output_schema,
         "messages": [
             {"role": message.role, "content": message.content} for message in prompt.messages
         ],
@@ -197,6 +195,14 @@ def _request_for(prompt: PromptEnvelope, *, model: str) -> dict[str, object]:
             {"role": "user", "content": json.dumps(prompt_data, default=_json_default)},
         ],
         "provider": dict(_SAFE_PROVIDER_ROUTING),
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": prompt.response_schema.replace(":", "_"),
+                "strict": True,
+                "schema": json_schema_for_recommendation(prompt.response_schema),
+            },
+        },
     }
 
 

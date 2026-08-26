@@ -39,11 +39,10 @@ docker compose --profile tools run --rm app enterprise-agent demo --list
 To use the terminal shell against the Compose database:
 
 ```sh
-docker compose up --wait db
-docker compose --profile tools run --rm app enterprise-agent
+make tui
 ```
 
-The second command opens the keyboard-first Home screen. Choose **Guided company demo**, **Normal operator mode**, or **Configure an LLM profile**. Direct commands remain available for scripts and documentation.
+This starts the private database, applies migrations, and opens the keyboard-first Home screen. Direct commands remain available for scripts and documentation.
 
 ## Local development
 
@@ -69,12 +68,66 @@ enterprise-agent
 
 This command-line interface (CLI) is keyboard-only and renders bounded panels and tables. In a pipe, or with `--output json`, it never prompts and instead returns the safe command directory. All JSON output uses a versioned, sanitized envelope. Use `--no-color` for plain terminal output.
 
+### Home menu
+
+Run `make tui`, then choose one of these modes:
+
+| Key | Mode | What it does | Safety boundary |
+|---:|---|---|---|
+| 1 | Guided company demo | Runs the deterministic Scenario A, B, and C walkthroughs or the short safety tour. | Resets and seeds only the local synthetic database. It never calls an LLM or executes a business-system effect. |
+| 2 | Guarded live local demo | Sends one fixed synthetic Scenario A, B, or C context to one selected provider and stages its proposal for review. | Requires a configured profile, a fixed case, and typing `live` to confirm. It may create only local attention, plan, approval, workflow, schedule, and audit records; it cannot execute a business effect. |
+| 3 | Normal operator mode | Opens read paths, provider checks, and the no-write live-evaluation pack. | Each action states whether it is read-only or makes an explicit provider request. |
+| 4 | Configure an LLM profile | Selects one provider and reviewed model for this machine. | API-key input is hidden; saving remains explicitly confirmed. |
+
+The guarded live local demo is intentionally separate from the deterministic guided demo. The former makes one real provider request; the latter is the repeatable acceptance proof and requires no provider configuration.
+
+### Guided company demo cases
+
+Choose Home option 1, then select a case:
+
+| Key | Case | What it proves |
+|---:|---|---|
+| 1 | Safety tour | Runs the short cross-scenario deterministic proof set in its fixed order. |
+| 2 | Scenario A — viable reroute rejects the tempting supplier | An unapproved supplier is excluded even when it is cheaper and faster; the viable reroute stages a pending plan. |
+| 3 | Scenario A — recovery after replacement-PO crash | A restart resumes the original effect with its idempotency key and does not create a duplicate replacement purchase order. |
+| 4 | Scenario A — newest evidence and hostile email handling | Newer on-schedule supplier evidence produces no action; hostile email content remains evidence only. |
+| 5 | Scenario A — Tuesday arrival follow-up | A full receipt resolves attention; a partial or missing receipt produces one guarded follow-up. |
+| 6 | Scenario B — quality-lot capacity respects commitments | Released quality inventory is usable only when its free capacity covers demand. |
+| 7 | Scenario C — supplier-risk bulletin awaits review | A current authorized bulletin creates a local plan awaiting approval. |
+
+### Guarded live local demo cases
+
+Choose Home option 2, select a provider and one fixed case, then type `live` to confirm:
+
+| Case ID | Scenario | Provider proposal is limited to |
+|---|---|---|
+| `scenario-a-reroute` | A | A typed reroute recommendation that must pass schema and policy checks before it can stage approval. |
+| `scenario-b-quality-hold` | B | A typed quality-lot reallocation and notification recommendation that remains approval-gated. |
+| `scenario-c-supplier-risk` | C | A typed hold-and-notify recommendation that remains approval-gated. |
+
+### Normal operator menu
+
+Choose Home option 3 to reach these actions:
+
+| Key | Action | What it does | Safety boundary |
+|---:|---|---|---|
+| 1 | Control-plane status | Shows pending approvals, workflow state, recovery state, and copyable IDs. | Read-only local database query. |
+| 2 | Audit explanation | Reconstructs one durable run from the append-only ledger. Enter the run ID shown in status under **Audit actions**. | Read-only local query. |
+| 3 | LLM usage | Shows recorded token and cost totals. | Read-only local ledger query; no provider request. |
+| 4 | LLM profile setup | Opens the same hidden-key provider setup flow as Home option 4. | Saving a profile is explicitly confirmed. |
+| 5 | Provider smoke check | Sends one fixed, no-business-data probe to the active configured provider. | Explicit provider request; no business-system write. |
+| 6 | Live-evaluation catalogue | Lists the 13 fixed synthetic LLM safety cases, then lets you deliberately run one case or all cases. | Provider requests require confirmation. Evaluation has no workflow, ERP, mail, audit, or business-system write. |
+
+After an action finishes, its result stays on screen until you press Enter. Enter `b` from a nested menu to return Home and `q` from Home to quit.
+
 Useful direct commands:
 
 ```sh
 enterprise-agent guide
 enterprise-agent demo --list
 enterprise-agent demo --case scenario-a-reroute-bait
+enterprise-agent live-demo --list
+enterprise-agent live-demo --profile openai --case scenario-a-reroute
 enterprise-agent status
 enterprise-agent audit explain RUN_ID
 enterprise-agent llm-usage
