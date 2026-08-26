@@ -3,9 +3,10 @@
 import sys
 from datetime import timedelta
 from os import environ
-from typing import cast
+from typing import NoReturn, cast
 
 import typer
+from rich.console import Console
 
 from enterprise_agent import __version__
 from enterprise_agent.adapters import (
@@ -37,6 +38,7 @@ from enterprise_agent.llm_setup import (
     verify_credential,
 )
 from enterprise_agent.llm_usage import render_llm_usage, summarize_llm_usage
+from enterprise_agent.presentation import ConfirmationSummary, TerminalPresenter, TerminalTheme
 from enterprise_agent.seed import (
     SeedSafetyError,
     _require_local_demo_database,
@@ -53,6 +55,12 @@ clock_app = typer.Typer(help="Inspect and advance deterministic local-demo time.
 audit_app = typer.Typer(help="Reconstruct read-only operator stories from the audit ledger.")
 app.add_typer(clock_app, name="clock")
 app.add_typer(audit_app, name="audit")
+
+_CANCELLATION_WORD = "cancel"
+
+
+class InteractiveFlowCancelled(Exception):
+    """Raised when an operator explicitly cancels before a command creates a durable write."""
 
 
 @app.callback()
@@ -87,13 +95,19 @@ def llm_setup() -> None:
             err=True,
         )
         raise typer.Exit(code=1)
-    _interactive_llm_setup()
+    try:
+        _interactive_llm_setup()
+    except InteractiveFlowCancelled:
+        _exit_cancelled("configuration: cancelled; no settings were saved")
 
 
 @app.command()
 def run() -> None:
     """Bootstrap one configured LLM profile; full scenario execution is introduced with the M8 demo."""
-    configuration = _provider_configuration_or_setup(action="run")
+    try:
+        configuration = _provider_configuration_or_setup(action="run")
+    except InteractiveFlowCancelled:
+        _exit_cancelled("configuration: cancelled; no settings were saved")
     typer.echo(
         "run: LLM profile ready "
         f"(profile: {configuration.profile}, model: {configuration.model}); "
@@ -138,6 +152,19 @@ def reset() -> None:
     """Remove data from the strictly limited local demo database."""
     database_url = _database_url()
     try:
+        _confirm_local_write(
+            ConfirmationSummary(
+                action="Reset local demo data",
+                target="the local synthetic demo database",
+                effect="Removes only synthetic harness records and resets deterministic time.",
+                freshness="Any pending plan or workflow will no longer be available after reset.",
+                write_consequence="Deletes local demo records only; no provider request is made.",
+                confirmation_word="reset",
+            )
+        )
+    except InteractiveFlowCancelled:
+        _exit_cancelled("operation: cancelled; no data was written")
+    try:
         reset_database(database_url)
     except SeedSafetyError as error:
         typer.echo(f"database: reset refused ({error})", err=True)
@@ -150,6 +177,19 @@ def reset() -> None:
 def seed() -> None:
     """Insert the fixed dataset into the strictly limited local demo database."""
     database_url = _database_url()
+    try:
+        _confirm_local_write(
+            ConfirmationSummary(
+                action="Seed local demo data",
+                target="the local synthetic demo database",
+                effect="Inserts the fixed, deterministic harness dataset.",
+                freshness="The seed resets demo time and establishes the known evidence baseline.",
+                write_consequence="Writes local synthetic records only; no provider request is made.",
+                confirmation_word="seed",
+            )
+        )
+    except InteractiveFlowCancelled:
+        _exit_cancelled("operation: cancelled; no data was written")
     try:
         seed_database(database_url)
     except SeedSafetyError as error:
@@ -165,6 +205,23 @@ def scenario_c() -> None:
     database_url = _database_url(action="scenario-c")
     try:
         _require_local_demo_database(database_url, allow_test_database=False)
+    except (SeedSafetyError, ValueError) as error:
+        typer.echo(f"scenario-c: refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+    try:
+        _confirm_local_write(
+            ConfirmationSummary(
+                action="Stage Scenario C review",
+                target="the local synthetic supplier-risk scenario",
+                effect="Creates one pending approval and workflow; it does not hold a purchase order.",
+                freshness="Execution revalidates the approved plan's evidence before any hold.",
+                write_consequence="Writes only the local demo attention, plan, approval, and workflow.",
+                confirmation_word="stage",
+            )
+        )
+    except InteractiveFlowCancelled:
+        _exit_cancelled("operation: cancelled; no data was written")
+    try:
         staged = stage_scenario_c_pending(database_url, run_id=RunId("run-scenario-c-cli"))
     except (ScenarioCDeterministicRunError, SeedSafetyError, ValueError) as error:
         typer.echo(f"scenario-c: refused ({error})", err=True)
@@ -241,15 +298,23 @@ def _provider_configuration_or_setup(*, action: str) -> ProviderConfiguration:
 
 def _interactive_llm_setup() -> ProviderConfiguration:
     """Collect, optionally verify, and locally save one profile without echoing its secret key."""
-    typer.echo("Select an LLM provider: openai, claude, or openrouter.")
-    selected_profile = cast(str, typer.prompt("Provider"))
+    _terminal_presenter().render_header(
+        title="LLM setup",
+        subtitle="Choose one local provider profile. Type cancel at any prompt to leave without writing.",
+    )
+    typer.echo("Choose a provider: openai, claude, or openrouter.")
+    selected_profile = _prompt_with_cancellation("Provider")
     try:
         profile = normalize_llm_profile(selected_profile)
     except ValueError as error:
         typer.echo(f"configuration: setup refused ({error})", err=True)
         raise typer.Exit(code=1) from error
 
-    api_key = cast(str, typer.prompt(f"{profile.title()} API key", hide_input=True))
+    typer.echo(
+        "Your API key input is hidden. It is never displayed or logged; it is saved only if you "
+        "confirm this local profile."
+    )
+    api_key = _prompt_with_cancellation(f"{profile.title()} API key", hide_input=True)
     try:
         catalog = discover_compatible_models(profile, api_key)
     except (ModelDiscoveryError, ValueError) as error:
@@ -271,6 +336,16 @@ def _interactive_llm_setup() -> ProviderConfiguration:
 
     model = _prompt_model_choice(catalog)
     selection = LLMSetupSelection(profile=profile, api_key=api_key, model=model)
+    _confirm_local_write(
+        ConfirmationSummary(
+            action="Save local LLM profile",
+            target=f"{default_env_path().name} with owner-only permissions",
+            effect=f"Selects the {profile} provider profile and chosen model.",
+            freshness="Suggested models are adapter-reviewed and visible to this key; custom IDs are explicit.",
+            write_consequence="Writes the selected profile, key, and model while preserving other profiles.",
+            confirmation_word="save",
+        )
+    )
     try:
         save_llm_profile(default_env_path(), selection)
     except (OSError, ValueError) as error:
@@ -291,9 +366,9 @@ def _prompt_model_choice(catalog: tuple[CuratedModel, ...]) -> str:
         typer.echo(f"  {index}. {model.label}: {model.model_id}{marker}")
     custom_index = len(catalog) + 1
     typer.echo(f"  {custom_index}. Enter a custom model ID")
-    selection = cast(str, typer.prompt("Model choice", default="1")).strip().lower()
+    selection = _prompt_with_cancellation("Model choice", default="1").strip().lower()
     if selection == "custom" or selection == str(custom_index):
-        return cast(str, typer.prompt("Custom model ID"))
+        return _prompt_with_cancellation("Custom model ID")
     try:
         selected_index = int(selection)
     except ValueError as error:
@@ -301,6 +376,43 @@ def _prompt_model_choice(catalog: tuple[CuratedModel, ...]) -> str:
     if not 1 <= selected_index <= len(catalog):
         raise typer.BadParameter("choose a listed model number or custom")
     return catalog[selected_index - 1].model_id
+
+
+def _terminal_presenter() -> TerminalPresenter:
+    """Create one terminal-bound presentation adapter only after command semantics are known."""
+    return TerminalPresenter(console=Console(file=sys.stdout), theme=TerminalTheme())
+
+
+def _confirm_local_write(summary: ConfirmationSummary) -> None:
+    """Require an explicit keyboard confirmation only when an interactive terminal is available."""
+    if not _is_interactive_terminal():
+        return
+    _terminal_presenter().render_confirmation(summary)
+    expected = summary.confirmation_word.lower()
+    while True:
+        response = _prompt_with_cancellation("Confirmation").strip().lower()
+        if response == expected:
+            return
+        typer.echo(f"Enter {summary.confirmation_word} to continue or {_CANCELLATION_WORD} to stop.")
+
+
+def _prompt_with_cancellation(
+    message: str,
+    *,
+    default: str | None = None,
+    hide_input: bool = False,
+) -> str:
+    """Collect one terminal value while reserving an explicit cancellation key for safe exit."""
+    value = cast(str, typer.prompt(message, default=default, hide_input=hide_input))
+    if value.strip().lower() == _CANCELLATION_WORD:
+        raise InteractiveFlowCancelled
+    return value
+
+
+def _exit_cancelled(message: str) -> NoReturn:
+    """Return the documented cancellation exit code after guaranteeing no local write occurred."""
+    typer.echo(message)
+    raise typer.Exit(code=130)
 
 
 def _is_interactive_terminal() -> bool:

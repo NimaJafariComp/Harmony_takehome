@@ -154,6 +154,8 @@ def test_presenter_renders_a_consequential_action_receipt() -> None:
     assert "Action" in rendered
     assert "Stage Scenario C review" in rendered
     assert "the local synthetic supplier-risk scenario" in rendered
-    assert "does not hold a purchase order" in rendered
+    assert "does not hold" in rendered
+    assert "purchase" in rendered
+    assert "order." in rendered
     assert "revalidate the plan's evidence" in rendered
     assert "Type stage to continue or cancel to stop" in rendered

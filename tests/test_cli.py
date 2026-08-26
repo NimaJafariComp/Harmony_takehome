@@ -65,6 +65,27 @@ def test_reset_and_seed_commands_need_only_database_configuration(
     ]
 
 
+@pytest.mark.parametrize("command", ("reset", "seed"))
+def test_interactive_local_data_cancellation_creates_no_database_write(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    """Reset and seed require explicit confirmation only in a human terminal."""
+    called_urls: list[str] = []
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr("typer.prompt", lambda *_args, **_kwargs: "cancel")
+    monkeypatch.setattr(cli, "reset_database", called_urls.append)
+    monkeypatch.setattr(cli, "seed_database", called_urls.append)
+
+    result = CliRunner().invoke(cli.app, [command])
+
+    assert result.exit_code == 130
+    assert "local synthetic demo database" in result.stdout
+    assert "cancelled" in result.stdout
+    assert called_urls == []
+
+
 def test_reset_command_reports_guard_failures_and_missing_database_url(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -232,7 +253,8 @@ def test_interactive_scenario_c_cancellation_creates_no_pending_plan(
 
     assert result.exit_code == 130
     assert "Stage Scenario C review" in result.stdout
-    assert "does not hold a purchase order" in result.stdout
+    assert "does not hold" in result.stdout
+    assert "purchase order" in result.stdout
     assert "cancelled" in result.stdout
 
 

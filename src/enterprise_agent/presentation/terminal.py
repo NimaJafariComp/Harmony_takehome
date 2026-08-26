@@ -73,6 +73,18 @@ class StatusSummary:
 
 
 @dataclass(frozen=True)
+class ConfirmationSummary:
+    """Safe, command-owned facts an operator must see before a consequential write."""
+
+    action: str
+    target: str
+    effect: str
+    freshness: str
+    write_consequence: str
+    confirmation_word: str
+
+
+@dataclass(frozen=True)
 class ApprovalSummary:
     """Copyable approval facts selected by a command or application read model."""
 
@@ -155,6 +167,20 @@ class TerminalPresenter:
         if summary.next_action is not None:
             details.add_row("Next", summary.next_action)
         self.console.print(details)
+
+    def render_confirmation(self, summary: ConfirmationSummary) -> None:
+        """Render the command-owned decision receipt before a human confirms a write."""
+        details = self._detail_grid()
+        details.add_row("Action", summary.action)
+        details.add_row("Target", summary.target)
+        details.add_row("Effect", summary.effect)
+        details.add_row("Freshness", summary.freshness)
+        details.add_row("Writes", summary.write_consequence)
+        details.add_row(
+            "Confirm",
+            f"Type {summary.confirmation_word} to continue or cancel to stop.",
+        )
+        self.console.print(Panel(details, title="Confirm action", border_style=self.theme.attention_style))
 
     def render_approvals(self, approvals: tuple[ApprovalSummary, ...]) -> None:
         """Render approval facts, preserving every durable identifier in full."""

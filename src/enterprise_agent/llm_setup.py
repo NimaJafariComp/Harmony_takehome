@@ -332,6 +332,6 @@ def _safe_value(value: str, *, name: str) -> str:
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{name} is required")
-    if "\n" in normalized or "\r" in normalized or "\x00" in normalized:
-        raise ValueError(f"{name} must not contain line breaks or NUL")
+    if any(ord(character) < 32 or ord(character) == 127 for character in normalized):
+        raise ValueError(f"{name} must not contain terminal control characters")
     return normalized
