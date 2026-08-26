@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -70,6 +71,30 @@ class MemoryWorkflowStateStore:
         *,
         worker_id: str,
         expected_step_index: int,
+        completed_at: datetime,
+    ) -> Any | None:
+        return None
+
+    def start_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        started_at: datetime,
+    ) -> Any | None:
+        return None
+
+    def complete_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        result: Mapping[str, object],
+        finish_workflow: bool,
         completed_at: datetime,
     ) -> Any | None:
         return None
@@ -353,6 +378,126 @@ def test_postgres_adapter_claims_and_advances_only_one_leased_pending_guard(
     assert transaction.execute.call_args_list[0].args[1]["worker_id"] == "worker-a"
     assert transaction.execute.call_args_list[3].args[1]["expected_step_index"] == 1
     assert transaction.execute.call_args_list[3].args[1]["result"] == '{"guard": "confirmed"}'
+
+
+def test_postgres_adapter_commits_tool_started_then_result_and_cursor_in_separate_transactions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The effect boundary has one durable started transition and one later result transition."""
+    from enterprise_agent.adapters import workflow_state
+    from enterprise_agent.domain import WorkflowStatus, WorkflowStepStatus
+
+    snapshot = staged_snapshot()
+    started_at = NOW + timedelta(minutes=2)
+    lease_expires_at = NOW + timedelta(minutes=10)
+    leased_steps = list(snapshot.steps)
+    for index in range(2):
+        leased_steps[index] = replace(
+            leased_steps[index],
+            status=WorkflowStepStatus.SUCCEEDED,
+            attempt_count=1,
+            started_at=started_at,
+            completed_at=started_at,
+            result={"guard": "confirmed"},
+            updated_at=started_at,
+        )
+    leased = replace(
+        snapshot,
+        workflow=replace(
+            snapshot.workflow,
+            status=WorkflowStatus.RUNNING,
+            current_step=2,
+            started_at=started_at,
+            lease_owner="worker-a",
+            lease_expires_at=lease_expires_at,
+            updated_at=started_at,
+        ),
+        steps=tuple(leased_steps),
+    )
+    key = "tool:v1:workflow:3:create_replacement_po:abc"
+    started_steps = list(leased.steps)
+    started_steps[2] = replace(
+        started_steps[2],
+        status=WorkflowStepStatus.RUNNING,
+        idempotency_key=key,
+        attempt_count=1,
+        started_at=started_at,
+        lease_owner="worker-a",
+        lease_expires_at=lease_expires_at,
+        updated_at=started_at,
+    )
+    started_snapshot = replace(leased, steps=tuple(started_steps))
+    completed_at = NOW + timedelta(minutes=3)
+    completed_steps = list(started_snapshot.steps)
+    completed_steps[2] = replace(
+        completed_steps[2],
+        status=WorkflowStepStatus.SUCCEEDED,
+        result={"replacement_purchase_order_id": "replacement-po-1"},
+        completed_at=completed_at,
+        lease_owner=None,
+        lease_expires_at=None,
+        updated_at=completed_at,
+    )
+    completed_snapshot = replace(
+        started_snapshot,
+        workflow=replace(started_snapshot.workflow, current_step=3, updated_at=completed_at),
+        steps=tuple(completed_steps),
+    )
+    start_result = MagicMock()
+    start_result.scalar_one_or_none.return_value = str(snapshot.steps[2].step_id)
+    complete_result = MagicMock()
+    complete_result.scalar_one_or_none.return_value = str(snapshot.steps[2].step_id)
+    advance_result = MagicMock()
+    advance_result.scalar_one_or_none.return_value = str(snapshot.workflow.workflow_id)
+    lost_result = MagicMock()
+    lost_result.scalar_one_or_none.return_value = None
+    engine = MagicMock()
+    transaction = engine.begin.return_value.__enter__.return_value
+    transaction.execute.side_effect = [
+        start_result,
+        mapping_result(one_or_none=_workflow_row(started_snapshot)),
+        mapping_result(all_rows=_step_rows(started_snapshot)),
+        complete_result,
+        advance_result,
+        mapping_result(one_or_none=_workflow_row(completed_snapshot)),
+        mapping_result(all_rows=_step_rows(completed_snapshot)),
+        lost_result,
+    ]
+    monkeypatch.setattr(workflow_state, "create_engine", lambda _: engine)
+    adapter = workflow_state.PostgresWorkflowStateAdapter("postgresql+psycopg://ignored")
+
+    started = adapter.start_tool_step(
+        snapshot.workflow.workflow_id,
+        worker_id="worker-a",
+        expected_step_index=3,
+        idempotency_key=key,
+        started_at=started_at,
+    )
+    completed = adapter.complete_tool_step(
+        snapshot.workflow.workflow_id,
+        worker_id="worker-a",
+        expected_step_index=3,
+        idempotency_key=key,
+        result={"replacement_purchase_order_id": "replacement-po-1"},
+        finish_workflow=False,
+        completed_at=completed_at,
+    )
+    lost = adapter.start_tool_step(
+        snapshot.workflow.workflow_id,
+        worker_id="worker-b",
+        expected_step_index=3,
+        idempotency_key=key,
+        started_at=started_at,
+    )
+
+    assert started == started_snapshot
+    assert completed == completed_snapshot
+    assert lost is None
+    assert transaction.execute.call_args_list[0].args[1]["idempotency_key"] == key
+    assert transaction.execute.call_args_list[3].args[1]["result"] == (
+        '{"replacement_purchase_order_id": "replacement-po-1"}'
+    )
+    assert transaction.execute.call_args_list[4].args[1]["finish_workflow"] is False
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:

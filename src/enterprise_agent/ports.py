@@ -24,6 +24,7 @@ from enterprise_agent.domain import (
     ScenarioAStockoutTrigger,
     ScheduledTask,
     ScheduledTaskId,
+    ToolInvocation,
     UserId,
     WorkflowId,
     WorkflowStateSnapshot,
@@ -185,6 +186,41 @@ class WorkflowStatePort(Protocol):
         completed_at: datetime,
     ) -> WorkflowStateSnapshot | None:
         """Atomically complete exactly the currently declared next read-only guard step."""
+        ...
+
+    def start_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Commit the exact next external step as started before its effect may be invoked."""
+        ...
+
+    def complete_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        result: Mapping[str, object],
+        finish_workflow: bool,
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Atomically retain a tool result and advance only its still-current workflow cursor."""
+        ...
+
+
+@runtime_checkable
+class ToolExecutionPort(Protocol):
+    """Invoke one already-started, idempotent external-style tool action."""
+
+    def execute(self, actor: ActorContext, invocation: ToolInvocation) -> Mapping[str, object]:
+        """Execute or return the durable result for this exact stable idempotency key."""
         ...
 
 

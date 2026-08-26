@@ -11,6 +11,7 @@ from .providers import (
     PostgresMailAdapter,
     UnsupportedEvidenceTypeError,
 )
+from .tools import PostgresScenarioAToolAdapter, ToolExecutionError
 from .workflow_state import PostgresWorkflowStateAdapter
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "PostgresIdentityAdapter",
     "PostgresMailAdapter",
     "PostgresPlanApprovalAdapter",
+    "PostgresScenarioAToolAdapter",
     "PostgresWorkflowStateAdapter",
+    "ToolExecutionError",
     "UnsupportedEvidenceTypeError",
 ]

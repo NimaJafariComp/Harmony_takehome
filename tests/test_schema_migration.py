@@ -90,6 +90,7 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "approvals",
         "workflow_instances",
         "workflow_steps",
+        "tool_invocations",
         "scheduled_tasks",
         "audit_events",
     }
@@ -119,6 +120,15 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "lease_owner",
         "lease_expires_at",
     }.issubset(schema["columns"]["workflow_steps"])
+    assert {
+        "workflow_instance_id",
+        "tool_name",
+        "idempotency_key",
+        "status",
+        "parameters",
+        "result",
+        "attempt_count",
+    }.issubset(schema["columns"]["tool_invocations"])
     assert {"payload", "lease_expires_at", "idempotency_key"}.issubset(
         schema["columns"]["scheduled_tasks"]
     )
@@ -130,6 +140,7 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert "approver_id->users" in schema["foreign_keys"]["plans"]
     assert "plan_id->plans" in schema["foreign_keys"]["workflow_instances"]
     assert "workflow_instance_id->workflow_instances" in schema["foreign_keys"]["workflow_steps"]
+    assert "workflow_instance_id->workflow_instances" in schema["foreign_keys"]["tool_invocations"]
     assert "ix_purchase_orders_part_id_status" in schema["indexes"]["purchase_orders"]
     assert "ix_messages_purchase_order_id_received_at" in schema["indexes"]["messages"]
     assert "ix_attention_items_status_created_at" in schema["indexes"]["attention_items"]
@@ -137,6 +148,9 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "ix_workflow_steps_workflow_instance_id_step_index" in schema["indexes"]["workflow_steps"]
     )
     assert "ix_scheduled_tasks_status_due_at" in schema["indexes"]["scheduled_tasks"]
+    assert (
+        "ix_tool_invocations_workflow_instance_id_status" in schema["indexes"]["tool_invocations"]
+    )
     assert "ix_audit_events_run_id_occurred_at" in schema["indexes"]["audit_events"]
 
 
@@ -177,6 +191,7 @@ def test_integrity_migration_enforces_dedupe_idempotency_and_source_versions(
     )
     assert "uq_workflow_steps_idempotency_key" in schema["unique_constraints"]["workflow_steps"]
     assert "uq_scheduled_tasks_idempotency_key" in schema["unique_constraints"]["scheduled_tasks"]
+    assert "uq_tool_invocations_idempotency_key" in schema["unique_constraints"]["tool_invocations"]
     assert "uq_inventory_part_id_plant_id" in schema["unique_constraints"]["inventory"]
     assert (
         "uq_production_allocations_quality_lot_id_production_order_id"

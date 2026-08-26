@@ -108,6 +108,63 @@ ADVANCE_WORKFLOW_AFTER_GUARD = text("""
       AND current_step = :previous_step_index
     RETURNING id
 """)
+START_TOOL_STEP = text("""
+    UPDATE workflow_steps AS step
+    SET status = :running_step_status,
+        idempotency_key = :idempotency_key,
+        attempt_count = step.attempt_count + 1,
+        started_at = COALESCE(step.started_at, :started_at),
+        lease_owner = :worker_id,
+        lease_expires_at = workflow.lease_expires_at,
+        updated_at = :started_at
+    FROM workflow_instances AS workflow
+    WHERE step.workflow_instance_id = workflow.id
+      AND workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :running_workflow_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :started_at
+      AND workflow.current_step = :previous_step_index
+      AND step.step_index = :expected_step_index
+      AND step.tool_name IS NOT NULL
+      AND step.status = :pending_step_status
+    RETURNING step.id
+""")
+COMPLETE_TOOL_STEP = text("""
+    UPDATE workflow_steps AS step
+    SET status = :succeeded_step_status,
+        result = CAST(:result AS JSONB),
+        completed_at = :completed_at,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = :completed_at
+    FROM workflow_instances AS workflow
+    WHERE step.workflow_instance_id = workflow.id
+      AND workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :running_workflow_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :completed_at
+      AND workflow.current_step = :previous_step_index
+      AND step.step_index = :expected_step_index
+      AND step.tool_name IS NOT NULL
+      AND step.status = :running_step_status
+      AND step.idempotency_key = :idempotency_key
+    RETURNING step.id
+""")
+ADVANCE_WORKFLOW_AFTER_TOOL = text("""
+    UPDATE workflow_instances
+    SET current_step = :expected_step_index,
+        status = CASE WHEN :finish_workflow THEN :succeeded_workflow_status ELSE status END,
+        completed_at = CASE WHEN :finish_workflow THEN :completed_at ELSE completed_at END,
+        lease_owner = CASE WHEN :finish_workflow THEN NULL ELSE lease_owner END,
+        lease_expires_at = CASE WHEN :finish_workflow THEN NULL ELSE lease_expires_at END,
+        updated_at = :completed_at
+    WHERE id = CAST(:workflow_id AS UUID)
+      AND status = :running_workflow_status
+      AND lease_owner = :worker_id
+      AND lease_expires_at > :completed_at
+      AND current_step = :previous_step_index
+    RETURNING id
+""")
 
 
 class PostgresWorkflowStateAdapter:
@@ -183,6 +240,72 @@ class PostgresWorkflowStateAdapter:
             ).scalar_one_or_none()
             if advanced is None:
                 raise RuntimeError("workflow cursor was lost while completing a declared guard")
+            return _load_snapshot(connection, workflow_id)
+
+    def start_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Commit an exact leased external step before its effect leaves the control plane."""
+        with self._engine.begin() as connection:
+            started = connection.execute(
+                START_TOOL_STEP,
+                {
+                    "workflow_id": str(workflow_id),
+                    "worker_id": worker_id,
+                    "expected_step_index": expected_step_index,
+                    "previous_step_index": expected_step_index - 1,
+                    "idempotency_key": idempotency_key,
+                    "started_at": started_at,
+                    "pending_step_status": WorkflowStepStatus.PENDING.value,
+                    "running_step_status": WorkflowStepStatus.RUNNING.value,
+                    "running_workflow_status": WorkflowStatus.RUNNING.value,
+                },
+            ).scalar_one_or_none()
+            if started is None:
+                return None
+            return _load_snapshot(connection, workflow_id)
+
+    def complete_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        result: Mapping[str, object],
+        finish_workflow: bool,
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Commit the external result and its exact cursor transition in one new transaction."""
+        with self._engine.begin() as connection:
+            parameters = {
+                "workflow_id": str(workflow_id),
+                "worker_id": worker_id,
+                "expected_step_index": expected_step_index,
+                "previous_step_index": expected_step_index - 1,
+                "idempotency_key": idempotency_key,
+                "result": json.dumps(dict(result), sort_keys=True),
+                "finish_workflow": finish_workflow,
+                "completed_at": completed_at,
+                "running_step_status": WorkflowStepStatus.RUNNING.value,
+                "succeeded_step_status": WorkflowStepStatus.SUCCEEDED.value,
+                "running_workflow_status": WorkflowStatus.RUNNING.value,
+                "succeeded_workflow_status": WorkflowStatus.SUCCEEDED.value,
+            }
+            completed = connection.execute(COMPLETE_TOOL_STEP, parameters).scalar_one_or_none()
+            if completed is None:
+                return None
+            advanced = connection.execute(
+                ADVANCE_WORKFLOW_AFTER_TOOL, parameters
+            ).scalar_one_or_none()
+            if advanced is None:
+                raise RuntimeError("workflow cursor was lost while completing a declared tool")
             return _load_snapshot(connection, workflow_id)
 
 

@@ -66,6 +66,7 @@ TRUNCATE_SQL = """
 TRUNCATE TABLE
     audit_events,
     scheduled_tasks,
+    tool_invocations,
     workflow_steps,
     workflow_instances,
     approvals,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -205,9 +206,7 @@ class MemoryWorkflowStore:
         started_at: datetime,
     ) -> WorkflowStateSnapshot | None:
         """Model the durable ``tool.started`` commit required before an external call."""
-        self.start_tool_calls.append(
-            (workflow_id, worker_id, expected_step_index, idempotency_key)
-        )
+        self.start_tool_calls.append((workflow_id, worker_id, expected_step_index, idempotency_key))
         snapshot = self.snapshots.get(workflow_id)
         if snapshot is None:
             return None
@@ -243,7 +242,8 @@ class MemoryWorkflowStore:
         worker_id: str,
         expected_step_index: int,
         idempotency_key: str,
-        result: dict[str, object],
+        result: Mapping[str, object],
+        finish_workflow: bool,
         completed_at: datetime,
     ) -> WorkflowStateSnapshot | None:
         """Model the separate result-plus-cursor transaction after a tool returns."""
@@ -278,7 +278,15 @@ class MemoryWorkflowStore:
             updated_at=completed_at,
         )
         updated = WorkflowStateSnapshot(
-            workflow=replace(workflow, current_step=expected_step_index, updated_at=completed_at),
+            workflow=replace(
+                workflow,
+                current_step=expected_step_index,
+                status=WorkflowStatus.SUCCEEDED if finish_workflow else workflow.status,
+                completed_at=completed_at if finish_workflow else workflow.completed_at,
+                lease_owner=None if finish_workflow else workflow.lease_owner,
+                lease_expires_at=None if finish_workflow else workflow.lease_expires_at,
+                updated_at=completed_at,
+            ),
             steps=tuple(steps),
         )
         self.snapshots[workflow_id] = updated
@@ -765,6 +773,23 @@ class RecordingToolExecutor:
         return self.result
 
 
+class ScenarioAToolExecutor:
+    """Return only the bounded result each declared Scenario A effect may expose to the workflow."""
+
+    def execute(self, actor: ActorContext, invocation: Any) -> dict[str, object]:
+        """Model successful independently committed tools while preserving their declared order."""
+        assert actor.user_id == UserId("00000000-0000-0000-0000-000000000001")
+        if invocation.tool_name == "create_replacement_po":
+            return {"replacement_purchase_order_id": "replacement-po-1"}
+        if invocation.tool_name == "reduce_or_cancel_po":
+            return {"status": "cancelled"}
+        if invocation.tool_name == "notify_production":
+            return {"message_id": "message-1"}
+        if invocation.tool_name == "schedule_arrival_check":
+            return {"scheduled_task_id": "task-1"}
+        raise AssertionError("unexpected undeclared tool")
+
+
 def _advance_to_first_tool(executor: Any, plan: Plan) -> None:
     """Complete the two declared read-only guards before the first external workflow step."""
     claimed = executor.claim(
@@ -808,7 +833,9 @@ def test_executor_durably_starts_an_external_tool_before_invocation_then_commits
     assert len(store.start_tool_calls) == 1
     assert store.complete_tool_calls == []
     assert events == []
-    started_step = store.load(WORKFLOW_ID).steps[2]
+    retained = store.load(WORKFLOW_ID)
+    assert retained is not None
+    started_step = retained.steps[2]
     assert started_step.status is WorkflowStepStatus.RUNNING
     assert started_step.idempotency_key == started.invocation.idempotency_key
     assert started.invocation.parameters == {
@@ -856,10 +883,80 @@ def test_executor_leaves_a_durable_started_tool_for_safe_retry_when_the_effect_f
         )
 
     retained = store.load(WORKFLOW_ID)
+    assert retained is not None
     assert retained.workflow.current_step == 2
     assert retained.steps[2].status is WorkflowStepStatus.RUNNING
     assert retained.steps[2].idempotency_key == started.invocation.idempotency_key
     assert store.complete_tool_calls == []
+
+
+def test_executor_runs_all_declared_tool_inputs_in_order_and_finishes_the_workflow() -> None:
+    """Later effects use only prior durable results and continue the existing active workflow lease."""
+    executor, store, plan, _ = executor_setup(tool_executor=ScenarioAToolExecutor())
+    _advance_to_first_tool(executor, plan)
+
+    current = None
+    for minute in (5, 7, 9, 11):
+        started = executor.begin_next_tool(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=minute),
+            lease_expires_at=NOW + timedelta(minutes=15),
+            current_source_versions=plan.source_versions,
+        )
+        current = executor.execute_started_tool(
+            started,
+            worker_id="worker-a",
+            completed_at=NOW + timedelta(minutes=minute + 1),
+        )
+
+    assert current is not None
+    assert current.workflow.status is WorkflowStatus.SUCCEEDED
+    assert current.workflow.current_step == 6
+    assert current.workflow.lease_owner is None
+    assert [step.status for step in current.steps] == [WorkflowStepStatus.SUCCEEDED] * 6
+    assert [call[2] for call in store.start_tool_calls] == [3, 4, 5, 6]
+    assert [call[2] for call in store.complete_tool_calls] == [3, 4, 5, 6]
+    assert current.steps[5].input["plan_parameters"]["original_purchase_order_id"] == "po-4812-y"
+
+
+def test_executor_rejects_unavailable_or_lost_external_tool_execution_before_an_effect() -> None:
+    """A tool cannot run without its provider boundary, an active lease, or its durable started state."""
+    from enterprise_agent.application.workflow_executor import (
+        WorkflowClaimLostError,
+        WorkflowToolExecutionUnavailableError,
+    )
+
+    executor, store, plan, _ = executor_setup()
+    _advance_to_first_tool(executor, plan)
+    with pytest.raises(WorkflowToolExecutionUnavailableError, match="not configured"):
+        executor.begin_next_tool(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=5),
+            lease_expires_at=NOW + timedelta(minutes=12),
+            current_source_versions=plan.source_versions,
+        )
+
+    executor, store, plan, _ = executor_setup(tool_executor=ScenarioAToolExecutor())
+    _advance_to_first_tool(executor, plan)
+    started = executor.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=5),
+        lease_expires_at=NOW + timedelta(minutes=12),
+        current_source_versions=plan.source_versions,
+    )
+    with pytest.raises(WorkflowClaimLostError, match="active lease"):
+        executor.execute_started_tool(
+            started,
+            worker_id="worker-b",
+            completed_at=NOW + timedelta(minutes=6),
+        )
+
+    retained = store.load(WORKFLOW_ID)
+    assert retained is not None
+    assert retained.steps[2].status is WorkflowStepStatus.RUNNING
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -942,6 +1039,97 @@ def test_postgres_executor_claims_and_completes_only_the_first_declared_guard(
         "    assert connection.execute(text('SELECT status FROM workflow_steps WHERE workflow_instance_id = CAST(:workflow_id AS UUID) AND step_index = 1'), {'workflow_id': str(snapshot.workflow.workflow_id)}).scalar_one() == 'succeeded'\n"
         "    purchase_orders_after = connection.execute(text('SELECT id::text, supplier_id::text, ordered_quantity::text, received_quantity::text, status, source_version FROM purchase_orders ORDER BY id')).all()\n"
         "assert purchase_orders_after == purchase_orders_before\n"
+    )
+    compose(
+        "--profile",
+        "tools",
+        "run",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={disposable_database}",
+        "app",
+        "python",
+        "-c",
+        command,
+    )
+
+
+@pytest.mark.critical
+@pytest.mark.integration
+def test_postgres_external_tool_boundary_runs_the_declared_erp_mail_and_scheduler_effects_once(
+    disposable_database: str,
+) -> None:
+    """Each external-style effect commits by its key before its separate workflow transition."""
+    compose(
+        "--profile",
+        "tools",
+        "run",
+        "--build",
+        "--rm",
+        "-e",
+        f"DATABASE_URL={disposable_database}",
+        "app",
+        "alembic",
+        "upgrade",
+        "head",
+    )
+    command = (
+        "from datetime import UTC, datetime, timedelta\n"
+        "from decimal import Decimal\n"
+        "from os import environ\n"
+        "from sqlalchemy import create_engine, text\n"
+        "from enterprise_agent.adapters import (\n"
+        "    PostgresAttentionAdapter, PostgresCalendarAdapter, PostgresErpAdapter,\n"
+        "    PostgresIdentityAdapter, PostgresMailAdapter, PostgresPlanApprovalAdapter,\n"
+        "    PostgresScenarioAToolAdapter, PostgresWorkflowStateAdapter,\n"
+        ")\n"
+        "from enterprise_agent.application.approvals import ScenarioAApprovalService\n"
+        "from enterprise_agent.application.context import ScenarioAContextAssembler\n"
+        "from enterprise_agent.application.planning import EnterWorkflowRecommendation\n"
+        "from enterprise_agent.application.stockout import StockoutDetector\n"
+        "from enterprise_agent.application.workflow_executor import ScenarioAWorkflowExecutor\n"
+        "from enterprise_agent.application.workflow_state import WorkflowStateService\n"
+        "from enterprise_agent.domain import ApprovalStatus, RunId, UserId, WorkflowStatus, WorkflowStepStatus\n"
+        "from enterprise_agent.seed import reset_database, seed_database\n"
+        "database_url = environ['DATABASE_URL']\n"
+        "now = datetime(2026, 8, 24, 9, tzinfo=UTC)\n"
+        "reset_database(database_url, allow_test_database=True)\n"
+        "seed_database(database_url, allow_test_database=True)\n"
+        "identity = PostgresIdentityAdapter(database_url)\n"
+        "actor = identity.actor_for(UserId('00000000-0000-0000-0000-000000000001'))\n"
+        "erp = PostgresErpAdapter(database_url)\n"
+        "detection = StockoutDetector(erp, PostgresAttentionAdapter(database_url)).detect(actor, RunId('run-external-tools'), now)[0]\n"
+        "context = ScenarioAContextAssembler(identity, erp, PostgresMailAdapter(database_url), PostgresCalendarAdapter(database_url)).assemble(user_id=actor.user_id, attention=detection.registration.attention, trigger=detection.risk.trigger)\n"
+        "recommendation = EnterWorkflowRecommendation(outcome='ENTER_WORKFLOW', workflow_name='po_reroute', workflow_version=1, supplier_id='00000000-0000-0000-0000-000000000202', quantity=Decimal(60), original_purchase_order_id=context.original_purchase_order.record_id, production_order_id=context.production_order.record_id, rationale='Approved alternate meets production.')\n"
+        "approvals = PostgresPlanApprovalAdapter(database_url)\n"
+        "pending = ScenarioAApprovalService(approvals).request_pending(context, recommendation, current_source_versions=context.source_versions, policy_version='scenario_a_policy:v1', requested_at=now, expires_at=now + timedelta(hours=4))\n"
+        "approved = ScenarioAApprovalService(approvals).approve(approval_id=pending.approval.approval_id, expected_plan_hash=pending.plan.plan_hash, current_source_versions=context.source_versions, decided_at=now + timedelta(minutes=1))\n"
+        "assert approved.status is ApprovalStatus.APPROVED\n"
+        "workflows = PostgresWorkflowStateAdapter(database_url)\n"
+        "snapshot = WorkflowStateService(workflows).stage(pending.plan, created_at=now + timedelta(minutes=1))\n"
+        "tool_adapter = PostgresScenarioAToolAdapter(database_url)\n"
+        "executor = ScenarioAWorkflowExecutor(workflow_store=workflows, approvals=approvals, identity=identity, tool_executor=tool_adapter)\n"
+        "claimed = executor.claim(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=2), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
+        "after_first_guard = executor.advance_next_guard(claimed, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=3))\n"
+        "executor.advance_next_guard(after_first_guard, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=4))\n"
+        "started = executor.begin_next_tool(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=5), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
+        "first_result = tool_adapter.execute(started.actor, started.invocation)\n"
+        "assert first_result == tool_adapter.execute(started.actor, started.invocation)\n"
+        "current = executor.execute_started_tool(started, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=6))\n"
+        "for minute in (7, 9, 11):\n"
+        "    started = executor.begin_next_tool(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=minute), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
+        "    current = executor.execute_started_tool(started, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=minute + 1))\n"
+        "assert current.workflow.status is WorkflowStatus.SUCCEEDED and current.workflow.current_step == 6\n"
+        "assert all(step.status is WorkflowStepStatus.SUCCEEDED for step in current.steps)\n"
+        "engine = create_engine(database_url)\n"
+        "with engine.connect() as connection:\n"
+        "    assert connection.execute(text(\"SELECT COUNT(*) FROM purchase_orders WHERE po_number LIKE 'RPL-%'\")).scalar_one() == 1\n"
+        "    original = connection.execute(text(\"SELECT ordered_quantity::text, received_quantity::text, status, source_version FROM purchase_orders WHERE id = '00000000-0000-0000-0000-000000000401'\")).one()\n"
+        "    assert original == ('40.000', '40.000', 'cancelled', 3)\n"
+        "    assert connection.execute(text(\"SELECT COUNT(*) FROM messages WHERE message_key LIKE 'tool:v1:%:notify_production:%'\")).scalar_one() == 1\n"
+        "    arrival = connection.execute(text(\"SELECT task_type, status, payload->>'purchase_order_id' FROM scheduled_tasks WHERE workflow_instance_id = CAST(:workflow_id AS UUID)\"), {'workflow_id': str(snapshot.workflow.workflow_id)}).one()\n"
+        "    assert arrival[0:2] == ('arrival_check', 'pending') and arrival[2] == first_result['replacement_purchase_order_id']\n"
+        "    assert connection.execute(text(\"SELECT COUNT(*) FROM tool_invocations WHERE workflow_instance_id = CAST(:workflow_id AS UUID) AND status = 'succeeded'\"), {'workflow_id': str(snapshot.workflow.workflow_id)}).scalar_one() == 4\n"
     )
     compose(
         "--profile",
