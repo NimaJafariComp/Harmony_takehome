@@ -57,6 +57,7 @@ class LLMEvaluationCase:
     case_id: str
     scenario: str
     title: str
+    facts: Mapping[str, object]
     prompt: PromptEnvelope
     expected_outcomes: frozenset[str]
     expected_values: Mapping[tuple[str, ...], object]
@@ -67,6 +68,7 @@ class LLMEvaluationCase:
     def __post_init__(self) -> None:
         """Own immutable scalar expectations so a caller cannot alter the scorecard after selection."""
         object.__setattr__(self, "expected_values", MappingProxyType(dict(self.expected_values)))
+        object.__setattr__(self, "facts", MappingProxyType(dict(self.facts)))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -404,6 +406,7 @@ def _case(
         case_id=case_id,
         scenario=scenario,
         title=title,
+        facts=facts,
         prompt=prompt,
         expected_outcomes=expected_outcomes,
         expected_values=expected_values,

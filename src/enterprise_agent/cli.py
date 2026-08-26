@@ -1,7 +1,7 @@
 """Command-line interface for the enterprise agent harness."""
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
@@ -41,6 +41,7 @@ from enterprise_agent.application.live_demo import (
 )
 from enterprise_agent.application.llm_evaluation import (
     EvaluationCaseSelectionError,
+    LLMEvaluationCase,
     LLMEvaluationReport,
     evaluate_cases,
     evaluation_cases,
@@ -86,6 +87,7 @@ from enterprise_agent.presentation import (
     EvidenceSummary,
     MenuEntry,
     StatusSummary,
+    StoryBrief,
     TerminalError,
     TerminalPresenter,
     TerminalResult,
@@ -322,6 +324,7 @@ def _run_demo_shell() -> None:
             entries=entries,
             prompt="Choose a case number. Enter b to return to Home.",
         )
+        _render_guided_story_briefs(presenter)
         try:
             choice = _prompt_with_cancellation("Demo case").strip().lower()
         except InteractiveFlowCancelled:
@@ -1252,6 +1255,10 @@ def _render_live_demo_catalogue() -> None:
         columns=("Case", "Scenario", "Purpose"),
         rows=tuple((str(item.case_id), item.scenario, item.title) for item in live_demo_cases()),
     )
+    for item in live_demo_cases():
+        presenter.render_story_brief(
+            StoryBrief(item.scenario, item.story, item.safety_rule, item.facts)
+        )
 
 
 def _live_demo_terminal_state(result: LiveDemoResult) -> TerminalState:
@@ -1309,6 +1316,9 @@ def _render_live_demo(result: LiveDemoResult) -> None:
         ),
         outcome=result.outcome or "No usable canonical recommendation was produced.",
         next_action=_live_demo_next_action(result),
+    )
+    presenter.render_story_brief(
+        StoryBrief(result.case.scenario, result.case.story, result.case.safety_rule, result.case.facts)
     )
     presenter.render_text_table(
         title="Live-demo control records",
@@ -1452,10 +1462,25 @@ def _render_guided_demo_catalog() -> None:
         ),
         *_guided_demo_catalogue_entries(),
     )
-    _terminal_presenter().render_demo_catalogue(
+    presenter = _terminal_presenter()
+    presenter.render_demo_catalogue(
         entries=entries,
         prompt="Run enterprise-agent demo --case CASE_ID, or enterprise-agent demo for the safety tour.",
     )
+    _render_guided_story_briefs(presenter)
+
+
+def _render_guided_story_briefs(presenter: TerminalPresenter) -> None:
+    """Show the deterministic case facts before a reviewer resets the local synthetic database."""
+    for case in guided_demo_cases():
+        presenter.render_story_brief(
+            StoryBrief(
+                case.title.split(" — ", maxsplit=1)[0],
+                case.outcome,
+                case.next_safe_action,
+                tuple((identifier.label, identifier.value) for identifier in case.identifiers),
+            )
+        )
 
 
 def _render_guided_demo(result: GuidedDemoRun) -> None:
@@ -1485,6 +1510,14 @@ def _render_guided_demo(result: GuidedDemoRun) -> None:
             ),
             outcome=item.case.outcome,
             next_action=item.case.next_safe_action,
+        )
+        presenter.render_story_brief(
+            StoryBrief(
+                item.case.title.split(" — ", maxsplit=1)[0],
+                item.case.outcome,
+                item.case.next_safe_action,
+                tuple((identifier.label, identifier.value) for identifier in item.identifiers),
+            )
         )
         presenter.render_evidence(
             tuple(
@@ -2067,10 +2100,46 @@ def _emit_evaluation_catalog() -> None:
                 case_id=item.case_id,
                 scenario=item.scenario,
                 expected_outcomes=", ".join(sorted(item.expected_outcomes)),
+                story=item.title,
+                safety_rule=_evaluation_safety_rule(item),
+                facts=_evaluation_story_facts(item.facts),
             )
             for item in cases
         )
     )
+
+
+def _evaluation_safety_rule(item: LLMEvaluationCase) -> str:
+    """State the public policy check without exposing the evaluation prompt."""
+    if item.tests_prompt_injection_resistance:
+        return "Treat instruction-like evidence as data only; require human review."
+    if item.tests_newest_evidence:
+        return "Use the newest authorized evidence, not a superseded update."
+    if item.tests_manual_review_under_ambiguity:
+        return "Ambiguous, stale, or unauthorized evidence requires human review."
+    return item.title
+
+
+def _evaluation_story_facts(facts: Mapping[str, object]) -> tuple[tuple[str, str], ...]:
+    """Make the fixed synthetic facts readable without showing a provider prompt or response."""
+    return tuple(
+        (key.replace("_", " ").capitalize(), _evaluation_fact_value(value))
+        for key, value in facts.items()
+    )
+
+
+def _evaluation_fact_value(value: object) -> str:
+    """Format one owned synthetic fact compactly for a Rich story card."""
+    if isinstance(value, Mapping):
+        return ", ".join(
+            f"{key.replace('_', ' ')}={_evaluation_fact_value(child)}"
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return ", ".join(_evaluation_fact_value(item) for item in value)
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
 
 
 def _llm_evaluation_result(

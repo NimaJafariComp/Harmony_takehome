@@ -142,6 +142,19 @@ class EvaluationCatalogueEntry:
     case_id: str
     scenario: str
     expected_outcomes: str
+    story: str = ""
+    safety_rule: str = ""
+    facts: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class StoryBrief:
+    """A reviewed scenario narrative and facts, never provider-owned text or a raw prompt."""
+
+    scenario: str
+    narrative: str
+    safety_rule: str
+    facts: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -364,6 +377,16 @@ class TerminalPresenter:
         details.add_row("Next", next_action)
         self.console.print(Panel(details, title=title, border_style=self.theme.status_style(state)))
 
+    def render_story_brief(self, brief: StoryBrief) -> None:
+        """Render the fixed business story an operator is evaluating or demonstrating."""
+        details = self._detail_grid()
+        details.add_row("Scenario", brief.scenario)
+        details.add_row("Story", brief.narrative)
+        details.add_row("Safety rule", brief.safety_rule)
+        for label, value in brief.facts:
+            details.add_row(label, value)
+        self.console.print(Panel(details, title="Story brief", border_style=self.theme.title_style))
+
     def render_planner_provenance(self, provenance: PlannerProvenance) -> None:
         """Render visible planner provenance without requiring a terminal color or provider payload."""
         details = self._detail_grid()
@@ -396,14 +419,31 @@ class TerminalPresenter:
                 details = self._detail_grid()
                 details.add_row("Case", entry.case_id)
                 details.add_row("Scenario", entry.scenario)
+                details.add_row("Story", entry.story)
+                details.add_row("Safety rule", entry.safety_rule)
+                for label, value in entry.facts:
+                    details.add_row(label, value)
                 details.add_row("Expected", entry.expected_outcomes)
                 self.console.print(
                     Panel(details, title=entry.case_id, border_style=self.theme.subtitle_style)
                 )
             return
-        table = self._table("Fixed synthetic cases", "Case", "Scenario", "Expected safe outcomes")
+        table = self._table(
+            "Fixed synthetic cases",
+            "Case",
+            "Scenario",
+            "Story and safety rule",
+            "Synthetic facts",
+            "Expected safe outcomes",
+        )
         for entry in entries:
-            table.add_row(entry.case_id, entry.scenario, entry.expected_outcomes)
+            table.add_row(
+                entry.case_id,
+                entry.scenario,
+                f"{entry.story}\nRule: {entry.safety_rule}",
+                "; ".join(f"{label}: {value}" for label, value in entry.facts),
+                entry.expected_outcomes,
+            )
         self.console.print(table)
 
     def _add_planner_provenance_rows(self, details: Table, provenance: PlannerProvenance) -> None:
