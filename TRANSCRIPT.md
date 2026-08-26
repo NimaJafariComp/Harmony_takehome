@@ -10,7 +10,19 @@ This is the recorded, reproducible walkthrough for the enterprise-agent harness.
 
 Live model behavior is never application-correctness evidence by itself. The deterministic gate, approval, freshness checks, idempotent executor, and audit controls govern every business effect.
 
-## Commands used
+## How to replay this evidence
+
+For an interactive reviewer, use `make tui`. It is the preferred route and reaches the same guarded application commands used to produce the receipts below:
+
+| Evidence lane | TUI route |
+|---|---|
+| Deterministic control-plane | Home → **Guided company demo** |
+| Live no-write evaluation | Home → **Normal operator mode** → **Live-evaluation catalogue** |
+| Guarded live local proposal | Home → **Guarded live local demo** |
+
+The command forms below are retained as precise, scriptable evidence of the original recorded runs—not because the TUI cannot produce the same results. Database-backed commands run through Compose because the synthetic database is intentionally private.
+
+## Commands used to record the receipt
 
 Run the credential-free deterministic review:
 
@@ -24,13 +36,13 @@ uv run pytest -q tests/test_workflow_executor.py \
   -k crash_after_replacement_effect_restarts_with_the_same_started_key
 ```
 
-Run the opt-in, fixed-synthetic provider scorecard:
+Run the opt-in, fixed-synthetic provider scorecard directly (or use the TUI route above):
 
 ```sh
 enterprise-agent llm-evaluate --profile openai --all --execute
 ```
 
-Run one guarded live local proposal. The command requires an interactive `live` confirmation and resets only the local synthetic target before every case:
+Run one guarded live local proposal by script. It requires an interactive `live` confirmation and resets only the local synthetic target before every case:
 
 ```sh
 docker compose --profile tools run --rm app \
@@ -107,10 +119,10 @@ No live approval, tool execution, crash recovery, or Tuesday follow-up was run i
 
 ## Repeat this review
 
-For a no-key reviewer demo, run `make demo` and inspect the bounded terminal panels. For the loopback-only UI, follow [README.md](README.md). To inspect a retained local live run, use:
+For a no-key reviewer demo, run `make tui` and choose **Guided company demo** (or use unattended `make demo`). For the loopback-only UI, follow [README.md](README.md). To inspect a retained local live run by command, use:
 
 ```sh
-enterprise-agent audit explain RUN_ID
+docker compose --profile tools run --rm app enterprise-agent audit explain RUN_ID
 ```
 
 `RUN_ID` is the stable text identifier such as `live-demo:scenario-c-supplier-risk`, not an approval or workflow UUID. The command reads the append-only audit ledger and does not reread mutable business records.
