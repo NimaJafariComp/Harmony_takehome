@@ -270,6 +270,7 @@ def test_credential_verification_fails_closed_without_secret_or_provider_error_d
         {"profile": "openai", "api_key": "", "model": "valid-model"},
         {"profile": "openai", "api_key": "key\npoison", "model": "valid-model"},
         {"profile": "openai", "api_key": "valid-key", "model": "model\npoison"},
+        {"profile": "openai", "api_key": "valid-key", "model": "model\x1b[31m"},
     ),
 )
 def test_llm_profile_save_rejects_invalid_or_injectable_selection(
@@ -318,7 +319,7 @@ def test_run_interactively_creates_a_hidden_key_profile_with_the_recommended_mod
     """A first `run` requests a hidden key, saves the selected profile, and never prints the key."""
     clear_llm_environment(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    prompts = iter(("openai", "interactive-openai-key", "1"))
+    prompts = iter(("openai", "interactive-openai-key", "1", "save"))
     prompt_calls: list[tuple[str, bool]] = []
 
     def fake_prompt(message: str, *args: Any, **kwargs: Any) -> str:
@@ -352,7 +353,7 @@ def test_interactive_setup_displays_only_key_accessible_adapter_reviewed_models(
 
     clear_llm_environment(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    prompts = iter(("openai", "interactive-openai-key", "1"))
+    prompts = iter(("openai", "interactive-openai-key", "1", "save"))
     monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
     monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
     monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: False)
@@ -385,7 +386,9 @@ def test_explicit_setup_verifies_only_the_selected_provider_and_allows_a_custom_
     """A user-confirmed verification is injected, successful, and persists the expressly entered model ID."""
     clear_llm_environment(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    prompts = iter(("openrouter", "interactive-router-key", "2", "vendor/custom-structured-model"))
+    prompts = iter(
+        ("openrouter", "interactive-router-key", "2", "vendor/custom-structured-model", "save")
+    )
     verification_calls: list[tuple[str, str]] = []
     monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
     monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
@@ -412,6 +415,31 @@ def test_explicit_setup_verifies_only_the_selected_provider_and_allows_a_custom_
     assert "interactive-router-key" not in result.output
     assert "OPENROUTER_MODEL=vendor/custom-structured-model" in contents
     assert "key saved without live verification" not in result.output
+
+
+def test_interactive_setup_can_cancel_before_save_without_echoing_or_writing_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Cancellation is explicit, secret-safe, and happens before the local profile write."""
+    clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    prompts = iter(("openai", "cancelled-openai-key", "1", "cancel"))
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        cli, "discover_compatible_models", lambda profile, _key: curated_models_for(profile)
+    )
+
+    result = CliRunner().invoke(cli.app, ["llm-setup"])
+
+    assert result.exit_code == 130
+    assert "Save local LLM profile" in result.stdout
+    assert "Type save to continue or cancel to stop" in result.stdout
+    assert "cancelled" in result.stdout
+    assert "cancelled-openai-key" not in result.output
+    assert not (tmp_path / ".env").exists()
 
 
 def test_noninteractive_run_names_the_missing_setting_and_setup_command_without_prompting(

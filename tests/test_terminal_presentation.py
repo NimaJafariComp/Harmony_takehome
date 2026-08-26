@@ -10,6 +10,7 @@ from enterprise_agent.presentation.terminal import (
     ApprovalSummary,
     AuditTimelineEntry,
     BoundedProgress,
+    ConfirmationSummary,
     EvidenceDisposition,
     EvidenceSummary,
     StatusSummary,
@@ -132,3 +133,27 @@ def test_presenter_renders_bounded_progress_and_rejects_invalid_bounds() -> None
         BoundedProgress(label="Invalid", completed=0, total=0)
     with pytest.raises(ValueError, match="cannot exceed total"):
         BoundedProgress(label="Invalid", completed=4, total=3)
+
+
+def test_presenter_renders_a_consequential_action_receipt() -> None:
+    """Interactive commands can name the effect and freshness consequence before confirmation."""
+    presenter, output = _presenter()
+
+    presenter.render_confirmation(
+        ConfirmationSummary(
+            action="Stage Scenario C review",
+            target="the local synthetic supplier-risk scenario",
+            effect="Creates one pending approval and workflow; it does not hold a purchase order.",
+            freshness="Execution will revalidate the plan's evidence after approval.",
+            write_consequence="Writes only to the local demo database.",
+            confirmation_word="stage",
+        )
+    )
+
+    rendered = output.getvalue()
+    assert "Action" in rendered
+    assert "Stage Scenario C review" in rendered
+    assert "the local synthetic supplier-risk scenario" in rendered
+    assert "does not hold a purchase order" in rendered
+    assert "revalidate the plan's evidence" in rendered
+    assert "Type stage to continue or cancel to stop" in rendered

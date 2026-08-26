@@ -214,6 +214,28 @@ def test_scenario_c_command_stages_a_pending_human_review_without_an_llm(
     assert staged_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
 
 
+def test_interactive_scenario_c_cancellation_creates_no_pending_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A keyboard cancellation happens before the deterministic scenario can make a durable write."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(cli, "_require_local_demo_database", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        cli,
+        "stage_scenario_c_pending",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not stage")),
+    )
+    monkeypatch.setattr("typer.prompt", lambda *_args, **_kwargs: "cancel")
+
+    result = CliRunner().invoke(cli.app, ["scenario-c"])
+
+    assert result.exit_code == 130
+    assert "Stage Scenario C review" in result.stdout
+    assert "does not hold a purchase order" in result.stdout
+    assert "cancelled" in result.stdout
+
+
 def test_llm_usage_command_renders_only_grouped_immutable_metering(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
