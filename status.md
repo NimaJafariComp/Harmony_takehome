@@ -43,12 +43,12 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M9 - CLI HCI and deterministic demo |
-| Current task | M9.1 - Define terminal interaction contract |
+| Current task | M9.2 - Build reusable terminal presentation components |
 | Required task progress | 55 / 62 complete |
-| Optional task progress | 6 / 19 complete |
+| Optional task progress | 7 / 19 complete |
 | Acceptance criteria progress | 11 / 14 satisfied; 2 in progress |
-| Last validated commit | `00efab8` |
-| Last completed-task push | M8.6 implementation pushed to `origin/main` |
+| Last validated commit | `f1ac7ad` |
+| Last completed-task push | M9.1 contract pushed to `origin/main` |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -158,7 +158,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M9.1 Define terminal interaction contract | `not_started` | Optional CLI HCI | - |
+| M9.1 Define terminal interaction contract | `complete` | Optional CLI HCI | Validation: `docs/terminal-interaction-contract.md` reviewed against the writing guideline; `git diff --check`, `enterprise-agent --help`, `enterprise-agent scenario-c --help`, and `enterprise-agent audit --help` - PASS.<br>Evidence: the tracked reference defines the Typer/application/presentation boundary, semantic states and exits, TTY/non-TTY/no-color/JSON surfaces, stable JSON envelope, copyable durable IDs, keyboard-only confirmations, secret handling, error guidance, compatibility rules, and the exact M9.2-M9.6 test obligations. It explicitly labels these presentation behaviors as future contract work, so no current command behavior is misrepresented.<br>Commit: `f1ac7ad` pushed to `origin/main`. |
 | M9.2 Build reusable terminal presentation components | `not_started` | Optional CLI HCI | - |
 | M9.3 Improve high-value interactive flows | `not_started` | Optional CLI HCI | - |
 | M9.4 Add guided deterministic demo mode | `not_started` | Optional CLI HCI | - |
@@ -317,3 +317,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | M8.4 | Completed Scenario C's constrained hold-and-notify contract. | Test: strict Scenario C schema, closed tool catalog, provider scope/freshness/compensation, and seeded scope boundary - PASS (33 focused); full suite - PASS (467 tests, 91% coverage); PostgreSQL migration - PASS. The sole write-capable outcome binds `place_purchase_order_hold` to the same production order as its notification, requires `erp:po:hold`, validates the locked open PO's expected source version plus part/plant relationship, journals a stable effect, and restores only its exact held version. | `5502172` RED and `45e6497` GREEN pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-26 | M8.5 | Routed Scenario C through the shared durable control plane. | Test: Scenario C controller contract and seeded PostgreSQL approval-to-execution flow - PASS (6 focused); `make verify` - PASS (473 tests, 91% coverage); clean migration and demo target - PASS. The controller accepts only the typed hold-and-notify pair, locks its targets to fresh current context facts, uses generic scope/source gate and immutable approval/workflow persistence, and the unmodified durable executor runs hold then notification only after Dana's approval. | `0a359dd` RED and `ad30918` GREEN pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-26 | M8.6 | Completed Scenario C safety, recovery, explanation, and deterministic CLI staging. | Test: fresh bulletin/filtering, scope, stale-approval, approval-before-hold, crash/retry, compensation, audit-only, service, and CLI contracts - PASS (22 focused); `make verify` - PASS (478 tests, 90% coverage); clean migration and demo target - PASS. The registered hold resumes from a post-effect crash with its journal key, compensates when the subsequent production notification fails, and stays fully explainable from append-only audit facts. The new local-only `enterprise-agent scenario-c` stages—not approves or executes—one fixed seeded pending review without an LLM or credentials, and refuses duplicate staging. | `2d4cb68` RED and `00efab8` GREEN pushed to `origin/main`; status completion recorded in this commit. |
+| 2026-08-26 | M9.1 | Defined the terminal interaction contract before changing presentation code. | Validation: writing-guideline review, `git diff --check`, and current Typer help for root, Scenario C, and audit commands - PASS. The tracked reference specifies semantic states and exits, copyable IDs, keyboard-only and secret-safe interaction, error guidance, TTY/non-TTY/no-color/JSON output, and compatibility test requirements. It separates target M9 behavior from current CLI output. | `f1ac7ad` pushed to `origin/main`; status completion recorded in this commit. |
