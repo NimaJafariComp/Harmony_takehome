@@ -129,6 +129,7 @@ def assert_seeded_provider_boundaries(database_url: str) -> None:
         "    PostgresCalendarAdapter,\n"
         "    PostgresErpAdapter,\n"
         "    PostgresIdentityAdapter,\n"
+        "    PostgresKnowledgeAdapter,\n"
         "    PostgresMailAdapter,\n"
         ")\n"
         "from enterprise_agent.domain import UserId\n"
@@ -138,12 +139,15 @@ def assert_seeded_provider_boundaries(database_url: str) -> None:
         "erp = PostgresErpAdapter(database_url)\n"
         "mail = PostgresMailAdapter(database_url)\n"
         "calendar = PostgresCalendarAdapter(database_url)\n"
+        "knowledge = PostgresKnowledgeAdapter(database_url)\n"
         "dana = identity.actor_for(UserId('00000000-0000-0000-0000-000000000001'))\n"
         "quinn = identity.actor_for(UserId('00000000-0000-0000-0000-000000000003'))\n"
         "avery = identity.actor_for(UserId('00000000-0000-0000-0000-000000000002'))\n"
         "procurement = erp.query(dana, EvidenceQuery(record_types=frozenset({'inventory', 'purchase_order', 'production_order', 'supplier'})))\n"
         "assert {(item.record_type, item.payload.get('po_number')) for item in procurement if item.record_type == 'purchase_order'} == {('purchase_order', 'PO-4812-Y'), ('purchase_order', 'PO-C-9001-W'), ('purchase_order', 'PO-NOISE-77')}\n"
         "assert {item.payload['supplier_code'] for item in procurement if item.record_type == 'supplier'} == {'SUP-BAIT', 'SUP-SLOW', 'SUP-W', 'SUP-Y', 'SUP-Z'}\n"
+        "bulletins = knowledge.query(dana, EvidenceQuery(record_types=frozenset({'supplier_risk_bulletin'})))\n"
+        "assert [(item.payload['bulletin_key'], item.payload['status'], item.source_version) for item in bulletins] == [('supplier-w-disruption', 'active', 2)]\n"
         "updates = mail.query(dana, EvidenceQuery(record_types=frozenset({'message'}), record_ids=frozenset({'00000000-0000-0000-0000-000000000801', '00000000-0000-0000-0000-000000000802'})))\n"
         "assert [item.payload['message_key'] for item in updates] == ['shipment-update-po-4812-y-v1', 'shipment-update-po-4812-y-v2']\n"
         "assert updates[-1].payload['payload']['current'] is True\n"
@@ -153,6 +157,7 @@ def assert_seeded_provider_boundaries(database_url: str) -> None:
         "assert calendar.query(quinn, EvidenceQuery(record_types=frozenset({'calendar_event'}))) == ()\n"
         "assert mail.query(avery, EvidenceQuery(record_types=frozenset({'message'}))) == ()\n"
         "assert calendar.query(avery, EvidenceQuery(record_types=frozenset({'calendar_event'}))) == ()\n"
+        "assert knowledge.query(quinn, EvidenceQuery(record_types=frozenset({'supplier_risk_bulletin'}))) == ()\n"
     )
     compose(
         "--profile",
