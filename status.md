@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M5 - Approval routing, durable scheduling, and audit explanation |
-| Current task | M5.2 - Implement durable task storage and claiming |
-| Required task progress | 31 / 58 complete |
+| Current task | M5.3 - Implement end-of-day approval routing |
+| Required task progress | 32 / 58 complete |
 | Acceptance criteria progress | 6 / 14 satisfied; 6 in progress |
-| Last validated commit | `a5c515b` |
-| Last completed-task push | `a5c515b` to `origin/main` |
+| Last validated commit | `7e85a9d` |
+| Last completed-task push | `7e85a9d` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -107,7 +107,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M5.1 Implement mutable demo clock | `complete` | AC-07, AC-10 | Test: `tests/test_demo_clock.py`, `tests/test_cli.py::test_clock_advance_command_uses_the_local_persisted_clock`, and `tests/test_stockout_detector.py` - PASS (clock adapter 100% direct coverage).<br>Validation: `make verify` - PASS (161 tests, 92.10% coverage, clean migration).<br>Evidence: PostgreSQL persists a singleton clock; reset/seed begins Monday 09:00; positive CLI advance is local guarded and survives a new adapter; and the Scenario A detector obtains business time from `ClockPort`.<br>Commit: `a5c515b` pushed to `origin/main`. |
-| M5.2 Implement durable task storage and claiming | `in_progress` | AC-10 | TDD contracts for idempotent persistence, ordered atomic due-task claims, lease expiry recovery, and completion fencing are being added. |
+| M5.2 Implement durable task storage and claiming | `complete` | AC-10 | Test: `tests/test_scheduler.py` - PASS (3; scheduler adapter 100% direct line-and-branch coverage).<br>Validation: `make verify` - PASS (164 tests, 92.37% coverage, clean migration).<br>Evidence: a PostgreSQL scheduler stores immutable pending tasks idempotently using the persisted demo clock; `FOR UPDATE SKIP LOCKED` atomically leases due work, increments attempts, excludes live leases, reclaims expired work after restart, and rejects completion at or after lease expiry.<br>Commit: `7e85a9d` pushed to `origin/main`. |
 | M5.3 Implement end-of-day approval routing | `not_started` | AC-07 | - |
 | M5.4 Implement Tuesday arrival task | `not_started` | AC-10 | - |
 | M5.5 Implement append-only audit writer | `not_started` | AC-11 | - |
@@ -163,7 +163,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence. M5.1 provides the deterministic persisted clock needed for end-of-day timing; routing behavior remains M5.3. |
 | AC-08 Fixed Scenario A workflow | `complete` | `po_reroute:v1` resolves only to its immutable six-step declaration and a plan-bound durable snapshot persists that exact ordered state. The executor runs each declared effect only in sequence; M4.8 proves model-added/reordered persisted steps reject before a claim and guards cannot be skipped before a provider action. |
 | AC-09 Idempotency, compensation, and recovery | `complete` | The closed catalog derives opaque stable effect and compensation keys. PostgreSQL journals independently committed effects for replay; M4.7 proves an injected post-replacement crash resumes its started step with exactly one replacement PO, while M4.6 proves only completed effects compensate in reverse order. |
-| AC-10 Durable scheduler and Tuesday loop | `in_progress` | M4.5 creates the idempotent durable `arrival_check` record at the next Tuesday 09:00 with the replacement PO only. M5.1 adds persistent time and detector clock injection; task claiming and Tuesday receipt handling remain M5.2/M5.4. |
+| AC-10 Durable scheduler and Tuesday loop | `in_progress` | M4.5 creates the idempotent durable `arrival_check` record at the next Tuesday 09:00 with the replacement PO only. M5.1 adds persistent time and detector clock injection; M5.2 adds idempotent persistence, atomic leasing, expiry reclaim, and stale-completion fencing. Tuesday receipt handling remains M5.4. |
 | AC-11 Append-only audit reconstruction | `in_progress` | M4.5 persists an external tool invocation journal and workflow started/result records. The formal append-only audit writer and human-readable reconstruction remain M5. |
 | AC-12 Scenario B free-form path | `in_progress` | The reusable scoped-provider, planner, audit, and scheduler boundaries are established; Scenario B behavior remains M6. |
 | AC-13 Three-provider contract | `not_started` | - |
@@ -237,3 +237,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M5.1 | Started persisted mutable demo-clock implementation. | Test: clock persistence, bounded CLI advancement, and detector clock-port contracts are being added before production code. | Pending RED checkpoint. |
 | 2026-08-25 | M5.1 | Completed persisted mutable demo-clock implementation. | Test: direct adapter, CLI, detector, and seeded PostgreSQL persistence/reset contracts - PASS; `make verify` - PASS (161 tests, 92.10% coverage, clean migration). | `a5c515b` pushed to `origin/main`; status completion pending this commit. |
 | 2026-08-25 | M5.2 | Started durable scheduled-task storage and claim implementation. | Test: idempotent persistence, due ordering, concurrent-safe leasing, expiry reclaim, and stale completion fencing are being added before production code. | Pending RED checkpoint. |
+| 2026-08-25 | M5.2 | Completed durable scheduled-task storage and claim implementation. | Test: direct adapter and seeded PostgreSQL persistence/lease/reclaim/fencing contracts - PASS (3; 100% direct coverage); `make verify` - PASS (164 tests, 92.37% coverage, clean migration). | `7e85a9d` pushed to `origin/main`; status completion pending this commit. |
