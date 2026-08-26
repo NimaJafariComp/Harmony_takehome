@@ -42,7 +42,7 @@ To use the terminal shell against the Compose database:
 make tui
 ```
 
-This starts the private database, applies migrations, and opens the keyboard-first Home screen. Direct commands remain available for scripts and documentation.
+This is the recommended command for an interviewer or operator. It starts the private database, applies migrations, and opens the keyboard-first Home screen; profile setup, guided demos, guarded live demos, status, audit, smoke checks, and live evaluations are all available there.
 
 ## Local development
 
@@ -60,13 +60,20 @@ The local-demo mutation guard accepts only the private Compose hostname `db` and
 
 ## Terminal use
 
-The default interactive command is:
+Use the Docker-backed terminal UI for normal interactive use:
 
 ```sh
-enterprise-agent
+make tui
 ```
 
-This command-line interface (CLI) is keyboard-only and renders bounded panels and tables. In a pipe, or with `--output json`, it never prompts and instead returns the safe command directory. All JSON output uses a versioned, sanitized envelope. Use `--no-color` for plain terminal output.
+It is keyboard-only and renders bounded panels and tables. In a pipe, or with `--output json`, it never prompts and instead returns the safe command directory. All JSON output uses a versioned, sanitized envelope. Use `--no-color` for plain terminal output.
+
+Do not use host `enterprise-agent` for database-backed operator actions: the guarded synthetic database is deliberately private to Compose at hostname `db`. Direct host commands are useful only for development/read-only commands after activating the `uv` environment. For a scripted database-backed command, run it through Compose instead:
+
+```sh
+docker compose --profile tools run --rm app enterprise-agent status
+docker compose --profile tools run --rm app enterprise-agent live-demo --list
+```
 
 ### Home menu
 
@@ -120,21 +127,16 @@ Choose Home option 3 to reach these actions:
 
 After an action finishes, its result stays on screen until you press Enter. Enter `b` from a nested menu to return Home and `q` from Home to quit.
 
-Useful direct commands:
+Useful host development/read-only commands after `uv sync --all-groups` and activating `.venv`:
 
 ```sh
 enterprise-agent guide
 enterprise-agent demo --list
-enterprise-agent demo --case scenario-a-reroute-bait
-enterprise-agent live-demo --list
-enterprise-agent live-demo --profile openai --case scenario-a-reroute
-enterprise-agent status
-enterprise-agent audit explain RUN_ID
-enterprise-agent llm-usage
+enterprise-agent llm-evaluate --list
 enterprise-agent --install-completion
 ```
 
-`demo` resets and seeds only the guarded local synthetic database after an explicit confirmation. `make demo` uses the intentional unattended form for continuous integration (CI) and repeatable reviewer runs. The guided stories clearly label whether they stage a pending plan or are a fixed acceptance-case walkthrough; neither route calls a live provider or executes business effects automatically.
+For interactive demos and all database-backed commands, return to `make tui`. `make demo` uses the intentional unattended form for continuous integration (CI) and repeatable reviewer runs. The guided stories clearly label whether they stage a pending plan or are a fixed acceptance-case walkthrough; neither route calls a live provider or executes business effects automatically.
 
 See [the terminal interaction contract](docs/terminal-interaction-contract.md) for output, keyboard, JSON, cancellation, and error-handling guarantees.
 
