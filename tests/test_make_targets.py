@@ -32,6 +32,7 @@ def test_makefile_exposes_all_standard_validation_targets() -> None:
         "migrate",
         "seed",
         "demo",
+        "llm-smoke",
     )
 
     assert result.returncode == 0, result.stderr
