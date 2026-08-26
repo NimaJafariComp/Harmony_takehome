@@ -14,6 +14,7 @@ The repository includes all required Scenario A and Scenario B behavior, optiona
 | Human control | No plan writes before an authorized approver decides. Approval authority, scopes, plan hashes, policy, and source versions are revalidated. |
 | Reliable effects | Workflows have declared steps, stable idempotency keys, crash recovery, compensation, durable scheduling, and an append-only audit ledger. |
 | LLM boundaries | OpenAI, Claude, and OpenRouter adapters share schemas. Live calls are explicit, account-configured, and cannot execute a plan or fall back across providers. |
+| Recorded walkthrough | [TRANSCRIPT.md](TRANSCRIPT.md) separates reproducible Scenario A/B/C control-plane proof from the opt-in, no-write OpenAI scorecard. |
 
 ## Run the deterministic reviewer demo
 
