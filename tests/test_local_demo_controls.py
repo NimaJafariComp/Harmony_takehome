@@ -27,12 +27,12 @@ class RecordingDemoClock:
         return self.current_at
 
 
-def test_demo_clock_control_advances_exactly_one_day_only_when_explicitly_enabled() -> None:
-    """The UI has one predictable demo-time action, separate from workflows and the demo engine."""
+def test_composed_demo_clock_control_advances_exactly_one_day() -> None:
+    """The local-target composition has one predictable demo-time action without a second setting."""
     from enterprise_agent.application.local_demo_controls import LocalDemoClockControlService
 
     clock = RecordingDemoClock()
-    control = LocalDemoClockControlService(clock=clock, demo_mode_enabled=True)
+    control = LocalDemoClockControlService(clock=clock)
 
     result = control.advance_one_day()
 
@@ -41,20 +41,18 @@ def test_demo_clock_control_advances_exactly_one_day_only_when_explicitly_enable
     assert clock.advances == [timedelta(days=1)]
 
 
-def test_demo_clock_control_fails_closed_when_demo_mode_is_not_explicitly_enabled() -> None:
-    """A missing or false setting cannot be turned into a clock mutation by a UI caller."""
+def test_unconfigured_demo_clock_control_fails_closed() -> None:
+    """Only composition may expose the clock; an unconfigured imported app cannot advance it."""
     from enterprise_agent.application.local_demo_controls import (
         LocalDemoClockControlDisabledError,
-        LocalDemoClockControlService,
+        UnconfiguredLocalDemoClockControlService,
     )
 
-    clock = RecordingDemoClock()
-    control = LocalDemoClockControlService(clock=clock, demo_mode_enabled=False)
+    control = UnconfiguredLocalDemoClockControlService()
 
     assert not control.availability().can_advance
     with pytest.raises(LocalDemoClockControlDisabledError):
         control.advance_one_day()
-    assert clock.advances is None
 
 
 def test_demo_clock_control_reports_an_unavailable_local_clock_without_falling_back() -> None:
@@ -74,14 +72,13 @@ def test_demo_clock_control_reports_an_unavailable_local_clock_without_falling_b
     with pytest.raises(LocalDemoClockControlUnavailableError):
         LocalDemoClockControlService(
             clock=UnavailableClock(),
-            demo_mode_enabled=True,
         ).advance_one_day()
 
 
-def test_demo_clock_control_composition_requires_true_setting_and_uses_only_the_local_clock(
+def test_demo_clock_control_composition_requires_only_the_strict_local_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The local UI cannot enable clock writes from a provider profile, missing value, or other setting."""
+    """The local UI never needs DEMO_MODE, but it still cannot target a remote database."""
     from enterprise_agent import local_review_composition
     from enterprise_agent.application.local_demo_controls import (
         LocalDemoClockControlService,
@@ -103,26 +100,25 @@ def test_demo_clock_control_composition_requires_true_setting_and_uses_only_the_
         "load_local_environment",
         lambda _path: {"DATABASE_URL": database_url, "DEMO_MODE": "false"},
     )
-    disabled = local_review_composition.create_local_demo_clock_control_service()
+    with_legacy_false = local_review_composition.create_local_demo_clock_control_service()
 
     monkeypatch.setattr(
         local_review_composition,
         "load_local_environment",
-        lambda _path: {"DATABASE_URL": database_url, "DEMO_MODE": "true"},
+        lambda _path: {"DATABASE_URL": database_url},
     )
-    enabled = local_review_composition.create_local_demo_clock_control_service()
+    without_setting = local_review_composition.create_local_demo_clock_control_service()
 
     monkeypatch.setattr(
         local_review_composition,
         "load_local_environment",
         lambda _path: {
             "DATABASE_URL": "postgresql+psycopg://operator:operator@remote:5432/production",
-            "DEMO_MODE": "true",
         },
     )
     unsafe_target = local_review_composition.create_local_demo_clock_control_service()
 
-    assert isinstance(disabled, UnconfiguredLocalDemoClockControlService)
-    assert isinstance(enabled, LocalDemoClockControlService)
+    assert isinstance(with_legacy_false, LocalDemoClockControlService)
+    assert isinstance(without_setting, LocalDemoClockControlService)
     assert isinstance(unsafe_target, UnconfiguredLocalDemoClockControlService)
-    assert constructed_urls == [database_url]
+    assert constructed_urls == [database_url, database_url]

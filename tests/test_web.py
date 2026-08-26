@@ -185,6 +185,7 @@ async def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "Enterprise Agent / Local Review" in response.text
+    assert 'href="/demo"' in response.text
     assert "Local verification surface" in response.text
     assert "No provider call · no credential display · no business-system write" in response.text
     assert "API key" not in response.text
@@ -475,6 +476,7 @@ async def test_local_ui_advances_one_demo_day_only_with_a_bound_csrf_form() -> N
 
     assert page.status_code == 200
     assert "Advance demo clock one day" in page.text
+    assert "DEMO_MODE" not in page.text
     assert submitted.status_code == 200
     assert "Demo time advanced" in submitted.text
     assert "2026-08-25T09:00:00+00:00" in submitted.text
@@ -482,7 +484,7 @@ async def test_local_ui_advances_one_demo_day_only_with_a_bound_csrf_form() -> N
     assert controls.advances == 1
 
 
-async def test_local_ui_keeps_demo_clock_controls_locked_without_demo_mode() -> None:
+async def test_local_ui_keeps_demo_clock_controls_unavailable_without_safe_composition() -> None:
     """A read-capable local UI does not gain a mutable clock path merely because it has review data."""
     from httpx import ASGITransport, AsyncClient
 
@@ -502,10 +504,28 @@ async def test_local_ui_keeps_demo_clock_controls_locked_without_demo_mode() -> 
         forbidden = await client.post("/demo-clock/advance", data={"csrf_token": "forged"})
 
     assert page.status_code == 200
-    assert "Demo clock controls are locked" in page.text
+    assert "Demo clock controls are unavailable" in page.text
     assert 'action="/demo-clock/advance"' not in page.text
     assert forbidden.status_code == 403
     assert controls.advances == 0
+
+
+async def test_local_ui_exposes_a_demo_tab_without_a_demo_mode_environment_setting() -> None:
+    """A fresh reviewer can discover deterministic cases in one dedicated UI area without config trivia."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(read_service=RecordingLocalReviewService())),
+        base_url="http://testserver",
+    ) as client:
+        demo = await client.get("/demo")
+
+    assert demo.status_code == 200
+    assert "Demo mode" in demo.text
+    assert "Scenario A, B, and C review cases" in demo.text
+    assert "DEMO_MODE" not in demo.text
 
 
 async def test_local_ui_reuses_the_shared_a_b_c_demo_catalogue_without_running_it() -> None:
