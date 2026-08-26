@@ -374,8 +374,9 @@ def test_interactive_setup_displays_only_key_accessible_adapter_reviewed_models(
     result = CliRunner().invoke(cli.app, ["llm-setup"])
 
     assert result.exit_code == 0
-    assert "Available adapter-compatible models for this key:" in result.stdout
-    assert "gpt-5.6-terra (recommended)" in result.stdout
+    assert "Adapter-compatible models visible to this key" in result.stdout
+    assert "GPT-5.6 Terra — more capable: gpt-5.6-terra" in result.stdout
+    assert "Recommendation: Recommended" in result.stdout
     assert "gpt-5.6-luna" not in result.stdout
     assert "interactive-openai-key" not in result.output
     assert "OPENAI_MODEL=gpt-5.6-terra" in (tmp_path / ".env").read_text(encoding="utf-8")

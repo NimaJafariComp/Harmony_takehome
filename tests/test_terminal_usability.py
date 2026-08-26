@@ -165,6 +165,18 @@ def test_default_json_entry_remains_one_command_directory_envelope() -> None:
     assert payload["data"]["commands"][0]["command"] == "enterprise-agent demo --list"
 
 
+def test_default_tty_entry_starts_the_operator_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The installed command itself is the primary interactive interface, not a dev wrapper."""
+    launched: list[bool] = []
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(cli, "_run_application_shell", lambda: launched.append(True))
+
+    result = CliRunner().invoke(cli.app, [])
+
+    assert result.exit_code == 0
+    assert launched == [True]
+
+
 def test_application_shell_routes_keyboard_choices_to_demo_and_operator_modes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -211,7 +223,7 @@ def test_status_json_and_no_color_preserve_semantics_and_copyable_ids(
         "Pending approval",
         "00000000-0000-0000-0000-000000000802",
         "00000000-0000-0000-0000-000000000803",
-        "Audit: enterprise-agent audit explain run-terminal-usability",
+        "Read-only command: enterprise-agent audit explain run-terminal-usability",
         "Recovery: reclaimable",
     ):
         assert text in no_color_result.stdout
@@ -237,7 +249,7 @@ def test_tty_and_piped_status_keep_the_same_operational_facts(
         "Pending approval",
         "00000000-0000-0000-0000-000000000802",
         "00000000-0000-0000-0000-000000000803",
-        "Audit: enterprise-agent audit explain run-terminal-usability",
+        "Read-only command: enterprise-agent audit explain run-terminal-usability",
         "Recovery: reclaimable",
     ):
         assert text in tty_text

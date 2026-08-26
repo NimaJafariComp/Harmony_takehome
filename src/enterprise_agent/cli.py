@@ -1,6 +1,7 @@
 """Command-line interface for the enterprise agent harness."""
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
@@ -63,13 +64,15 @@ from enterprise_agent.llm_setup import (
     save_llm_profile,
     verify_credential,
 )
-from enterprise_agent.llm_usage import LLMUsageSummary, render_llm_usage, summarize_llm_usage
+from enterprise_agent.llm_usage import LLMUsageSummary, summarize_llm_usage
 from enterprise_agent.presentation import (
     ApprovalSummary,
     CommandGuideEntry,
     ConfirmationSummary,
+    DemoCatalogueEntry,
     EvidenceDisposition,
     EvidenceSummary,
+    MenuEntry,
     StatusSummary,
     TerminalError,
     TerminalPresenter,
@@ -88,9 +91,10 @@ from enterprise_agent.smoke import create_no_write_adapter, run_smoke
 
 app = typer.Typer(
     help="Operate the enterprise agent harness.",
-    no_args_is_help=True,
+    no_args_is_help=False,
     epilog=(
-        "Start here: enterprise-agent guide\n"
+        "Interactive home: enterprise-agent\n"
+        "Command directory: enterprise-agent guide\n"
         "Demo cases: enterprise-agent demo --list\n"
         "Shell completion: enterprise-agent --install-completion"
     ),
@@ -122,7 +126,7 @@ class InteractiveFlowCancelled(Exception):
     """Raised when an operator explicitly cancels before a command creates a durable write."""
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def harness(
     context: typer.Context,
     no_color: Annotated[
@@ -142,6 +146,15 @@ def harness(
             "must be either 'text' or 'json'", param_hint="--output"
         ) from error
     context.obj = OutputOptions(mode=mode, no_color=no_color)
+    if context.invoked_subcommand is not None:
+        return
+    if _uses_json_output():
+        guide()
+        return
+    if _is_interactive_terminal():
+        _run_application_shell()
+        return
+    guide()
 
 
 @app.command()
@@ -208,6 +221,192 @@ def guide() -> None:
         entries=entries,
         completion_command="enterprise-agent --install-completion",
     )
+
+
+def _run_application_shell() -> None:
+    """Route a TTY through safe modes while direct commands remain scriptable."""
+    entries = (
+        MenuEntry(
+            key="1",
+            title="Guided company demo",
+            description="Run one deterministic Scenario A, B, or C story.",
+            boundary="Local synthetic data; no live provider or automatic effect.",
+        ),
+        MenuEntry(
+            key="2",
+            title="Normal operator mode",
+            description="Inspect status, audit, LLM usage, and safe provider checks.",
+            boundary="Reads do not prompt; every write keeps its existing confirmation.",
+        ),
+        MenuEntry(
+            key="3",
+            title="Configure an LLM profile",
+            description="Save one selected local provider and reviewed model.",
+            boundary="The API key stays hidden and is saved only after confirmation.",
+        ),
+    )
+    while True:
+        _terminal_presenter().render_app_shell(
+            title="Enterprise agent",
+            subtitle="Purchasing and quality control plane · keyboard-only local operator shell",
+            entries=entries,
+            prompt="Choose 1, 2, or 3. Enter q to quit.",
+        )
+        try:
+            choice = _prompt_with_cancellation("Mode").strip().lower()
+        except InteractiveFlowCancelled:
+            _exit_cancelled("shell: cancelled; no data was written")
+        if choice == "q":
+            typer.echo("shell: closed; no data was written")
+            return
+        if choice == "1":
+            _run_demo_shell()
+            continue
+        if choice == "2":
+            _run_operator_shell()
+            continue
+        if choice == "3":
+            _run_shell_command(llm_setup)
+            continue
+        typer.echo("Choose 1, 2, 3, or q.")
+
+
+def _run_demo_shell() -> None:
+    """Let a reviewer select one short local story before the existing write confirmation."""
+    cases = guided_demo_cases()
+    entries = (
+        DemoCatalogueEntry(
+            key="1",
+            title="Safety tour",
+            summary="Runs the short cross-scenario proof set in its fixed order.",
+            mode="Local reset, seed, and guarded pending-plan stages",
+        ),
+        *tuple(
+            DemoCatalogueEntry(
+                key=str(index),
+                title=item.title,
+                summary=_demo_catalogue_summary(item),
+                mode=_demo_execution_mode_label(item.execution_mode),
+            )
+            for index, item in enumerate(cases, start=2)
+        ),
+    )
+    while True:
+        _terminal_presenter().render_demo_catalogue(
+            entries=entries,
+            prompt="Choose a case number. Enter b to return to Home.",
+        )
+        try:
+            choice = _prompt_with_cancellation("Demo case").strip().lower()
+        except InteractiveFlowCancelled:
+            _exit_cancelled("shell: cancelled; no data was written")
+        if choice == "b":
+            return
+        if choice == "1":
+            _run_shell_command(lambda: demo(case=[_SAFETY_TOUR_LABEL]))
+            return
+        try:
+            selected = cases[int(choice) - 2]
+        except (IndexError, ValueError):
+            typer.echo("Choose a listed case number or b to return.")
+            continue
+
+        def run_selected_case(case_id: str = selected.case_id) -> None:
+            demo(case=[case_id])
+
+        _run_shell_command(run_selected_case)
+        return
+
+
+def _run_operator_shell() -> None:
+    """Expose reviewed read/check routes without inventing a second operational API."""
+    entries = (
+        MenuEntry(
+            key="1",
+            title="Control-plane status",
+            description="Read pending approvals, workflow state, and recovery status.",
+            boundary="Read-only local database query; no provider request.",
+        ),
+        MenuEntry(
+            key="2",
+            title="Audit explanation",
+            description="Reconstruct one durable run from the append-only ledger.",
+            boundary="Read-only; requires a displayed run ID.",
+        ),
+        MenuEntry(
+            key="3",
+            title="LLM usage",
+            description="Read scalar token and cost totals from the immutable ledger.",
+            boundary="Read-only; no provider request.",
+        ),
+        MenuEntry(
+            key="4",
+            title="LLM profile setup",
+            description="Choose a provider and adapter-reviewed model for this machine.",
+            boundary="Hidden key input; save remains explicitly confirmed.",
+        ),
+        MenuEntry(
+            key="5",
+            title="Provider smoke check",
+            description="Run one fixed no-business-data provider probe.",
+            boundary="An explicit provider request; no business-system write.",
+        ),
+        MenuEntry(
+            key="6",
+            title="Live-evaluation catalogue",
+            description="Inspect the fixed synthetic LLM evaluation cases.",
+            boundary="Listing only; no provider request or write.",
+        ),
+    )
+    while True:
+        _terminal_presenter().render_app_shell(
+            title="Normal operator mode",
+            subtitle="Use existing safe commands through a concise keyboard menu",
+            entries=entries,
+            prompt="Choose 1–6. Enter b to return to Home.",
+        )
+        try:
+            choice = _prompt_with_cancellation("Operator action").strip().lower()
+        except InteractiveFlowCancelled:
+            _exit_cancelled("shell: cancelled; no data was written")
+        if choice == "b":
+            return
+        if choice == "1":
+            _run_shell_command(status)
+            continue
+        if choice == "2":
+            try:
+                run_id = _prompt_with_cancellation("Audit run ID")
+            except InteractiveFlowCancelled:
+                typer.echo("audit: cancelled; no ledger query was made")
+                continue
+
+            def explain_selected_run(selected_run_id: str = run_id) -> None:
+                audit_explain(selected_run_id)
+
+            _run_shell_command(explain_selected_run)
+            continue
+        if choice == "3":
+            _run_shell_command(llm_usage)
+            continue
+        if choice == "4":
+            _run_shell_command(llm_setup)
+            continue
+        if choice == "5":
+            _run_shell_command(llm_smoke)
+            continue
+        if choice == "6":
+            _run_shell_command(lambda: llm_evaluate(list_cases=True))
+            continue
+        typer.echo("Choose 1–6 or b to return.")
+
+
+def _run_shell_command(command: Callable[[], None]) -> None:
+    """Keep a TTY menu open after a direct command reports its documented exit outcome."""
+    try:
+        command()
+    except typer.Exit:
+        return
 
 
 @app.command()
@@ -480,7 +679,7 @@ def llm_usage() -> None:
     if _uses_json_output():
         _emit_json_result(_llm_usage_result(summary))
         return
-    typer.echo(render_llm_usage(summary))
+    _render_llm_usage_summary(summary)
 
 
 @app.command()
@@ -785,6 +984,39 @@ def _guided_demo_case_data(item: GuidedDemoCase) -> dict[str, object]:
     }
 
 
+def _guided_demo_catalogue_entries() -> tuple[DemoCatalogueEntry, ...]:
+    """Project only concise case labels into the read-only terminal catalogue."""
+    return tuple(
+        DemoCatalogueEntry(
+            key=item.case_id,
+            title=item.title,
+            summary=_demo_catalogue_summary(item),
+            mode=_demo_execution_mode_label(item.execution_mode),
+        )
+        for item in guided_demo_cases()
+    )
+
+
+def _demo_catalogue_summary(item: GuidedDemoCase) -> str:
+    """Keep the catalogue scannable while the selected-case panel retains the full result."""
+    summaries = {
+        "scenario-a-reroute-bait": "Rejects the cheaper, faster supplier because it is unapproved.",
+        "scenario-a-crash-recovery": "Restarts after a replacement-PO crash without creating a duplicate.",
+        "scenario-a-current-evidence": "Uses the newest update and treats hostile email text as evidence only.",
+        "scenario-a-tuesday-follow-up": "Closes on full receipt or creates one freshness-bound follow-up.",
+        "scenario-b-capacity": "Does not reallocate insufficient or already committed quality capacity.",
+        "scenario-c-pending-review": "Stages a supplier-risk review; no hold or notification occurs yet.",
+    }
+    return summaries[item.case_id]
+
+
+def _demo_execution_mode_label(mode: DemoExecutionMode) -> str:
+    """Name whether a catalogue option stages guarded state or explains a fixed fixture."""
+    if mode is DemoExecutionMode.STAGE_PENDING:
+        return "Stages a local pending plan"
+    return "Fixture walkthrough (no workflow effect)"
+
+
 def _guided_demo_result(result: GuidedDemoRun) -> TerminalResult:
     """Serialize only selected demo facts, never a provider payload or tool result."""
     results: list[dict[str, object]] = []
@@ -831,17 +1063,19 @@ def _guided_demo_result(result: GuidedDemoRun) -> TerminalResult:
 
 def _render_guided_demo_catalog() -> None:
     """Print the safe catalogue before an operator chooses whether to reset local data."""
-    typer.echo("Guided deterministic demo cases (local only)")
-    typer.echo("No live provider is called; staged plans remain pending until separately approved.")
-    typer.echo(f"  {_SAFETY_TOUR_LABEL}: run the complete short safety tour")
-    for item in guided_demo_cases():
-        mode = (
-            "stages a pending plan"
-            if item.execution_mode is DemoExecutionMode.STAGE_PENDING
-            else "fixture"
-        )
-        typer.echo(f"  {item.case_id}: {item.title} [{mode}]")
-        typer.echo(f"    {item.outcome}")
+    entries = (
+        DemoCatalogueEntry(
+            key=_SAFETY_TOUR_LABEL,
+            title="Safety tour",
+            summary="Runs the short cross-scenario proof set in its fixed order.",
+            mode="Local reset, seed, and guarded pending-plan stages",
+        ),
+        *_guided_demo_catalogue_entries(),
+    )
+    _terminal_presenter().render_demo_catalogue(
+        entries=entries,
+        prompt="Run enterprise-agent demo --case CASE_ID, or enterprise-agent demo for the safety tour.",
+    )
 
 
 def _render_guided_demo(result: GuidedDemoRun) -> None:
@@ -859,19 +1093,19 @@ def _render_guided_demo(result: GuidedDemoRun) -> None:
             if item.case.execution_mode is DemoExecutionMode.STAGE_PENDING
             else TerminalState.SUCCEEDED
         )
-        presenter.render_status(
-            StatusSummary(
-                state=state,
-                summary=f"{item.case.title}: {item.case.outcome}",
-                next_action=item.case.next_safe_action,
-            )
+        presenter.render_demo_case(
+            state=state,
+            title=item.case.title,
+            phase=item.case.phase,
+            planner=item.case.planner_label,
+            mode=(
+                "Local pending-plan stage; no workflow effect is executed."
+                if item.case.execution_mode is DemoExecutionMode.STAGE_PENDING
+                else "Fixed acceptance-case walkthrough; no workflow effect is staged."
+            ),
+            outcome=item.case.outcome,
+            next_action=item.case.next_safe_action,
         )
-        typer.echo(f"Phase: {item.case.phase}")
-        typer.echo(f"Planner: {item.case.planner_label}")
-        if item.case.execution_mode is DemoExecutionMode.FIXTURE:
-            typer.echo("Mode: fixed acceptance-case walkthrough; no workflow effect is staged.")
-        else:
-            typer.echo("Mode: real local pending-plan stage; no workflow effect is executed.")
         presenter.render_evidence(
             tuple(
                 EvidenceSummary(
@@ -960,9 +1194,17 @@ def _render_operator_status(snapshot: OperatorStatusSnapshot) -> None:
                 for item in snapshot.pending_approvals
             )
         )
-        for item in snapshot.pending_approvals:
-            if item.audit_run_id is not None:
-                typer.echo(f"Audit: enterprise-agent audit explain {item.audit_run_id}")
+        audit_actions = tuple(
+            (f"enterprise-agent audit explain {item.audit_run_id}",)
+            for item in snapshot.pending_approvals
+            if item.audit_run_id is not None
+        )
+        if audit_actions:
+            presenter.render_text_table(
+                title="Audit actions",
+                columns=("Read-only command",),
+                rows=audit_actions,
+            )
     if snapshot.workflows:
         presenter.render_workflows(
             tuple(
@@ -976,7 +1218,11 @@ def _render_operator_status(snapshot: OperatorStatusSnapshot) -> None:
                 for item in snapshot.workflows
             )
         )
-    typer.echo("Usage: enterprise-agent llm-usage")
+    presenter.render_text_table(
+        title="Next safe action",
+        columns=("Read-only command",),
+        rows=(("enterprise-agent llm-usage",),),
+    )
 
 
 def _operator_status_result(snapshot: OperatorStatusSnapshot) -> TerminalResult:
@@ -1132,7 +1378,15 @@ def _interactive_llm_setup() -> ProviderConfiguration:
         title="LLM setup",
         subtitle="Choose one local provider profile. Type cancel at any prompt to leave without writing.",
     )
-    typer.echo("Choose a provider: openai, claude, or openrouter.")
+    _terminal_presenter().render_text_table(
+        title="Provider profiles",
+        columns=("Key", "Provider", "Use"),
+        rows=(
+            ("openai", "OpenAI", "Reviewed structured-output adapter"),
+            ("claude", "Claude", "Reviewed structured-output adapter"),
+            ("openrouter", "OpenRouter", "Reviewed JSON-only adapter"),
+        ),
+    )
     selected_profile = _prompt_with_cancellation("Provider")
     try:
         profile = normalize_llm_profile(selected_profile)
@@ -1190,12 +1444,30 @@ def _interactive_llm_setup() -> ProviderConfiguration:
 
 def _prompt_model_choice(catalog: tuple[CuratedModel, ...]) -> str:
     """Display only curated adapter-reviewed models plus an explicit custom-ID selection."""
-    typer.echo("Available adapter-compatible models for this key:")
-    for index, model in enumerate(catalog, start=1):
-        marker = " (recommended)" if model.recommended else ""
-        typer.echo(f"  {index}. {model.label}: {model.model_id}{marker}")
+    _terminal_presenter().render_text_table(
+        title="Adapter-compatible models visible to this key",
+        columns=("Key", "Model", "Recommendation"),
+        rows=tuple(
+            (
+                str(index),
+                f"{model.label}: {model.model_id}",
+                "Recommended" if model.recommended else "Reviewed option",
+            )
+            for index, model in enumerate(catalog, start=1)
+        ),
+    )
     custom_index = len(catalog) + 1
-    typer.echo(f"  {custom_index}. Enter a custom model ID")
+    _terminal_presenter().render_text_table(
+        title="Custom model",
+        columns=("Key", "Choice", "Boundary"),
+        rows=(
+            (
+                str(custom_index),
+                "Enter a custom model ID",
+                "Explicit only; it is not promoted as a reviewed suggestion.",
+            ),
+        ),
+    )
     selection = _prompt_with_cancellation("Model choice", default="1").strip().lower()
     if selection == "custom" or selection == str(custom_index):
         return _prompt_with_cancellation("Custom model ID")
@@ -1275,6 +1547,48 @@ def _llm_usage_result(summary: LLMUsageSummary) -> TerminalResult:
     )
 
 
+def _render_llm_usage_summary(summary: LLMUsageSummary) -> None:
+    """Render immutable metering as a compact table instead of a wrapped text report."""
+    presenter = _terminal_presenter()
+    presenter.render_header(
+        title="LLM usage",
+        subtitle="Immutable audit ledger · provider billing remains authoritative",
+    )
+    if not summary.lines:
+        presenter.render_status(
+            StatusSummary(
+                state=TerminalState.SUCCEEDED,
+                summary="No LLM calls have been recorded.",
+                next_action="Use Normal operator mode to run an explicit no-business-data smoke check.",
+            )
+        )
+        return
+    presenter.render_text_table(
+        title="Usage by configured model",
+        columns=("Provider", "Model", "Requests", "Tokens", "Known cost (USD)"),
+        rows=tuple(
+            (
+                item.provider,
+                item.model,
+                str(item.request_count),
+                f"{item.total_tokens} total ({item.input_tokens} input / {item.output_tokens} output)",
+                f"${item.cost_usd}",
+            )
+            for item in summary.lines
+        ),
+    )
+    presenter.render_status(
+        StatusSummary(
+            state=TerminalState.SUCCEEDED,
+            summary=(
+                f"Known total: ${summary.total_cost_usd}. Estimates use the reviewed public rate card; "
+                "provider billing is authoritative."
+            ),
+            next_action="Use enterprise-agent status to inspect the associated local control-plane state.",
+        )
+    )
+
+
 def _evaluation_refusal(
     *,
     summary: str,
@@ -1333,9 +1647,14 @@ def _emit_evaluation_catalog() -> None:
             next_action="Use --profile PROFILE --case CASE_ID --execute for one deliberate request.",
         )
     )
-    for item in cases:
-        expected = ", ".join(sorted(item.expected_outcomes))
-        typer.echo(f"  {item.case_id} [{item.scenario}] — {item.title}; expected: {expected}")
+    presenter.render_text_table(
+        title="Fixed synthetic cases",
+        columns=("Case", "Scenario", "Expected safe outcomes"),
+        rows=tuple(
+            (item.case_id, item.scenario, ", ".join(sorted(item.expected_outcomes)))
+            for item in cases
+        ),
+    )
 
 
 def _llm_evaluation_result(
@@ -1406,21 +1725,32 @@ def _render_llm_evaluation(
             ),
         )
     )
-    for observation in report.observations:
-        checks = ", ".join(f"{name}={state.value}" for name, state in observation.checks.items())
-        expected = ", ".join(observation.expected_outcomes)
-        observed = observation.observed_outcome or "no structured outcome"
-        typer.echo(
-            f"  {observation.case_id}: expected={expected}; observed={observed}; "
-            f"status={observation.status.value}; {checks}"
-        )
+    presenter.render_text_table(
+        title="Synthetic evaluation scorecard",
+        columns=("Case", "Expected", "Observed", "Provider status", "Checks"),
+        rows=tuple(
+            (
+                observation.case_id,
+                ", ".join(observation.expected_outcomes),
+                observation.observed_outcome or "no structured outcome",
+                observation.status.value,
+                ", ".join(f"{name}={state.value}" for name, state in observation.checks.items()),
+            )
+            for observation in report.observations
+        ),
+    )
     usage = report.usage
-    typer.echo(
-        "Usage: "
-        f"requests={usage.request_count}, metered={usage.metered_request_count}, "
-        f"unmetered={usage.unmetered_request_count}, unknown-cost={usage.unknown_cost_request_count}, "
-        f"input={usage.input_tokens}, output={usage.output_tokens}, total={usage.total_tokens}, "
-        f"cost_usd={usage.total_cost_usd}"
+    presenter.render_text_table(
+        title="Request metering",
+        columns=("Requests", "Metered", "Tokens", "Cost (USD)"),
+        rows=(
+            (
+                str(usage.request_count),
+                f"{usage.metered_request_count} metered / {usage.unmetered_request_count} unavailable",
+                f"{usage.total_tokens} total ({usage.input_tokens} input / {usage.output_tokens} output)",
+                str(usage.total_cost_usd),
+            ),
+        ),
     )
 
 

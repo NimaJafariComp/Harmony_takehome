@@ -134,6 +134,26 @@ class CommandGuideEntry:
 
 
 @dataclass(frozen=True)
+class MenuEntry:
+    """One keyboard-selectable operator route with a visible safety boundary."""
+
+    key: str
+    title: str
+    description: str
+    boundary: str
+
+
+@dataclass(frozen=True)
+class DemoCatalogueEntry:
+    """One concise, safe local-demo option for an operator-facing catalogue."""
+
+    key: str
+    title: str
+    summary: str
+    mode: str
+
+
+@dataclass(frozen=True)
 class ApprovalSummary:
     """Copyable approval facts selected by a command or application read model."""
 
@@ -259,6 +279,92 @@ class TerminalPresenter:
                 completion_command,
             )
         )
+
+    def render_app_shell(
+        self,
+        *,
+        title: str,
+        subtitle: str,
+        entries: tuple[MenuEntry, ...],
+        prompt: str,
+    ) -> None:
+        """Render a bounded keyboard-only navigation surface without command-side policy."""
+        self.render_header(title=title, subtitle=subtitle)
+        if self._is_narrow():
+            self._render_menu_cards(entries)
+        else:
+            table = self._table("Choose a mode", "Key", "Mode", "What it does", "Boundary")
+            for entry in entries:
+                table.add_row(entry.key, entry.title, entry.description, entry.boundary)
+            self.console.print(table)
+        self.console.print(Panel(prompt, border_style=self.theme.subtitle_style, expand=False))
+
+    def render_demo_catalogue(
+        self,
+        *,
+        entries: tuple[DemoCatalogueEntry, ...],
+        prompt: str,
+    ) -> None:
+        """Render concise case cards or a table before a demo can reset local synthetic data."""
+        self.render_header(
+            title="Guided company demo",
+            subtitle="Deterministic local stories · no live provider · effects remain gated",
+        )
+        if self._is_narrow():
+            records = tuple(
+                (
+                    ("Key", entry.key),
+                    ("Case", entry.title),
+                    ("Proves", entry.summary),
+                    ("Mode", entry.mode),
+                )
+                for entry in entries
+            )
+            self._render_narrow_records("Choose a case", records)
+        else:
+            table = self._table("Choose a case", "Key", "Case", "What it proves", "Mode")
+            for entry in entries:
+                table.add_row(entry.key, entry.title, entry.summary, entry.mode)
+            self.console.print(table)
+        self.console.print(Panel(prompt, border_style=self.theme.subtitle_style, expand=False))
+
+    def render_demo_case(
+        self,
+        *,
+        state: TerminalState,
+        title: str,
+        phase: str,
+        planner: str,
+        mode: str,
+        outcome: str,
+        next_action: str,
+    ) -> None:
+        """Render one selected demo outcome as a bounded labelled panel."""
+        details = self._detail_grid()
+        details.add_row("Status", Text(state.label, style=self.theme.status_style(state)))
+        details.add_row("Phase", phase)
+        details.add_row("Planner", planner)
+        details.add_row("Mode", mode)
+        details.add_row("Outcome", outcome)
+        details.add_row("Next", next_action)
+        self.console.print(Panel(details, title=title, border_style=self.theme.status_style(state)))
+
+    def render_text_table(
+        self,
+        *,
+        title: str,
+        columns: tuple[str, ...],
+        rows: tuple[tuple[str, ...], ...],
+    ) -> None:
+        """Render sanitized text rows with a labelled narrow-terminal fallback."""
+        if self._is_narrow():
+            records = tuple(tuple(zip(columns, row, strict=True)) for row in rows)
+            self._render_narrow_records(title, records)
+            return
+        table = self._table(title, *columns)
+        for row in rows:
+            table.add_row(*row)
+        self.console.print(table)
 
     def render_approvals(self, approvals: tuple[ApprovalSummary, ...]) -> None:
         """Render approval facts, preserving every durable identifier in full."""
@@ -419,6 +525,16 @@ class TerminalPresenter:
                     soft_wrap=True,
                 )
             self.console.print()
+
+    def _render_menu_cards(self, entries: tuple[MenuEntry, ...]) -> None:
+        """Keep a four-column navigation choice legible on ordinary eighty-column terminals."""
+        for entry in entries:
+            details = self._detail_grid()
+            details.add_row("Key", entry.key)
+            details.add_row("Mode", entry.title)
+            details.add_row("Use", entry.description)
+            details.add_row("Boundary", entry.boundary)
+            self.console.print(Panel(details, border_style=self.theme.table_header_style))
 
     def _table(
         self,

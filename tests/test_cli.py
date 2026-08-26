@@ -240,10 +240,10 @@ def test_demo_list_is_read_only_and_discovers_the_guided_cases() -> None:
     result = CliRunner().invoke(cli.app, ["demo", "--list"])
 
     assert result.exit_code == 0
-    assert "Guided deterministic demo cases" in result.stdout
+    assert "Guided company demo" in result.stdout
     assert "scenario-a-reroute-bait" in result.stdout
     assert "scenario-c-pending-review" in result.stdout
-    assert "No live provider is called" in result.stdout
+    assert "no live provider" in result.stdout
 
 
 def test_demo_unattended_starts_only_the_selected_local_case_without_prompting(
@@ -398,7 +398,9 @@ def test_llm_usage_command_renders_only_grouped_immutable_metering(
     result = CliRunner().invoke(cli.app, ["llm-usage"])
 
     assert result.exit_code == 0
-    assert "LLM usage (immutable audit ledger)" in result.stdout
-    assert "openai / gpt-5.6-luna: 1 requests" in result.stdout
-    assert "input=1000 (cached=200), output=500, total=1500" in result.stdout
-    assert "estimated cost: $0.000764" in result.stdout
+    assert "Immutable audit ledger" in result.stdout
+    assert "Provider: openai" in result.stdout
+    assert "Model: gpt-5.6-luna" in result.stdout
+    assert "Requests: 1" in result.stdout
+    assert "1500 total (1000 input / 500 output)" in result.stdout
+    assert "Known cost (USD): $0.000764" in result.stdout

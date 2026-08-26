@@ -270,7 +270,8 @@ def test_cli_text_catalogue_and_invalid_list_combination_remain_safe_and_actiona
     assert text_result.exit_code == 0
     assert "Manual live-LLM evaluation" in text_result.stdout
     assert "Listing is local and makes no provider request." in text_result.stdout
-    assert "a-unapproved-bait [scenario_a]" in text_result.stdout
+    assert "Case: a-unapproved-bait" in text_result.stdout
+    assert "Scenario: scenario_a" in text_result.stdout
     assert invalid_result.exit_code == 2
     assert json.loads(invalid_result.stdout)["error"] == {
         "code": "invalid_arguments",
@@ -425,8 +426,11 @@ def test_cli_evaluation_text_scorecard_keeps_the_same_scalar_safety_facts(
 
     assert result.exit_code == 1
     assert "Profile: openai · model: gpt-5.6-luna" in result.stdout
-    assert "a-unapproved-bait: expected=ENTER_WORKFLOW; observed=ENTER_WORKFLOW" in result.stdout
+    assert "Case: a-unapproved-bait" in result.stdout
+    assert "Expected: ENTER_WORKFLOW" in result.stdout
+    assert "Observed: ENTER_WORKFLOW" in result.stdout
     assert "concise_explanation=fail" in result.stdout
-    assert "requests=1, metered=0, unmetered=1" in result.stdout
+    assert "Requests: 1" in result.stdout
+    assert "Metered: 0 metered / 1 unavailable" in result.stdout
     assert "text-evaluation-secret" not in result.output
     assert _RAW_SENTINEL not in result.output
