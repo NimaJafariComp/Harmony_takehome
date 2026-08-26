@@ -97,6 +97,16 @@ def test_evaluation_prompt_requires_field_level_grounding_for_effectful_cases() 
     assert "shortage.shortage_quantity=\"90\"" in instruction
 
 
+def test_evaluation_prompt_states_the_too_slow_supplier_safety_policy() -> None:
+    """An approved supplier that misses the production deadline cannot be silently ignored."""
+    case = _case("a-approved-too-slow")
+
+    assert (
+        "If an otherwise approved supplier arrives after production starts, choose MANUAL_REVIEW; "
+        "never choose NO_ACTION."
+    ) in case.prompt.messages[0].content
+
+
 @pytest.mark.critical
 def test_evaluation_scores_allowed_candidate_freshness_and_rationale_without_retaining_raw_output() -> (
     None
