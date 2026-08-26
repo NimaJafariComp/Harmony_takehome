@@ -101,6 +101,9 @@ class MemoryWorkflowStore:
     complete_guard_calls: list[tuple[WorkflowId, str, int]]
     start_tool_calls: list[tuple[WorkflowId, str, int, str]]
     complete_tool_calls: list[tuple[WorkflowId, str, int, str]]
+    failed_tool_calls: list[tuple[WorkflowId, str, int]]
+    start_compensation_calls: list[tuple[WorkflowId, str, int]]
+    complete_compensation_calls: list[tuple[WorkflowId, str, int]]
     lose_next_guard_transition: bool
 
     def __init__(self) -> None:
@@ -109,6 +112,9 @@ class MemoryWorkflowStore:
         self.complete_guard_calls = []
         self.start_tool_calls = []
         self.complete_tool_calls = []
+        self.failed_tool_calls = []
+        self.start_compensation_calls = []
+        self.complete_compensation_calls = []
         self.lose_next_guard_transition = False
 
     def create(self, snapshot: WorkflowStateSnapshot) -> None:
@@ -282,6 +288,165 @@ class MemoryWorkflowStore:
                 workflow,
                 current_step=expected_step_index,
                 status=WorkflowStatus.SUCCEEDED if finish_workflow else workflow.status,
+                completed_at=completed_at if finish_workflow else workflow.completed_at,
+                lease_owner=None if finish_workflow else workflow.lease_owner,
+                lease_expires_at=None if finish_workflow else workflow.lease_expires_at,
+                updated_at=completed_at,
+            ),
+            steps=tuple(steps),
+        )
+        self.snapshots[workflow_id] = updated
+        return updated
+
+    def fail_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        error: str,
+        failed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Model a terminal effect failure that retains the owner lease for compensation."""
+        self.failed_tool_calls.append((workflow_id, worker_id, expected_step_index))
+        snapshot = self.snapshots.get(workflow_id)
+        if snapshot is None:
+            return None
+        workflow = snapshot.workflow
+        if (
+            workflow.status is not WorkflowStatus.RUNNING
+            or workflow.lease_owner != worker_id
+            or workflow.lease_expires_at is None
+            or workflow.lease_expires_at <= failed_at
+            or workflow.current_step != expected_step_index - 1
+        ):
+            return None
+        step = snapshot.steps[expected_step_index - 1]
+        if step.status is not WorkflowStepStatus.RUNNING or step.idempotency_key != idempotency_key:
+            return None
+        steps = list(snapshot.steps)
+        steps[expected_step_index - 1] = replace(
+            step,
+            status=WorkflowStepStatus.FAILED,
+            error=error,
+            completed_at=failed_at,
+            updated_at=failed_at,
+        )
+        updated = WorkflowStateSnapshot(
+            workflow=replace(
+                workflow,
+                status=WorkflowStatus.FAILED,
+                last_error=error,
+                updated_at=failed_at,
+            ),
+            steps=tuple(steps),
+        )
+        self.snapshots[workflow_id] = updated
+        return updated
+
+    def begin_compensation(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Model the durable failed-to-compensating transition under the retained lease."""
+        snapshot = self.snapshots.get(workflow_id)
+        if snapshot is None:
+            return None
+        workflow = snapshot.workflow
+        if (
+            workflow.status is not WorkflowStatus.FAILED
+            or workflow.lease_owner != worker_id
+            or workflow.lease_expires_at is None
+            or workflow.lease_expires_at <= started_at
+        ):
+            return None
+        updated = replace(
+            snapshot,
+            workflow=replace(
+                workflow,
+                status=WorkflowStatus.COMPENSATING,
+                updated_at=started_at,
+            ),
+        )
+        self.snapshots[workflow_id] = updated
+        return updated
+
+    def start_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Model starting one already-succeeded effect's reverse action."""
+        self.start_compensation_calls.append((workflow_id, worker_id, expected_step_index))
+        snapshot = self.snapshots.get(workflow_id)
+        if snapshot is None:
+            return None
+        workflow = snapshot.workflow
+        if (
+            workflow.status is not WorkflowStatus.COMPENSATING
+            or workflow.lease_owner != worker_id
+            or workflow.lease_expires_at is None
+            or workflow.lease_expires_at <= started_at
+        ):
+            return None
+        step = snapshot.steps[expected_step_index - 1]
+        if step.tool_name is None or step.status is not WorkflowStepStatus.SUCCEEDED:
+            return None
+        steps = list(snapshot.steps)
+        steps[expected_step_index - 1] = replace(
+            step,
+            status=WorkflowStepStatus.COMPENSATING,
+            updated_at=started_at,
+        )
+        updated = WorkflowStateSnapshot(workflow=workflow, steps=tuple(steps))
+        self.snapshots[workflow_id] = updated
+        return updated
+
+    def complete_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        result: Mapping[str, object],
+        finish_workflow: bool,
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Model the durable result for one compensation and terminal workflow closure."""
+        self.complete_compensation_calls.append((workflow_id, worker_id, expected_step_index))
+        snapshot = self.snapshots.get(workflow_id)
+        if snapshot is None:
+            return None
+        workflow = snapshot.workflow
+        if (
+            workflow.status is not WorkflowStatus.COMPENSATING
+            or workflow.lease_owner != worker_id
+            or workflow.lease_expires_at is None
+            or workflow.lease_expires_at <= completed_at
+        ):
+            return None
+        step = snapshot.steps[expected_step_index - 1]
+        if step.status is not WorkflowStepStatus.COMPENSATING:
+            return None
+        steps = list(snapshot.steps)
+        steps[expected_step_index - 1] = replace(
+            step,
+            status=WorkflowStepStatus.COMPENSATED,
+            result={"effect": dict(step.result or {}), "compensation": dict(result)},
+            completed_at=completed_at,
+            updated_at=completed_at,
+        )
+        updated = WorkflowStateSnapshot(
+            workflow=replace(
+                workflow,
+                status=WorkflowStatus.COMPENSATED if finish_workflow else workflow.status,
                 completed_at=completed_at if finish_workflow else workflow.completed_at,
                 lease_owner=None if finish_workflow else workflow.lease_owner,
                 lease_expires_at=None if finish_workflow else workflow.lease_expires_at,
@@ -790,6 +955,28 @@ class ScenarioAToolExecutor:
         raise AssertionError("unexpected undeclared tool")
 
 
+@dataclass
+class CompensatingScenarioAToolExecutor:
+    """Record declared compensations while returning the same bounded Scenario A effects."""
+
+    compensation_actions: list[Any]
+    terminal_tool_name: str | None = None
+
+    def execute(self, actor: ActorContext, invocation: Any) -> dict[str, object]:
+        """Return ordinary effects except for the explicitly terminal declared tool."""
+        if invocation.tool_name == self.terminal_tool_name:
+            from enterprise_agent.application.tools import TerminalToolExecutionError
+
+            raise TerminalToolExecutionError("simulated terminal tool failure")
+        return ScenarioAToolExecutor().execute(actor, invocation)
+
+    def compensate(self, actor: ActorContext, compensation: Any) -> dict[str, object]:
+        """Record only the declared reverse action that the executor selected."""
+        assert actor.user_id == UserId("00000000-0000-0000-0000-000000000001")
+        self.compensation_actions.append(compensation.action)
+        return {"action": compensation.action}
+
+
 def _advance_to_first_tool(executor: Any, plan: Plan) -> None:
     """Complete the two declared read-only guards before the first external workflow step."""
     claimed = executor.claim(
@@ -888,6 +1075,116 @@ def test_executor_leaves_a_durable_started_tool_for_safe_retry_when_the_effect_f
     assert retained.steps[2].status is WorkflowStepStatus.RUNNING
     assert retained.steps[2].idempotency_key == started.invocation.idempotency_key
     assert store.complete_tool_calls == []
+
+
+@pytest.mark.critical
+def test_terminal_tool_failure_compensates_only_completed_effects_in_reverse_order() -> None:
+    """Terminal failure reverses prior effects, never an effect that did not successfully commit."""
+    from enterprise_agent.application.tools import CompensationAction, TerminalToolExecutionError
+
+    tools = CompensatingScenarioAToolExecutor(
+        compensation_actions=[], terminal_tool_name="schedule_arrival_check"
+    )
+    executor, store, plan, _ = executor_setup(tool_executor=tools)
+    _advance_to_first_tool(executor, plan)
+
+    for minute in (5, 7, 9):
+        started = executor.begin_next_tool(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=minute),
+            lease_expires_at=NOW + timedelta(minutes=20),
+            current_source_versions=plan.source_versions,
+        )
+        executor.execute_started_tool(
+            started,
+            worker_id="worker-a",
+            completed_at=NOW + timedelta(minutes=minute + 1),
+        )
+    terminal = executor.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=11),
+        lease_expires_at=NOW + timedelta(minutes=20),
+        current_source_versions=plan.source_versions,
+    )
+
+    with pytest.raises(TerminalToolExecutionError, match="terminal tool failure"):
+        executor.execute_started_tool(
+            terminal,
+            worker_id="worker-a",
+            completed_at=NOW + timedelta(minutes=12),
+        )
+
+    compensated = store.load(WORKFLOW_ID)
+    assert compensated is not None
+    assert compensated.workflow.status is WorkflowStatus.COMPENSATED
+    assert compensated.workflow.lease_owner is None
+    assert [step.status for step in compensated.steps] == [
+        WorkflowStepStatus.SUCCEEDED,
+        WorkflowStepStatus.SUCCEEDED,
+        WorkflowStepStatus.COMPENSATED,
+        WorkflowStepStatus.COMPENSATED,
+        WorkflowStepStatus.COMPENSATED,
+        WorkflowStepStatus.FAILED,
+    ]
+    assert tools.compensation_actions == [
+        CompensationAction.SEND_CORRECTION_NOTIFICATION,
+        CompensationAction.RESTORE_ORIGINAL_PURCHASE_ORDER,
+        CompensationAction.CANCEL_CREATED_REPLACEMENT_PO,
+    ]
+    assert [call[2] for call in store.start_compensation_calls] == [5, 4, 3]
+    assert [call[2] for call in store.complete_compensation_calls] == [5, 4, 3]
+
+
+@pytest.mark.critical
+def test_compensation_cancels_a_succeeded_arrival_task_before_earlier_effects() -> None:
+    """A failed workflow with all four completed effects unwinds every declared action in LIFO order."""
+    from enterprise_agent.application.tools import CompensationAction
+
+    tools = CompensatingScenarioAToolExecutor(compensation_actions=[])
+    executor, store, plan, _ = executor_setup(tool_executor=tools)
+    _advance_to_first_tool(executor, plan)
+    for minute in (5, 7, 9, 11):
+        started = executor.begin_next_tool(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=minute),
+            lease_expires_at=NOW + timedelta(minutes=20),
+            current_source_versions=plan.source_versions,
+        )
+        executor.execute_started_tool(
+            started,
+            worker_id="worker-a",
+            completed_at=NOW + timedelta(minutes=minute + 1),
+        )
+    successful = store.load(WORKFLOW_ID)
+    assert successful is not None
+    store.snapshots[WORKFLOW_ID] = replace(
+        successful,
+        workflow=replace(
+            successful.workflow,
+            status=WorkflowStatus.FAILED,
+            completed_at=None,
+            lease_owner="worker-a",
+            lease_expires_at=NOW + timedelta(minutes=20),
+        ),
+    )
+
+    compensated = executor.compensate_failed_workflow(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=14),
+    )
+
+    assert compensated.workflow.status is WorkflowStatus.COMPENSATED
+    assert tools.compensation_actions == [
+        CompensationAction.CANCEL_ARRIVAL_CHECK,
+        CompensationAction.SEND_CORRECTION_NOTIFICATION,
+        CompensationAction.RESTORE_ORIGINAL_PURCHASE_ORDER,
+        CompensationAction.CANCEL_CREATED_REPLACEMENT_PO,
+    ]
+    assert [call[2] for call in store.start_compensation_calls] == [6, 5, 4, 3]
 
 
 def test_executor_runs_all_declared_tool_inputs_in_order_and_finishes_the_workflow() -> None:
