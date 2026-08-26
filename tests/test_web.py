@@ -14,6 +14,10 @@ from enterprise_agent.application.local_decisions import (
     ApprovalDecisionResult,
     LocalApprovalDecisionStaleError,
 )
+from enterprise_agent.application.local_demo_controls import (
+    DemoClockAdvanceResult,
+    DemoClockControlAvailability,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.contract]
 
@@ -145,6 +149,21 @@ class RecordingLocalDecisionService:
         )
 
 
+@dataclass
+class RecordingLocalDemoClockControlService:
+    """Expose only the one fixed-duration demo-clock action to HTTP route contracts."""
+
+    can_advance: bool = True
+    advances: int = 0
+
+    def availability(self) -> DemoClockControlAvailability:
+        return DemoClockControlAvailability(can_advance=self.can_advance)
+
+    def advance_one_day(self) -> DemoClockAdvanceResult:
+        self.advances += 1
+        return DemoClockAdvanceResult(current_at="2026-08-25T09:00:00+00:00")
+
+
 @pytest.mark.critical
 async def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local_assets() -> None:
     """A reviewer gets a useful local entry point without credentials, provider setup, or write controls."""
@@ -240,6 +259,7 @@ async def test_local_ui_exposes_only_selected_actor_read_models_through_the_serv
     ]
     assert approval.json()["source_versions"] == {"inventory:PART-X": 4}
     assert workflow.json()["steps"][0]["idempotency_key_prefix"] == "not started"
+    assert workflow.json()["compensation_state"] == "not_required"
     assert audit.json() == {
         "run_id": "run-a",
         "event_count": 2,
@@ -364,6 +384,69 @@ async def test_local_ui_renders_semantic_evidence_ledger_pages_from_the_safe_rea
         ("workflow", "workflow-a"),
         ("audit", "run-a"),
     ]
+
+
+@pytest.mark.critical
+async def test_local_ui_advances_one_demo_day_only_with_a_bound_csrf_form() -> None:
+    """The visible demo control is explicit, fixed-duration, local, and unavailable without its token."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    controls = RecordingLocalDemoClockControlService()
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(
+                read_service=RecordingLocalReviewService(),
+                demo_clock_control_service=controls,
+            )
+        ),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/")
+        token = re.search(
+            r'<form[^>]+action="/demo-clock/advance"[^>]*>.*?'
+            r'name="csrf_token" value="([^"]+)"',
+            page.text,
+            flags=re.DOTALL,
+        )
+        assert token is not None
+        submitted = await client.post("/demo-clock/advance", data={"csrf_token": token.group(1)})
+        forged = await client.post("/demo-clock/advance", data={"csrf_token": "forged"})
+
+    assert page.status_code == 200
+    assert "Advance demo clock one day" in page.text
+    assert submitted.status_code == 200
+    assert "Demo time advanced" in submitted.text
+    assert "2026-08-25T09:00:00+00:00" in submitted.text
+    assert forged.status_code == 403
+    assert controls.advances == 1
+
+
+async def test_local_ui_keeps_demo_clock_controls_locked_without_demo_mode() -> None:
+    """A read-capable local UI does not gain a mutable clock path merely because it has review data."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    controls = RecordingLocalDemoClockControlService(can_advance=False)
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(
+                read_service=RecordingLocalReviewService(),
+                demo_clock_control_service=controls,
+            )
+        ),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/")
+        forbidden = await client.post("/demo-clock/advance", data={"csrf_token": "forged"})
+
+    assert page.status_code == 200
+    assert "Demo clock controls are locked" in page.text
+    assert 'action="/demo-clock/advance"' not in page.text
+    assert forbidden.status_code == 403
+    assert controls.advances == 0
 
 
 async def test_local_ui_renders_a_safe_html_error_page_for_a_missing_ledger_record() -> None:

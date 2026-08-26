@@ -219,7 +219,7 @@ def _workflow() -> WorkflowStateSnapshot:
         tool_name=None,
         status=WorkflowStepStatus.SUCCEEDED,
         idempotency_key="workflow-idempotency-secret",
-        input={"raw_provider_input": "do-not-render"},
+        input={"audit_run_id": str(RUN_ID), "raw_provider_input": "do-not-render"},
         result={"raw_provider_result": "do-not-render"},
         error="step-error-secret",
         attempt_count=1,
@@ -331,6 +331,8 @@ def test_local_review_service_reuses_cli_status_and_omits_sensitive_workflow_and
 
     workflow = service.workflow(str(WORKFLOW_ID))
     assert workflow["recovery_state"] == "in_progress"
+    assert workflow["compensation_state"] == "not_required"
+    assert workflow["audit_run_id"] == str(RUN_ID)
     assert workflow["steps"] == [
         {
             "step_index": 1,
