@@ -273,6 +273,95 @@ async def test_local_ui_rejects_unknown_cross_actor_and_unconfigured_read_resour
     assert unconfigured.json() == {"detail": "Local review data is not configured."}
 
 
+@pytest.mark.critical
+async def test_local_ui_renders_semantic_evidence_ledger_pages_from_the_safe_read_service() -> None:
+    """A reviewer can follow an approval, its evidence, workflow, and audit trail without client code."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    service = RecordingLocalReviewService()
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(read_service=service)),
+        base_url="http://testserver",
+    ) as client:
+        status = await client.get("/")
+        approval = await client.get("/approval/approval-a")
+        attention = await client.get("/attention/attention-a")
+        workflow = await client.get("/workflow/workflow-a")
+        audit = await client.get("/audit/run-a")
+        stylesheet = await client.get("/static/app.css")
+
+    assert status.status_code == 200
+    assert status.headers["content-type"].startswith("text/html")
+    assert "What awaits approval" in status.text
+    assert 'href="/approval/approval-a"' in status.text
+    assert 'href="/audit/run-a"' in status.text
+    assert 'href="/workflow/workflow-a"' in status.text
+    assert "rerouted" in status.text
+    assert "<script" not in status.text
+    assert "data-state=\"rerouted\"" in status.text
+
+    assert approval.status_code == 200
+    assert "Approval / approval-a" in approval.text
+    assert 'href="/attention/attention-a"' in approval.text
+    assert "scenario_a_policy:v1" in approval.text
+    assert "do-not-render" not in approval.text
+
+    assert attention.status_code == 200
+    assert "Evidence references" in attention.text
+    assert "inventory:PART-X" in attention.text
+    assert "Source version" in attention.text
+
+    assert workflow.status_code == 200
+    assert "Recovery state" in workflow.text
+    assert "verify_freshness" in workflow.text
+    assert "not started" in workflow.text
+
+    assert audit.status_code == 200
+    assert "Audit / run-a" in audit.text
+    assert "Audit explanation for run run-a" in audit.text
+
+    assert ".ledger-table-wrap" in stylesheet.text
+    assert "overflow-x: auto" in stylesheet.text
+    assert "@media (max-width:" in stylesheet.text
+    assert "[data-state]" in stylesheet.text
+    assert service.requests == [
+        ("status", None),
+        ("approval", "approval-a"),
+        ("attention", "attention-a"),
+        ("workflow", "workflow-a"),
+        ("audit", "run-a"),
+    ]
+
+
+async def test_local_ui_renders_a_safe_html_error_page_for_a_missing_ledger_record() -> None:
+    """Browser navigation receives clear recovery guidance while API callers retain their JSON contract."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.application.local_review import LocalReviewResourceNotFoundError
+    from enterprise_agent.web import create_app
+
+    class MissingReviewService(RecordingLocalReviewService):
+        def workflow(self, workflow_id: str) -> dict[str, object]:
+            raise LocalReviewResourceNotFoundError("missing internal detail")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(read_service=MissingReviewService())),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/workflow/not-a-real-workflow")
+        api = await client.get("/api/workflow/not-a-real-workflow")
+
+    assert page.status_code == 404
+    assert page.headers["content-type"].startswith("text/html")
+    assert "Review record unavailable" in page.text
+    assert "missing internal detail" not in page.text
+    assert "not-a-real-workflow" not in page.text
+    assert api.status_code == 404
+    assert api.json() == {"detail": "The requested review resource is unavailable."}
+
+
 def test_local_ui_module_has_no_direct_database_provider_or_configuration_dependency() -> None:
     """The UI boundary cannot turn into a parallel control plane or expose a credential setup path."""
     from enterprise_agent import web
