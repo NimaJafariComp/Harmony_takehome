@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -353,7 +354,9 @@ def test_scenario_a_seed_timeline_is_causally_consistent() -> None:
         table: [row.values for row in SEED_ROWS if row.table == table]
         for table in ("inventory", "production_orders", "purchase_orders", "suppliers", "messages")
     }
-    production = next(row for row in rows_by_table["production_orders"] if row["order_number"] == "4812")
+    production = next(
+        row for row in rows_by_table["production_orders"] if row["order_number"] == "4812"
+    )
     original_po = next(
         row for row in rows_by_table["purchase_orders"] if row["po_number"] == "PO-4812-Y"
     )
@@ -367,18 +370,20 @@ def test_scenario_a_seed_timeline_is_causally_consistent() -> None:
         row for row in rows_by_table["suppliers"] if row["supplier_code"] == "SUP-Z"
     )
 
-    production_start = production["start_date"]
-    delayed_receipt = original_po["expected_receipt_date"]
+    production_start = cast(date, production["start_date"])
+    delayed_receipt = cast(date, original_po["expected_receipt_date"])
+    replacement_lead_time = cast(int, viable_replacement["lead_time_days"])
+    current_payload = cast(dict[str, object], current_update["payload"])
+    current_expected_receipt = cast(str, current_payload["expected_receipt_date"])
+    required_quantity = cast(Decimal, production["required_quantity"])
+    safety_stock = cast(Decimal, inventory["safety_stock_quantity"])
+    available_quantity = cast(Decimal, inventory["available_quantity"])
 
     assert DEMO_CLOCK_START.date() < production_start
     assert delayed_receipt > production_start
-    assert current_update["payload"]["expected_receipt_date"] == delayed_receipt.isoformat()
-    assert DEMO_CLOCK_START.date() + timedelta(days=viable_replacement["lead_time_days"]) <= production_start
-    assert (
-        production["required_quantity"]
-        + inventory["safety_stock_quantity"]
-        - inventory["available_quantity"]
-    ) > 0
+    assert current_expected_receipt == delayed_receipt.isoformat()
+    assert DEMO_CLOCK_START.date() + timedelta(days=replacement_lead_time) <= production_start
+    assert required_quantity + safety_stock - available_quantity > 0
 
 
 def test_reset_and_seed_execute_one_safe_transaction_each(
