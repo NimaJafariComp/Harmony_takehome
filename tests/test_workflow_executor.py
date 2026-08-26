@@ -816,6 +816,34 @@ def test_executor_rejects_invalid_persisted_workflow_shape_before_claim(
     assert store.claim_calls == []
 
 
+@pytest.mark.critical
+@pytest.mark.parametrize("mutation", ["model_added_step", "reordered_steps"])
+def test_executor_rejects_model_mutated_workflow_steps_before_claim(mutation: str) -> None:
+    """Persisted steps may neither gain a model-authored action nor change reviewed order."""
+    from enterprise_agent.application.workflow_executor import WorkflowExecutionRejectedError
+
+    executor, store, plan, _ = executor_setup()
+    snapshot = store.load(WORKFLOW_ID)
+    assert snapshot is not None
+    steps = (
+        (*snapshot.steps, snapshot.steps[-1])
+        if mutation == "model_added_step"
+        else (snapshot.steps[1], snapshot.steps[0], *snapshot.steps[2:])
+    )
+    store.snapshots[WORKFLOW_ID] = replace(snapshot, steps=steps)
+
+    with pytest.raises(WorkflowExecutionRejectedError, match="stored steps"):
+        executor.claim(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=2),
+            lease_expires_at=NOW + timedelta(minutes=7),
+            current_source_versions=plan.source_versions,
+        )
+
+    assert store.claim_calls == []
+
+
 def test_guard_execution_rejects_undeclared_or_out_of_order_state_and_lost_transitions() -> None:
     """Guard advancement cannot bypass a declaration, lifecycle order, lease, or CAS result."""
     from enterprise_agent.application.workflow_executor import (
@@ -999,6 +1027,43 @@ def _advance_to_first_tool(executor: Any, plan: Plan) -> None:
         worker_id="worker-a",
         completed_at=NOW + timedelta(minutes=4),
     )
+
+
+@pytest.mark.critical
+def test_executor_blocks_skipped_guards_and_stale_source_before_provider_invocation() -> None:
+    """No provider action begins until both guards and exact current source evidence hold."""
+    from enterprise_agent.application.workflow_executor import WorkflowExecutionRejectedError
+
+    tools = RecordingToolExecutor(
+        events=[],
+        result={"replacement_purchase_order_id": "replacement-po-1"},
+    )
+    executor, store, plan, _ = executor_setup(tool_executor=tools)
+
+    with pytest.raises(WorkflowExecutionRejectedError, match="read-only guard"):
+        executor.begin_next_tool(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=2),
+            lease_expires_at=NOW + timedelta(minutes=12),
+            current_source_versions=plan.source_versions,
+        )
+
+    assert store.start_tool_calls == []
+    assert tools.events == []
+    _advance_to_first_tool(executor, plan)
+
+    with pytest.raises(WorkflowExecutionRejectedError, match="source evidence"):
+        executor.begin_next_tool(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=5),
+            lease_expires_at=NOW + timedelta(minutes=12),
+            current_source_versions={"erp:purchase_order:po-4812-y": 3},
+        )
+
+    assert store.start_tool_calls == []
+    assert tools.events == []
 
 
 @pytest.mark.critical
