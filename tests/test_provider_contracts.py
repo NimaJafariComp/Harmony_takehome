@@ -436,11 +436,11 @@ def test_interactive_setup_preserves_other_profiles_and_hides_the_selected_key(
         encoding="utf-8",
     )
     selected_key = f"selected-{contract.profile}-key"
-    prompts = iter((contract.profile, selected_key, "1"))
+    prompts = iter((contract.profile, selected_key, "1", "save"))
     prompt_calls: list[tuple[str, bool]] = []
 
     def fake_prompt(message: str, *args: object, **kwargs: object) -> str:
-        """Feed the provider, hidden key, and recommended-model menu choice without a real terminal."""
+        """Feed the provider, hidden key, model, and explicit save choice without a real terminal."""
         prompt_calls.append((message, bool(kwargs.get("hide_input", False))))
         return next(prompts)
 
