@@ -81,7 +81,7 @@ An operator must be able to copy every durable identifier without parsing prose.
 - **Attention**: attention ID, scenario, cause, and current state
 - **Plan and approval**: plan ID, plan hash prefix, approval ID, requester, approver, expiry, and decision state
 - **Workflow**: workflow ID, status, current step, idempotency key prefix, and recovery state
-- **Audit**: run ID, event count, timestamp range, and the read-only `audit explain` action
+- **Audit**: run ID, event count, timestamp range, and the read-only `audit explain` action; an audit-action table labels the run ID separately from approval and workflow IDs
 
 Commands may truncate an identifier only in decorative text. They must print its full value in a copyable field within the same result.
 

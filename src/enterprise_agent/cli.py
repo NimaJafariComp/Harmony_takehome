@@ -1198,14 +1198,17 @@ def _render_operator_status(snapshot: OperatorStatusSnapshot) -> None:
             )
         )
         audit_actions = tuple(
-            (f"enterprise-agent audit explain {item.audit_run_id}",)
+            (
+                item.audit_run_id,
+                f"enterprise-agent audit explain {item.audit_run_id}",
+            )
             for item in snapshot.pending_approvals
             if item.audit_run_id is not None
         )
         if audit_actions:
             presenter.render_text_table(
                 title="Audit actions",
-                columns=("Read-only command",),
+                columns=("Run ID", "Read-only command"),
                 rows=audit_actions,
             )
     if snapshot.workflows:
