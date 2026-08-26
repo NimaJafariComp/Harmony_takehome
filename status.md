@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M7 - OpenAI, Claude, and OpenRouter profiles |
-| Current task | M7.1 - Finalize provider-neutral LLM adapter contract |
-| Required task progress | 43 / 58 complete |
-| Acceptance criteria progress | 10 / 14 satisfied; 2 in progress |
-| Last validated commit | `08de64a` |
-| Last completed-task push | `08de64a` to `origin/main` |
+| Current task | M7.2 - Implement OpenAI adapter |
+| Required task progress | 44 / 58 complete |
+| Acceptance criteria progress | 10 / 14 satisfied; 3 in progress |
+| Last validated commit | `949687a` |
+| Last completed-task push | `949687a` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -129,7 +129,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M7.1 Finalize LLM adapter contract | `not_started` | AC-13 | - |
+| M7.1 Finalize LLM adapter contract | `complete` | AC-13 | Test: `tests/test_llm_contract.py`, `tests/test_ports.py`, and `tests/test_planning_schemas.py` - PASS (14 focused tests).<br>Validation: `make verify` - PASS (296 tests, 91.51% coverage, clean migration).<br>Evidence: every selected adapter now returns one immutable provider-neutral result with exactly `succeeded`, `invalid_response`, `timeout`, `provider_failure`, or `refusal` status. Failure results retain neither provider payload nor error text and cannot become planner input; success output must be structured and is immutable. The existing deterministic fake remains compatible but must explicitly request output before schema validation.<br>Commit: `949687a` pushed to `origin/main`. |
 | M7.2 Implement OpenAI adapter | `not_started` | AC-13 | - |
 | M7.3 Implement Claude adapter | `not_started` | AC-13 | - |
 | M7.4 Implement OpenRouter adapter | `not_started` | AC-13 | - |
@@ -166,7 +166,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-10 Durable scheduler and Tuesday loop | `complete` | M4.5 creates an idempotent Tuesday 09:00 `arrival_check` task bound to replacement PO, original attention, and actor. M5.1 persists business time; M5.2 atomically leases due work, reclaims expired claims, and fences stale completion. M5.4 proves a live lease reads only scoped current PO receipt evidence: full receipt resolves the original attention, while partial/missing receipt creates exactly one source-version-specific causal follow-up and re-enters the loop. |
 | AC-11 Append-only audit reconstruction | `complete` | The PostgreSQL ledger enforces append-only controlled, sanitized, provenance-bound events and deterministic chronological reads. A strict `audit explain` uses only that ledger. M5.7 proves one fully correlated Scenario A run records authorized evidence, planner/gate/approval decisions, EOD routing, workflow and tool execution, durable task scheduling/firing, and Tuesday follow-up re-entry; the audit-only explanation reconstructs the result without live-system reads. |
 | AC-12 Scenario B free-form path | `complete` | M6.1-M6.6 prove the distinct quality actor can see only quality evidence, detects both imminent held-lot paths, and emits only typed bounded recommendations. The shared freshness/scope gate, immutable approval, dynamic catalog workflow, idempotent executor, compensation interface, and audit ledger control all Scenario B writes. The seeded M6.6 run proves Q-7002's 80-unit shortage path, Q-7001's approved reallocation/notification path, no ERP leakage, approval-before-write, crash/replay safety, and a ledger-only explanation that names each selected outcome. |
-| AC-13 Three-provider contract | `not_started` | - |
+| AC-13 Three-provider contract | `in_progress` | M7.1 establishes the shared five-state provider-neutral outcome contract: structured success, invalid response, timeout, provider failure, and refusal. Failure results retain no raw provider data and cannot enter schema validation; provider-specific adapters, profile setup, mocked cross-provider contract tests, and manual smoke evidence remain M7.2-M7.8. |
 | AC-14 Demo, documentation, and transcript | `not_started` | - |
 
 ## Activity log
@@ -258,3 +258,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M6.4 | Completed current-state Scenario B tool effects. | Test: quality/tool adapter contracts - PASS (21), including seeded PostgreSQL reallocation, supervisor notification, shortage escalation, and CAS-bound compensation; `make verify` - PASS (283 tests, 92.14% coverage, clean migration). | `34a32c4` GREEN pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-25 | M6.5 | Completed Scenario B reuse of the shared control plane. | Test: pending approval, strict bounded-tool plan, stale/scope denial, manual-review no-op, durable staged execution, and approval-before-write contracts - PASS; `make verify` - PASS (289 tests, 91.54% coverage, clean migration). | `729a4cf` RED and `759d363` GREEN pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-25 | M6.6 | Completed seeded Scenario B control-plane verification. | Test: one PostgreSQL run proves the covered and no-cover outcomes, quality/ERP isolation, approval-before-write, forced crash/replay idempotency, and ledger-only explanation - PASS; `make verify` - PASS (290 tests, 91.50% coverage, clean migration). | `2a9cdd5` RED and `08de64a` GREEN pushed to `origin/main`; status completion recorded in this commit. |
+| 2026-08-25 | M7.1 | Completed provider-neutral LLM result contract. | Test: normalized success, invalid response, timeout, provider failure, refusal, immutable output, and invalid result-state contracts - PASS (14 focused); `make verify` - PASS (296 tests, 91.51% coverage, clean migration). | `585f1b4` RED and `949687a` GREEN pushed to `origin/main`; status completion recorded in this commit. |
