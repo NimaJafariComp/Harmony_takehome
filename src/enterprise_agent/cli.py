@@ -246,12 +246,18 @@ def _run_application_shell() -> None:
         ),
         MenuEntry(
             key="2",
+            title="Guarded live local demo",
+            description="Stage one live provider proposal for human approval.",
+            boundary="Resets only local synthetic data; provider request and local review records require confirmation.",
+        ),
+        MenuEntry(
+            key="3",
             title="Normal operator mode",
             description="Inspect status, audit, LLM usage, and safe provider checks.",
             boundary="Reads do not prompt; every write keeps its existing confirmation.",
         ),
         MenuEntry(
-            key="3",
+            key="4",
             title="Configure an LLM profile",
             description="Save one selected local provider and reviewed model.",
             boundary="The API key stays hidden and is saved only after confirmation.",
@@ -264,7 +270,7 @@ def _run_application_shell() -> None:
             title="Enterprise agent",
             subtitle="Purchasing and quality control plane · keyboard-only local operator shell",
             entries=entries,
-            prompt="Choose 1, 2, or 3. Enter q to quit.",
+            prompt="Choose 1–4. Enter q to quit.",
         )
         try:
             choice = _prompt_with_cancellation("Mode").strip().lower()
@@ -277,12 +283,15 @@ def _run_application_shell() -> None:
             _run_demo_shell()
             continue
         if choice == "2":
-            _run_operator_shell()
+            _run_live_demo_shell()
             continue
         if choice == "3":
+            _run_operator_shell()
+            continue
+        if choice == "4":
             _run_shell_command(llm_setup)
             continue
-        typer.echo("Choose 1, 2, 3, or q.")
+        typer.echo("Choose 1–4 or q.")
 
 
 def _run_demo_shell() -> None:
@@ -373,12 +382,6 @@ def _run_operator_shell() -> None:
             description="Inspect the fixed synthetic LLM evaluation cases.",
             boundary="Listing only; no provider request or write.",
         ),
-        MenuEntry(
-            key="7",
-            title="Guarded live local demo",
-            description="Stage one live provider proposal for human approval.",
-            boundary="Resets only local synthetic data; provider request and local review records require confirmation.",
-        ),
     )
     while True:
         presenter = _terminal_presenter()
@@ -387,7 +390,7 @@ def _run_operator_shell() -> None:
             title="Normal operator mode",
             subtitle="Use existing safe commands through a concise keyboard menu",
             entries=entries,
-            prompt="Choose 1–7. Enter b to return to Home.",
+            prompt="Choose 1–6. Enter b to return to Home.",
         )
         try:
             choice = _prompt_with_cancellation("Operator action").strip().lower()
@@ -422,10 +425,7 @@ def _run_operator_shell() -> None:
         if choice == "6":
             _run_live_evaluation_shell()
             continue
-        if choice == "7":
-            _run_live_demo_shell()
-            continue
-        typer.echo("Choose 1–7 or b to return.")
+        typer.echo("Choose 1–6 or b to return.")
 
 
 def _run_live_evaluation_shell() -> None:

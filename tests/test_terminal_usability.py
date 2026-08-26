@@ -184,19 +184,20 @@ def test_default_tty_entry_starts_the_operator_shell(monkeypatch: pytest.MonkeyP
     assert launched == [True]
 
 
-def test_application_shell_routes_keyboard_choices_to_demo_and_operator_modes(
+def test_application_shell_routes_keyboard_choices_to_demo_live_demo_and_operator_modes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """TTY navigation is an app shell that delegates to existing safe command flows."""
-    choices = iter(("1", "2", "q"))
+    choices = iter(("1", "2", "3", "q"))
     routed: list[str] = []
     monkeypatch.setattr(cli, "_prompt_with_cancellation", lambda *_args, **_kwargs: next(choices))
     monkeypatch.setattr(cli, "_run_demo_shell", lambda: routed.append("demo"))
+    monkeypatch.setattr(cli, "_run_live_demo_shell", lambda: routed.append("live-demo"))
     monkeypatch.setattr(cli, "_run_operator_shell", lambda: routed.append("operator"))
 
     cli._run_application_shell()
 
-    assert routed == ["demo", "operator"]
+    assert routed == ["demo", "live-demo", "operator"]
 
 
 def test_shell_command_waits_for_an_operator_to_read_the_result(
@@ -249,20 +250,6 @@ def test_live_evaluation_shell_runs_one_explicitly_confirmed_case(
             "execute": True,
         }
     ]
-
-
-def test_operator_shell_routes_guarded_live_demo_from_the_keyboard_menu(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The live end-to-end demo is reachable without reconstructing a Docker command."""
-    choices = iter(("7", "b"))
-    routed: list[str] = []
-    monkeypatch.setattr(cli, "_prompt_with_cancellation", lambda *_args, **_kwargs: next(choices))
-    monkeypatch.setattr(cli, "_run_live_demo_shell", lambda: routed.append("live-demo"))
-
-    cli._run_operator_shell()
-
-    assert routed == ["live-demo"]
 
 
 def test_live_demo_shell_forwards_an_explicit_profile_and_fixed_case(
