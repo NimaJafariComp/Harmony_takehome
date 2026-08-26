@@ -7,12 +7,14 @@ from typing import Annotated, NoReturn, cast
 
 import typer
 from rich.console import Console
+from sqlalchemy.exc import SQLAlchemyError
 
 from enterprise_agent import __version__
 from enterprise_agent.adapters import (
     DemoClockNotInitializedError,
     PostgresAuditAdapter,
     PostgresDemoClock,
+    PostgresOperatorStatusAdapter,
 )
 from enterprise_agent.application import AuditExplainer, AuditExplanationError
 from enterprise_agent.application.guided_demo import (
@@ -23,6 +25,7 @@ from enterprise_agent.application.guided_demo import (
     run_guided_demo,
     select_guided_demo_cases,
 )
+from enterprise_agent.application.operator_status import OperatorStatusSnapshot
 from enterprise_agent.application.scenario_c_demo import (
     ScenarioCDeterministicRunError,
     stage_scenario_c_pending,
@@ -48,6 +51,7 @@ from enterprise_agent.llm_setup import (
 from enterprise_agent.llm_usage import render_llm_usage, summarize_llm_usage
 from enterprise_agent.presentation import (
     ApprovalSummary,
+    CommandGuideEntry,
     ConfirmationSummary,
     EvidenceDisposition,
     EvidenceSummary,
@@ -68,6 +72,11 @@ from enterprise_agent.smoke import run_smoke
 app = typer.Typer(
     help="Operate the enterprise agent harness.",
     no_args_is_help=True,
+    epilog=(
+        "Start here: enterprise-agent guide\n"
+        "Demo cases: enterprise-agent demo --list\n"
+        "Shell completion: enterprise-agent --install-completion"
+    ),
 )
 clock_app = typer.Typer(help="Inspect and advance deterministic local-demo time.")
 audit_app = typer.Typer(help="Reconstruct read-only operator stories from the audit ledger.")
@@ -104,6 +113,51 @@ def config_check() -> None:
     typer.echo(configuration.safe_summary())
 
 
+@app.command()
+def guide() -> None:
+    """Show the shortest safe path to demo, inspect state, and enable shell completion."""
+    _terminal_presenter().render_command_guide(
+        title="Reviewer guide",
+        entries=(
+            CommandGuideEntry(
+                command="enterprise-agent demo --list",
+                purpose="See selectable local deterministic safety cases before resetting demo data.",
+            ),
+            CommandGuideEntry(
+                command="make demo",
+                purpose="Run the unattended local safety tour with no LLM provider call.",
+            ),
+            CommandGuideEntry(
+                command="enterprise-agent status",
+                purpose="Inspect pending approvals plus workflow and recovery state.",
+            ),
+            CommandGuideEntry(
+                command="enterprise-agent audit explain RUN_ID",
+                purpose="Reconstruct one run from the append-only audit ledger.",
+            ),
+            CommandGuideEntry(
+                command="enterprise-agent llm-usage",
+                purpose="Read recorded token and cost totals without a provider request.",
+            ),
+        ),
+        completion_command="enterprise-agent --install-completion",
+    )
+
+
+@app.command()
+def status() -> None:
+    """Read pending approvals and workflow recovery state without prompting or writing."""
+    try:
+        snapshot = PostgresOperatorStatusAdapter(_database_url(action="status")).read_status()
+    except SQLAlchemyError as error:
+        typer.echo(
+            "status: unavailable (the local database is unavailable; run make demo first)",
+            err=True,
+        )
+        raise typer.Exit(code=1) from error
+    _render_operator_status(snapshot)
+
+
 @app.command(name="llm-setup")
 def llm_setup() -> None:
     """Interactively save one selected LLM profile locally without displaying its API key."""
@@ -121,7 +175,7 @@ def llm_setup() -> None:
 
 @app.command()
 def run() -> None:
-    """Bootstrap one configured LLM profile; full scenario execution is introduced with the M8 demo."""
+    """Bootstrap one configured LLM profile and direct the operator to explicit safe next steps."""
     try:
         configuration = _provider_configuration_or_setup(action="run")
     except InteractiveFlowCancelled:
@@ -129,7 +183,8 @@ def run() -> None:
     typer.echo(
         "run: LLM profile ready "
         f"(profile: {configuration.profile}, model: {configuration.model}); "
-        "scenario execution is not available until M8."
+        "next: enterprise-agent demo --list for the local safety tour or enterprise-agent llm-smoke "
+        "for a no-business-data provider check."
     )
 
 
@@ -411,6 +466,69 @@ def _render_guided_demo(result: GuidedDemoRun) -> None:
                     ),
                 )
             )
+
+
+def _render_operator_status(snapshot: OperatorStatusSnapshot) -> None:
+    """Render the safe local read model without issuing additional database or provider calls."""
+    presenter = _terminal_presenter()
+    presenter.render_header(
+        title="Local operator status",
+        subtitle="Read-only control-plane summary · no provider request or write",
+    )
+    if not snapshot.pending_approvals and not snapshot.workflows:
+        presenter.render_status(
+            StatusSummary(
+                state=TerminalState.SUCCEEDED,
+                summary="No pending approvals or workflow instances are recorded.",
+                next_action="Run enterprise-agent demo --list to choose a local safety case.",
+            )
+        )
+        return
+
+    state = (
+        TerminalState.PENDING_APPROVAL if snapshot.pending_approvals else TerminalState.IN_PROGRESS
+    )
+    presenter.render_status(
+        StatusSummary(
+            state=state,
+            summary=(
+                f"{len(snapshot.pending_approvals)} pending approval(s), "
+                f"{len(snapshot.workflows)} workflow instance(s)."
+            ),
+            next_action="Use the full IDs below to inspect audit history or resume an authorized path.",
+        )
+    )
+    if snapshot.pending_approvals:
+        presenter.render_approvals(
+            tuple(
+                ApprovalSummary(
+                    approval_id=item.approval_id,
+                    plan_id=item.plan_id,
+                    requester=item.requester,
+                    approver=item.approver,
+                    decision_state=item.decision_state,
+                    expires_at=item.expires_at,
+                )
+                for item in snapshot.pending_approvals
+            )
+        )
+        for item in snapshot.pending_approvals:
+            if item.audit_run_id is not None:
+                typer.echo(f"Audit: enterprise-agent audit explain {item.audit_run_id}")
+    if snapshot.workflows:
+        presenter.render_workflows(
+            tuple(
+                WorkflowSummary(
+                    workflow_id=item.workflow_id,
+                    status=item.status,
+                    current_step=item.current_step,
+                    idempotency_key_prefix=item.idempotency_key_prefix,
+                    recovery_state=item.recovery_state.label,
+                )
+                for item in snapshot.workflows
+            )
+        )
+    typer.echo("Usage: enterprise-agent llm-usage")
 
 
 _SAFETY_TOUR_LABEL = "safety-tour"

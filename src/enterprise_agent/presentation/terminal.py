@@ -11,6 +11,8 @@ from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
 
+_MINIMUM_WIDE_TABLE_WIDTH = 120
+
 
 class TerminalState(StrEnum):
     """Stable outcome labels supplied by commands before rendering."""
@@ -82,6 +84,14 @@ class ConfirmationSummary:
     freshness: str
     write_consequence: str
     confirmation_word: str
+
+
+@dataclass(frozen=True)
+class CommandGuideEntry:
+    """One copyable command and the short operator outcome it provides."""
+
+    command: str
+    purpose: str
 
 
 @dataclass(frozen=True)
@@ -184,6 +194,31 @@ class TerminalPresenter:
         )
         self.console.print(
             Panel(details, title="Confirm action", border_style=self.theme.attention_style)
+        )
+
+    def render_command_guide(
+        self,
+        *,
+        title: str,
+        entries: tuple[CommandGuideEntry, ...],
+        completion_command: str,
+    ) -> None:
+        """Render a concise command directory with a copyable shell-completion instruction."""
+        if self._is_narrow():
+            self._render_narrow_records(
+                title,
+                tuple((("Command", entry.command), ("Use", entry.purpose)) for entry in entries),
+            )
+        else:
+            table = self._table(title, "Command", "Use", copyable_columns=(0,))
+            for entry in entries:
+                table.add_row(entry.command, entry.purpose)
+            self.console.print(table)
+        self.console.print(
+            Text.assemble(
+                ("Shell completion: ", self.theme.label_style),
+                completion_command,
+            )
         )
 
     def render_approvals(self, approvals: tuple[ApprovalSummary, ...]) -> None:
@@ -328,8 +363,8 @@ class TerminalPresenter:
         return grid
 
     def _is_narrow(self) -> bool:
-        """Keep durable values intact when a conventional table would compress them."""
-        return self.console.width < 80
+        """Use label/value records before conventional terminals hide operational table columns."""
+        return self.console.width < _MINIMUM_WIDE_TABLE_WIDTH
 
     def _render_narrow_records(
         self,

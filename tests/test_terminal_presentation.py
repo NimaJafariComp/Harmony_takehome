@@ -118,6 +118,41 @@ def test_presenter_keeps_operational_ids_and_evidence_dispositions_copyable() ->
     assert "2026-08-26T12:00:00+00:00" in rendered
 
 
+def test_presenter_uses_label_value_records_before_eighty_columns_hide_operational_fields() -> None:
+    """Conventional terminals retain every approval and workflow label instead of squeezed columns."""
+    presenter, output = _presenter(width=80)
+
+    presenter.render_approvals(
+        (
+            ApprovalSummary(
+                approval_id="approval-80-columns",
+                plan_id="plan-80-columns",
+                requester="Dana Buyer",
+                approver="Avery Backup",
+                decision_state="rerouted",
+                expires_at="2026-08-27T17:00:00+00:00",
+            ),
+        )
+    )
+    presenter.render_workflows(
+        (
+            WorkflowSummary(
+                workflow_id="workflow-80-columns",
+                status="running",
+                current_step="create replacement purchase order",
+                idempotency_key_prefix="replace-po-80",
+                recovery_state="reclaimable",
+            ),
+        )
+    )
+
+    rendered = output.getvalue()
+    assert "Requester: Dana Buyer" in rendered
+    assert "Approver: Avery Backup" in rendered
+    assert "Recovery: reclaimable" in rendered
+    assert "workflow-80-columns" in rendered
+
+
 def test_presenter_renders_bounded_progress_and_rejects_invalid_bounds() -> None:
     """Local progress always exposes an honest finite completion range."""
     presenter, output = _presenter()

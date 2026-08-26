@@ -13,6 +13,7 @@ from .openrouter import (
     OpenRouterChatCompletionsTransport,
     UrllibOpenRouterChatCompletionsTransport,
 )
+from .operator_status import PostgresOperatorStatusAdapter
 from .plan_approvals import PostgresPlanApprovalAdapter
 from .providers import (
     PostgresCalendarAdapter,
@@ -49,6 +50,7 @@ __all__ = [
     "PostgresIdentityAdapter",
     "PostgresKnowledgeAdapter",
     "PostgresMailAdapter",
+    "PostgresOperatorStatusAdapter",
     "PostgresPlanApprovalAdapter",
     "PostgresQualityAdapter",
     "PostgresScenarioAToolAdapter",
