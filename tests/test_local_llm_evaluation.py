@@ -80,6 +80,9 @@ def test_local_llm_evaluation_lists_only_configured_profiles_and_returns_a_scala
     assert len(availability.cases) == 13
     assert receipt.profile == "openai"
     assert receipt.model == "gpt-5.6-luna"
+    assert receipt.provenance.mode_label == "LIVE"
+    assert receipt.provenance.schema_validation_label == "Passed"
+    assert receipt.provenance.gate_label == "Not invoked (no-write evaluation)"
     assert receipt.report.passed
     assert receipt.report.usage.total_tokens == 150
     assert receipt.report.usage.total_cost_usd == Decimal("0.000060")

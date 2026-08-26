@@ -12,6 +12,7 @@ from enterprise_agent.application.guided_demo import (
     run_guided_demo,
     select_guided_demo_cases,
 )
+from enterprise_agent.review_provenance import PlannerProvenance
 from enterprise_agent.seed import SeedSafetyError, _require_local_demo_database
 
 
@@ -57,6 +58,7 @@ class GuidedDemoReceiptCase:
     run_id: str | None
     approval_id: str | None
     workflow_id: str | None
+    provenance: PlannerProvenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +198,7 @@ def _receipt(*, persona: GuidedDemoPersona, run: GuidedDemoRun) -> GuidedDemoRec
                 run_id=str(pending.run_id) if pending is not None else None,
                 approval_id=str(pending.approval_id) if pending is not None else None,
                 workflow_id=str(scenario_c.workflow_id) if scenario_c is not None else None,
+                provenance=result.case.planner_provenance,
             )
         )
     return GuidedDemoReceipt(persona_label=persona.label, cases=tuple(cases))

@@ -35,6 +35,7 @@ from enterprise_agent.application.llm_evaluation import (
     LLMEvaluationReport,
     evaluate_cases,
     evaluation_cases,
+    live_evaluation_provenance,
     select_evaluation_cases,
 )
 from enterprise_agent.application.operator_status import (
@@ -81,6 +82,7 @@ from enterprise_agent.presentation import (
     TerminalTheme,
     WorkflowSummary,
 )
+from enterprise_agent.review_provenance import PlannerProvenance
 from enterprise_agent.seed import (
     SeedSafetyError,
     _require_local_demo_database,
@@ -978,6 +980,7 @@ def _guided_demo_case_data(item: GuidedDemoCase) -> dict[str, object]:
         "case_id": item.case_id,
         "title": item.title,
         "execution_mode": item.execution_mode.value,
+        "planner": item.planner_provenance.to_data(),
         "phase": item.phase,
         "outcome": item.outcome,
         "next_action": item.next_safe_action,
@@ -1084,7 +1087,7 @@ def _render_guided_demo(result: GuidedDemoRun) -> None:
     presenter.render_header(
         title="Guided deterministic demo",
         subtitle=(
-            "Local synthetic data only · deterministic fake planner · no live provider or external business write"
+            "Local synthetic data only · Planner: FAKE / DETERMINISTIC · no live provider or external business write"
         ),
     )
     for item in result.results:
@@ -1097,7 +1100,7 @@ def _render_guided_demo(result: GuidedDemoRun) -> None:
             state=state,
             title=item.case.title,
             phase=item.case.phase,
-            planner=item.case.planner_label,
+            provenance=item.case.planner_provenance,
             mode=(
                 "Local pending-plan stage; no workflow effect is executed."
                 if item.case.execution_mode is DemoExecutionMode.STAGE_PENDING
@@ -1662,9 +1665,11 @@ def _llm_evaluation_result(
     report: LLMEvaluationReport,
 ) -> TerminalResult:
     """Wrap the scalar-only manual scorecard in the universal command JSON envelope."""
+    provenance = _live_evaluation_provenance(configuration, report)
     data = {
         "profile": configuration.profile,
         "model": configuration.model,
+        "planner": provenance.to_data(),
     } | report.to_data()
     if report.passed:
         return TerminalResult(
@@ -1704,13 +1709,16 @@ def _render_llm_evaluation(
 ) -> None:
     """Render a compact scorecard from only sanitized scalars, never a provider response or rationale."""
     presenter = _terminal_presenter()
+    provenance = _live_evaluation_provenance(configuration, report)
     presenter.render_header(
         title="Manual live-LLM evaluation",
         subtitle=(
-            f"Profile: {configuration.profile} · model: {configuration.model} · fixed synthetic inputs · "
+            f"Planner: {provenance.mode_label} · Provider: {provenance.provider_label} · "
+            f"Profile: {provenance.profile_label} · Model: {provenance.model} · fixed synthetic inputs · "
             "no business-system write"
         ),
     )
+    presenter.render_planner_provenance(provenance)
     presenter.render_status(
         StatusSummary(
             state=TerminalState.SUCCEEDED if report.passed else TerminalState.FAILED,
@@ -1739,6 +1747,7 @@ def _render_llm_evaluation(
             for observation in report.observations
         ),
     )
+
     usage = report.usage
     presenter.render_text_table(
         title="Request metering",
@@ -1751,6 +1760,18 @@ def _render_llm_evaluation(
                 str(usage.total_cost_usd),
             ),
         ),
+    )
+
+
+def _live_evaluation_provenance(
+    configuration: ProviderConfiguration,
+    report: LLMEvaluationReport,
+) -> PlannerProvenance:
+    """Keep CLI text and JSON on the exact same safe live-evaluation provenance contract."""
+    return live_evaluation_provenance(
+        profile=configuration.profile,
+        model=configuration.model,
+        report=report,
     )
 
 

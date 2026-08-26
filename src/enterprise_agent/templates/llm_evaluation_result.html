@@ -5,7 +5,7 @@
 {% block content %}
   <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/demo">Demo mode</a><span aria-hidden="true">/</span><span>LLM evaluation complete</span></nav>
   <header class="page-intro compact">
-    <p class="eyebrow">Synthetic no-write evaluation</p>
+    <p class="eyebrow">Planner: {{ receipt.provenance.mode_label }} · synthetic no-write evaluation</p>
     <h1>LLM evaluation complete</h1>
     <p class="lede">{{ receipt.profile }} · {{ receipt.model }} evaluated {{ receipt.case_title }}. The scorecard retains no credential, prompt, raw provider response, or business-system write.</p>
   </header>
@@ -16,6 +16,12 @@
       <div><dt>Outcome</dt><dd><span class="state-label" data-state="{% if receipt.report.passed %}succeeded{% else %}failed{% endif %}">{% if receipt.report.passed %}passed{% else %}needs review{% endif %}</span></dd></div>
       <div><dt>Token total</dt><dd>{{ receipt.report.usage.total_tokens }}</dd></div>
       <div><dt>Cost total</dt><dd>${{ receipt.report.usage.total_cost_usd }}</dd></div>
+      <div><dt>Planner</dt><dd>{{ receipt.provenance.mode_label }}</dd></div>
+      <div><dt>Provider</dt><dd>{{ receipt.provenance.provider_label }}</dd></div>
+      <div><dt>Profile</dt><dd>{{ receipt.provenance.profile_label }}</dd></div>
+      <div><dt>Model</dt><dd>{{ receipt.provenance.model }}</dd></div>
+      <div><dt>Schema validation</dt><dd>{{ receipt.provenance.schema_validation_label }}</dd></div>
+      <div><dt>Gate</dt><dd>{{ receipt.provenance.gate_label }}</dd></div>
     </dl>
     <aside class="trace-card">
       <p class="section-label">Safety boundary</p>

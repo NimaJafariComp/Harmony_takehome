@@ -27,7 +27,7 @@ def test_safety_tour_selects_every_required_company_story_with_honest_execution_
     ]
     assert cases[0].execution_mode is DemoExecutionMode.STAGE_PENDING
     assert cases[-1].execution_mode is DemoExecutionMode.STAGE_PENDING
-    assert all(case.planner_label == "deterministic fake planner" for case in cases)
+    assert all(case.planner_provenance.mode_label == "FAKE / DETERMINISTIC" for case in cases)
     assert "unapproved" in cases[0].outcome.lower()
     assert "exactly one" in cases[1].outcome.lower()
     assert "malicious" in cases[2].outcome.lower()

@@ -85,6 +85,17 @@ An operator must be able to copy every durable identifier without parsing prose.
 
 Commands may truncate an identifier only in decorative text. They must print its full value in a copyable field within the same result.
 
+## Name planner provenance explicitly
+
+Reviewer-facing demos and evaluations must show how a recommendation was produced, without exposing a credential, prompt body, raw provider response, or rationale. Text, local UI, and JSON use the same sanitized fields:
+
+- **Planner**: `FAKE / DETERMINISTIC` for the fixed local planner, or `LIVE` for an explicitly opted-in provider call
+- **Provider, profile, and model**: `none`/`deterministic-fake-v1` for the local planner; the selected configured provider profile and model for a live evaluation
+- **Schema validation**: whether the returned structured recommendation was validated before its result was shown
+- **Gate**: whether the application gate accepted a staged plan, was not invoked for a fixture walkthrough, or was not invoked because a live evaluation is intentionally no-write
+
+The no-write evaluation wording is exact: `Gate: Not invoked (no-write evaluation)`. A live planner label proves only that the provider adapter was invoked for the fixed synthetic evaluation; it never implies a business-system write, approval, or production recommendation.
+
 ## Make keyboard-only decisions safe
 
 Interactive flows must work without a mouse. A confirmation presents the exact effect, target ID, approver, and freshness consequence before it accepts a response.
@@ -129,6 +140,7 @@ Every M9 command change requires tests for these contracts:
 - Interactive cancellation creates no durable write
 - Hidden-key setup retains the existing credential protections
 - Demo output identifies synthetic data, state transitions, and the next safe action
+- Guided demo and live-evaluation output identify planner mode, provider/profile/model, schema-validation status, and the applicable gate boundary in text, UI, and JSON
 - The Home and nested menus expose short labelled choices; wide terminals use bounded tables and ordinary terminals use bounded labelled cards
 
 The test suite asserts semantic content, exit codes, and durable side effects. It does not use visual snapshots of tables, colors, or spacing.

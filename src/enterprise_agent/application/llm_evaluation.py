@@ -27,6 +27,12 @@ from enterprise_agent.ports import (
     LLMPort,
     PromptEnvelope,
 )
+from enterprise_agent.review_provenance import (
+    GateStatus,
+    PlannerMode,
+    PlannerProvenance,
+    SchemaValidation,
+)
 
 _EVALUATION_NOW = datetime(2026, 8, 26, 12, tzinfo=UTC)
 _EVALUATION_VERSION = "v2"
@@ -167,6 +173,29 @@ class LLMEvaluationReport:
             "observations": [observation.to_data() for observation in self.observations],
             "usage": self.usage.to_data(),
         }
+
+
+def live_evaluation_provenance(
+    *, profile: str, model: str, report: LLMEvaluationReport
+) -> PlannerProvenance:
+    """Project the selected live adapter and its schema-only outcome without retaining provider output."""
+    if not report.observations:
+        schema_validation = SchemaValidation.NOT_RUN
+    elif all(
+        observation.checks.get("structured_valid") is EvaluationCheckState.PASS
+        for observation in report.observations
+    ):
+        schema_validation = SchemaValidation.PASSED
+    else:
+        schema_validation = SchemaValidation.FAILED
+    return PlannerProvenance(
+        mode=PlannerMode.LIVE,
+        provider=profile,
+        profile=profile,
+        model=model,
+        schema_validation=schema_validation,
+        gate_status=GateStatus.NOT_INVOKED_NO_WRITE_EVALUATION,
+    )
 
 
 def evaluation_cases() -> tuple[LLMEvaluationCase, ...]:

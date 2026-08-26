@@ -35,6 +35,12 @@ from enterprise_agent.application.scenario_c_demo import (
 from enterprise_agent.application.stockout import StockoutDetector
 from enterprise_agent.domain import ApprovalId, AttentionId, PlanId, RunId, UserId
 from enterprise_agent.ports import LLMMessage, PromptEnvelope
+from enterprise_agent.review_provenance import (
+    GateStatus,
+    PlannerMode,
+    PlannerProvenance,
+    SchemaValidation,
+)
 from enterprise_agent.seed import (
     ID_DANA,
     ID_LOT_GOOD,
@@ -81,11 +87,31 @@ class GuidedDemoCase:
     case_id: str
     title: str
     execution_mode: DemoExecutionMode
-    planner_label: str
     phase: str
     outcome: str
     next_safe_action: str
     identifiers: tuple[DemoIdentifier, ...]
+
+    @property
+    def planner_provenance(self) -> PlannerProvenance:
+        """Expose explicit fake-planner and gate facts without claiming a fixture executed a planner."""
+        if self.execution_mode is DemoExecutionMode.STAGE_PENDING:
+            return PlannerProvenance(
+                mode=PlannerMode.FAKE_DETERMINISTIC,
+                provider=None,
+                profile=None,
+                model="deterministic-fake-v1",
+                schema_validation=SchemaValidation.PASSED,
+                gate_status=GateStatus.PENDING_APPROVAL,
+            )
+        return PlannerProvenance(
+            mode=PlannerMode.FAKE_DETERMINISTIC,
+            provider=None,
+            profile=None,
+            model="deterministic-fake-v1",
+            schema_validation=SchemaValidation.NOT_RUN,
+            gate_status=GateStatus.NOT_INVOKED_FIXTURE,
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -126,7 +152,6 @@ DEMO_CASES: tuple[GuidedDemoCase, ...] = (
         case_id=_SCENARIO_A_REROUTE,
         title="Scenario A — viable reroute rejects the tempting supplier",
         execution_mode=DemoExecutionMode.STAGE_PENDING,
-        planner_label="deterministic fake planner",
         phase="evidence → candidate policy → pending human approval",
         outcome=(
             "Supplier Z is the only viable alternate; cheaper, faster Supplier Bait is visibly "
@@ -148,7 +173,6 @@ DEMO_CASES: tuple[GuidedDemoCase, ...] = (
         case_id="scenario-a-crash-recovery",
         title="Scenario A — recovery after replacement-PO crash",
         execution_mode=DemoExecutionMode.FIXTURE,
-        planner_label="deterministic fake planner",
         phase="replacement-PO effect → crash checkpoint → replay-safe recovery",
         outcome=(
             "A restart resumes the started effect with its original idempotency key and leaves "
@@ -164,7 +188,6 @@ DEMO_CASES: tuple[GuidedDemoCase, ...] = (
         case_id="scenario-a-current-evidence",
         title="Scenario A — newest evidence and hostile email handling",
         execution_mode=DemoExecutionMode.FIXTURE,
-        planner_label="deterministic fake planner",
         phase="evidence freshness → safe outcome",
         outcome=(
             "A newer on-schedule supplier update produces no action; malicious email content "
@@ -183,7 +206,6 @@ DEMO_CASES: tuple[GuidedDemoCase, ...] = (
         case_id="scenario-a-tuesday-follow-up",
         title="Scenario A — Tuesday arrival follow-up",
         execution_mode=DemoExecutionMode.FIXTURE,
-        planner_label="deterministic fake planner",
         phase="scheduled receipt check → close or reopen",
         outcome=(
             "A full Tuesday receipt resolves the original attention; a partial or missing receipt "
@@ -200,7 +222,6 @@ DEMO_CASES: tuple[GuidedDemoCase, ...] = (
         case_id="scenario-b-capacity",
         title="Scenario B — quality-lot capacity respects commitments",
         execution_mode=DemoExecutionMode.FIXTURE,
-        planner_label="deterministic fake planner",
         phase="quality evidence → capacity policy → approved reallocation or escalation",
         outcome=(
             "A released lot with complete free capacity can be reallocated after approval; an "
@@ -220,7 +241,6 @@ DEMO_CASES: tuple[GuidedDemoCase, ...] = (
         case_id=_SCENARIO_C_PENDING,
         title="Scenario C — supplier-risk bulletin awaits review",
         execution_mode=DemoExecutionMode.STAGE_PENDING,
-        planner_label="deterministic fake planner",
         phase="current bulletin → bounded hold-and-notify plan → pending human approval",
         outcome=(
             "The current supplier-risk bulletin stages one reviewable local plan; it does not "

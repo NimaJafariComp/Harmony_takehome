@@ -211,6 +211,13 @@ class RecordingLocalGuidedDemoService:
         )
 
     def run(self, *, persona_id: str, case_ids: tuple[str, ...]) -> GuidedDemoReceipt:
+        from enterprise_agent.review_provenance import (
+            GateStatus,
+            PlannerMode,
+            PlannerProvenance,
+            SchemaValidation,
+        )
+
         if not self.can_run:
             raise LocalGuidedDemoDisabledError("unavailable")
         self.runs.append((persona_id, case_ids))
@@ -226,6 +233,14 @@ class RecordingLocalGuidedDemoService:
                     run_id="demo-scenario-a-reroute",
                     approval_id="approval-a",
                     workflow_id=None,
+                    provenance=PlannerProvenance(
+                        mode=PlannerMode.FAKE_DETERMINISTIC,
+                        provider=None,
+                        profile=None,
+                        model="deterministic-fake-v1",
+                        schema_validation=SchemaValidation.PASSED,
+                        gate_status=GateStatus.PENDING_APPROVAL,
+                    ),
                 ),
             ),
         )
@@ -254,6 +269,12 @@ class RecordingLocalLLMEvaluationService(LocalLLMEvaluationPort):
     def evaluate(self, *, profile_id: str, case_id: str) -> LLMEvaluationReceipt:
         self.evaluations.append((profile_id, case_id))
         from enterprise_agent.application.llm_evaluation import LLMEvaluationReport
+        from enterprise_agent.review_provenance import (
+            GateStatus,
+            PlannerMode,
+            PlannerProvenance,
+            SchemaValidation,
+        )
 
         report = LLMEvaluationReport(
             observations=(),
@@ -265,6 +286,14 @@ class RecordingLocalLLMEvaluationService(LocalLLMEvaluationPort):
             case_id=case_id,
             case_title="Unapproved supplier bait",
             report=report,
+            provenance=PlannerProvenance(
+                mode=PlannerMode.LIVE,
+                provider="openai",
+                profile="openai",
+                model="gpt-5.6-luna",
+                schema_validation=SchemaValidation.PASSED,
+                gate_status=GateStatus.NOT_INVOKED_NO_WRITE_EVALUATION,
+            ),
         )
 
 
@@ -697,6 +726,7 @@ async def test_local_ui_runs_only_an_explicit_csrf_bound_persona_matched_guided_
     assert "Replace local synthetic demo data" in page.text
     assert submitted.status_code == 200
     assert "Guided demo ready" in submitted.text
+    assert "Planner: FAKE / DETERMINISTIC" in submitted.text
     assert 'href="/approval/approval-a"' in submitted.text
     assert 'href="/audit/demo-scenario-a-reroute"' in submitted.text
     assert replay.status_code == 403
@@ -771,6 +801,9 @@ async def test_local_ui_runs_one_explicit_csrf_bound_no_write_llm_evaluation() -
     assert "API key" not in page.text
     assert result.status_code == 200
     assert "LLM evaluation complete" in result.text
+    assert "Planner: LIVE" in result.text
+    assert "Schema validation" in result.text
+    assert "Not invoked (no-write evaluation)" in result.text
     assert "Token total" in result.text
     assert "Cost total" in result.text
     assert evaluator.evaluations == [("openai", "a-unapproved-bait")]

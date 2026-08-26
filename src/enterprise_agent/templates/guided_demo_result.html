@@ -18,6 +18,15 @@
           <p class="section-label">{{ case.execution_mode | replace('_', ' ') }}</p>
           <h3>{{ case.title }}</h3>
           <p>{{ case.outcome }}</p>
+          <p class="section-label">Planner: {{ case.provenance.mode_label }}</p>
+          <dl class="record-list" aria-label="Planner provenance">
+            <div><dt>Planner</dt><dd>{{ case.provenance.mode_label }}</dd></div>
+            <div><dt>Provider</dt><dd>{{ case.provenance.provider_label }}</dd></div>
+            <div><dt>Profile</dt><dd>{{ case.provenance.profile_label }}</dd></div>
+            <div><dt>Model</dt><dd>{{ case.provenance.model }}</dd></div>
+            <div><dt>Schema validation</dt><dd>{{ case.provenance.schema_validation_label }}</dd></div>
+            <div><dt>Gate</dt><dd>{{ case.provenance.gate_label }}</dd></div>
+          </dl>
           <p class="quiet">Next safe action: {{ case.next_safe_action }}</p>
           {% if case.run_id or case.approval_id or case.workflow_id %}
             <div class="result-links" aria-label="Durable review records">

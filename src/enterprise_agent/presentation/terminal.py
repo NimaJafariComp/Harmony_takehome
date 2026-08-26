@@ -13,6 +13,8 @@ from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
 
+from enterprise_agent.review_provenance import PlannerProvenance
+
 _MINIMUM_WIDE_TABLE_WIDTH = 120
 
 
@@ -220,6 +222,10 @@ class TerminalPresenter:
     console: Console
     theme: TerminalTheme
 
+    def clear_screen(self) -> None:
+        """Clear an interactive terminal before rendering the next bounded shell view."""
+        self.console.clear()
+
     def render_header(self, *, title: str, subtitle: str | None = None) -> None:
         """Render a concise command or demo heading."""
         content = Text(title, style=self.theme.title_style)
@@ -334,7 +340,7 @@ class TerminalPresenter:
         state: TerminalState,
         title: str,
         phase: str,
-        planner: str,
+        provenance: PlannerProvenance,
         mode: str,
         outcome: str,
         next_action: str,
@@ -343,11 +349,19 @@ class TerminalPresenter:
         details = self._detail_grid()
         details.add_row("Status", Text(state.label, style=self.theme.status_style(state)))
         details.add_row("Phase", phase)
-        details.add_row("Planner", planner)
+        self._add_planner_provenance_rows(details, provenance)
         details.add_row("Mode", mode)
         details.add_row("Outcome", outcome)
         details.add_row("Next", next_action)
         self.console.print(Panel(details, title=title, border_style=self.theme.status_style(state)))
+
+    def render_planner_provenance(self, provenance: PlannerProvenance) -> None:
+        """Render visible planner provenance without requiring a terminal color or provider payload."""
+        details = self._detail_grid()
+        self._add_planner_provenance_rows(details, provenance)
+        self.console.print(
+            Panel(details, title="Planner provenance", border_style=self.theme.subtitle_style)
+        )
 
     def render_text_table(
         self,
@@ -365,6 +379,15 @@ class TerminalPresenter:
         for row in rows:
             table.add_row(*row)
         self.console.print(table)
+
+    def _add_planner_provenance_rows(self, details: Table, provenance: PlannerProvenance) -> None:
+        """Add the complete sanitized fake/live identity and gate boundary to an existing detail grid."""
+        details.add_row("Planner", provenance.mode_label)
+        details.add_row("Provider", provenance.provider_label)
+        details.add_row("Profile", provenance.profile_label)
+        details.add_row("Model", provenance.model)
+        details.add_row("Schema validation", provenance.schema_validation_label)
+        details.add_row("Gate", provenance.gate_label)
 
     def render_approvals(self, approvals: tuple[ApprovalSummary, ...]) -> None:
         """Render approval facts, preserving every durable identifier in full."""

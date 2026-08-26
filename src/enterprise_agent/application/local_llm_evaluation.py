@@ -10,10 +10,12 @@ from enterprise_agent.application.llm_evaluation import (
     LLMEvaluationReport,
     evaluate_cases,
     evaluation_cases,
+    live_evaluation_provenance,
     select_evaluation_cases,
 )
 from enterprise_agent.config import ProviderConfiguration
 from enterprise_agent.ports import LLMPort
+from enterprise_agent.review_provenance import PlannerProvenance
 from enterprise_agent.smoke import create_no_write_adapter
 
 
@@ -60,6 +62,7 @@ class LLMEvaluationReceipt:
     case_id: str
     case_title: str
     report: LLMEvaluationReport
+    provenance: PlannerProvenance
 
 
 class LocalLLMEvaluationPort:
@@ -129,6 +132,11 @@ class LocalLLMEvaluationService(LocalLLMEvaluationPort):
             case_id=selected_case.case_id,
             case_title=selected_case.title,
             report=report,
+            provenance=live_evaluation_provenance(
+                profile=configuration.profile,
+                model=configuration.model,
+                report=report,
+            ),
         )
 
 
