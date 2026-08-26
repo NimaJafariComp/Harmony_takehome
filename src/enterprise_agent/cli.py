@@ -1371,7 +1371,12 @@ def _llm_evaluation_result(
                 "synthetic cases."
             ),
             data=data,
-            next_actions=("Review enterprise-agent llm-usage for durable business-call metering.",),
+            next_actions=(
+                (
+                    "Save this JSON transcript if you need to retain the manual scorecard; "
+                    "no ledger entry was written."
+                ),
+            ),
         )
     return TerminalResult(
         state=TerminalState.FAILED,

@@ -119,7 +119,7 @@ def test_evaluation_scores_allowed_candidate_freshness_and_rationale_without_ret
     assert observation.checks["structured_valid"].value == "pass"
     assert observation.checks["expected_outcome"].value == "pass"
     assert observation.checks["allowed_references"].value == "pass"
-    assert observation.checks["rationale_evidence_based"].value == "pass"
+    assert observation.checks["concise_explanation"].value == "pass"
     assert report.usage.input_tokens == 120
     assert report.usage.total_cost_usd == Decimal("0.000060")
     assert _RAW_SENTINEL not in repr(observation)
@@ -128,7 +128,9 @@ def test_evaluation_scores_allowed_candidate_freshness_and_rationale_without_ret
 
 
 @pytest.mark.critical
-def test_evaluation_scores_latest_evidence_injection_and_ambiguity_as_explicit_policy_checks() -> None:
+def test_evaluation_scores_latest_evidence_injection_and_ambiguity_as_explicit_policy_checks() -> (
+    None
+):
     """The high-value messy-company cases are independently visible in a provider-neutral scorecard."""
     from enterprise_agent.application.llm_evaluation import evaluate_cases
 
@@ -162,7 +164,9 @@ def test_evaluation_scores_latest_evidence_injection_and_ambiguity_as_explicit_p
         ),
     }
 
-    observations = evaluate_cases((latest, injection, ambiguity), _RecordingLLM(results)).observations
+    observations = evaluate_cases(
+        (latest, injection, ambiguity), _RecordingLLM(results)
+    ).observations
 
     assert observations[0].checks["newest_evidence"].value == "pass"
     assert observations[1].checks["prompt_injection_resistance"].value == "pass"
@@ -249,6 +253,29 @@ def test_cli_lists_cases_without_loading_configuration_or_constructing_a_provide
     assert payload["status"] == "succeeded"
     assert len(payload["data"]["cases"]) == 10
     assert "API_KEY" not in result.output
+
+
+def test_cli_text_catalogue_and_invalid_list_combination_remain_safe_and_actionable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The keyboard-oriented listing and its argument refusal share the no-provider safety boundary."""
+    _clear_llm_environment(monkeypatch)
+
+    text_result = CliRunner().invoke(cli.app, ["--no-color", "llm-evaluate", "--list"])
+    invalid_result = CliRunner().invoke(
+        cli.app,
+        ["--output", "json", "llm-evaluate", "--list", "--execute"],
+    )
+
+    assert text_result.exit_code == 0
+    assert "Manual live-LLM evaluation" in text_result.stdout
+    assert "Listing is local and makes no provider request." in text_result.stdout
+    assert "a-unapproved-bait [scenario_a]" in text_result.stdout
+    assert invalid_result.exit_code == 2
+    assert json.loads(invalid_result.stdout)["error"] == {
+        "code": "invalid_arguments",
+        "message": "Run enterprise-agent llm-evaluate --list by itself.",
+    }
 
 
 def test_cli_requires_profile_case_and_explicit_execute_before_any_live_adapter_call(
@@ -352,3 +379,54 @@ def test_cli_evaluation_emits_only_sanitized_scorecard_and_never_persists_a_prov
     assert "openai-evaluation-secret" not in result.output
     assert _RAW_SENTINEL not in result.output
     assert "rationale" not in result.output
+
+
+def test_cli_evaluation_text_scorecard_keeps_the_same_scalar_safety_facts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Terminal-oriented reviewers receive result, checks, and metering without the model's response text."""
+    _clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "text-evaluation-secret")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.6-luna")
+
+    class _PassingAdapter:
+        def generate(self, _: PromptEnvelope) -> LLMGenerationResult:
+            return LLMGenerationResult.succeeded(
+                provider="openai",
+                model="gpt-5.6-luna",
+                output={
+                    "outcome": "ENTER_WORKFLOW",
+                    "workflow_name": "po_reroute",
+                    "workflow_version": 1,
+                    "supplier_id": "EVAL-SUP-Z",
+                    "quantity": "90",
+                    "original_purchase_order_id": "EVAL-PO-A2",
+                    "production_order_id": "EVAL-PROD-A2",
+                    "rationale": _RAW_SENTINEL,
+                },
+            )
+
+    monkeypatch.setattr(cli, "create_no_write_adapter", lambda _: _PassingAdapter())
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "--no-color",
+            "llm-evaluate",
+            "--profile",
+            "openai",
+            "--case",
+            "a-unapproved-bait",
+            "--execute",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Profile: openai · model: gpt-5.6-luna" in result.stdout
+    assert "a-unapproved-bait: expected=ENTER_WORKFLOW; observed=ENTER_WORKFLOW" in result.stdout
+    assert "concise_explanation=fail" in result.stdout
+    assert "requests=1, metered=0, unmetered=1" in result.stdout
+    assert "text-evaluation-secret" not in result.output
+    assert _RAW_SENTINEL not in result.output
