@@ -43,13 +43,13 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` — required baseline remains complete; optional live-evidence hardening is active |
 | Current milestone | M13 - Optional live-LLM reviewer evidence hardening |
-| Current task | M13.2 - Standardize planner provenance across reviewer surfaces (ready) |
+| Current task | M13.3 - Add guarded live Scenario A local-demo runner (ready) |
 | Required task progress | 62 / 62 complete |
-| Optional task progress | 28 / 34 complete |
+| Optional task progress | 29 / 34 complete |
 | Acceptance criteria progress | 14 / 14 satisfied |
 | Optional live-evidence criterion | LE-01 in progress |
-| Last validated commit | `507516c` (M13.1 provider-free evaluation safety catalogue) |
-| Last completed-task push | M13.1 live-evaluation safety catalogue (`507516c`) |
+| Last validated commit | `7497881` (M13.2 planner-provenance surfaces) |
+| Last completed-task push | M13.2 planner-provenance surfaces (`7497881`; companion status record) |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -357,12 +357,14 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | M12.6 | Completed release validation. | `make verify` passed format, lint, strict MyPy, 579 tests at 85.70% coverage, Compose migration, and deterministic demo. The rebuilt loopback UI health endpoint returned only its safe readiness payload. Explicit OpenAI and Claude no-write smokes passed; the configured OpenRouter free model returned the normalized, secret-safe `provider_failure` result and was not retried because its external availability is rate limited. | `113cf49` validated plus this status commit pushed to `origin/main`. |
 | 2026-08-26 | M12.7 | Completed final source-requirement traceability review. | The seven-page assignment and appendix were reviewed against final implementation evidence, test names, commands, transcript, and written deliverables. `REQUIREMENTS.md` records each required Scenario A/B, model, deterministic workflow, LLM, documentation, and deliverable claim; it separates the safe walkthrough from the full execution proof and labels Scenario C, terminal HCI, and UI as optional additions. The review confirms all 14 acceptance criteria with no hidden live-provider or fixture claim. | `82261fe` plus this status commit pushed to `origin/main`. |
 
+| 2026-08-26 | M13.2 | Standardized visible planner provenance across reviewer surfaces. | Test: 48 guided/local/live evaluation and FastAPI contracts plus 41 terminal/CLI contracts - PASS; `make test-critical` - PASS (72); Ruff format/lint, strict MyPy, and `git diff --check` - PASS. The shared sanitized record makes fake/deterministic versus live source, provider/profile/model, schema validation, and gate non-invocation explicit in CLI text, JSON, and the loopback UI. Fixed-provider tests verified no secret, raw response, prompt, or business write is exposed; a real LIVE transcript remains deferred until it is observed in M13.6. | `7497881` implementation; completion recorded in this status commit. |
+
 ### M13 - Optional live-LLM reviewer evidence hardening
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M13.1 Complete fixed no-write evaluation safety catalogue | `complete` | LE-01 | Test: `tests/test_llm_evaluation.py`, `tests/test_local_llm_evaluation.py`, and `tests/test_web.py` - PASS (38 focused); `make test-critical` - PASS (72). Validation: Ruff format/lint, strict MyPy, and `git diff --check` - PASS. The fixed no-write pack now has 13 synthetic stories: the original ten plus Scenario B source-change/released-hold refresh and Scenario C unauthorized/hostile bulletin handling. Every new safe outcome is schema-bounded and tested with a fake adapter; no provider request, prompt/output persistence, credential, or business write occurs in CI. Commit: `507516c`; completion recorded in this status update. |
-| M13.2 Standardize planner provenance across reviewer surfaces | `not_started` | LE-01 | Pending M13.1. |
+| M13.2 Standardize planner provenance across reviewer surfaces | `complete` | LE-01 | Test: `tests/test_reviewer_provenance.py`, `tests/test_reviewer_provenance_cli.py`, guided/local/live evaluation, web, terminal, and CLI contracts - PASS (89 focused); `make test-critical` - PASS (72). Validation: Ruff format/lint, strict MyPy, and `git diff --check` - PASS. A single secret-free provenance model now makes text, JSON, and loopback UI state `Planner: FAKE / DETERMINISTIC` or `Planner: LIVE`, provider/profile/model, schema result, and the precise gate boundary. Fixture walkthroughs state that their gate was not invoked; live fixed-synthetic evaluation states `Gate: Not invoked (no-write evaluation)`. CLI and UI checks use a fake adapter only, so this task made no provider call or business write. The terminal contract records the same rule; actual live transcript evidence remains intentionally deferred to M13.6 rather than fabricated. Commit: `7497881`; completion recorded in this status update. |
 | M13.3 Add guarded live Scenario A local-demo runner | `not_started` | LE-01 | Pending M13.2. |
 | M13.4 Expose guarded live Scenario A path in loopback UI | `not_started` | LE-01 | Pending M13.3. |
 | M13.5 Capture factual provider-by-scenario matrix | `not_started` | LE-01 | Manual, explicit, no-write work after M13.1-M13.4. |
