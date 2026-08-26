@@ -17,6 +17,7 @@ from enterprise_agent.application.local_decisions import (
 from enterprise_agent.application.local_demo_controls import (
     DemoClockAdvanceResult,
     DemoClockControlAvailability,
+    LocalDemoClockControlDisabledError,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.contract]
@@ -162,6 +163,8 @@ class RecordingLocalDemoClockControlService:
         return DemoClockControlAvailability(can_advance=self.can_advance)
 
     def advance_one_day(self) -> DemoClockAdvanceResult:
+        if not self.can_advance:
+            raise LocalDemoClockControlDisabledError("demo mode is disabled")
         self.advances += 1
         return DemoClockAdvanceResult(current_at="2026-08-25T09:00:00+00:00")
 
@@ -279,12 +282,65 @@ async def test_local_ui_exposes_only_selected_actor_read_models_through_the_serv
 
     application = create_app(read_service=service)
     mutable_routes = {
-        method
+        (route.path, method)
         for route in application.routes
         for method in getattr(route, "methods", set())
         if method not in {"GET", "HEAD"}
     }
-    assert mutable_routes == {"POST"}
+    assert mutable_routes == {
+        ("/approval/{approval_id}/decision", "POST"),
+        ("/demo-clock/advance", "POST"),
+    }
+
+
+def test_fastapi_testclient_renders_actor_scoped_ledger_and_workflow_audit_detail() -> None:
+    """The browser client sees the same scoped evidence as the API, including recovery and audit links."""
+    from fastapi.testclient import TestClient
+
+    from enterprise_agent.web import create_app
+
+    service = RecordingLocalReviewService()
+    with TestClient(create_app(read_service=service)) as client:
+        status = client.get("/api/status")
+        ledger = client.get("/")
+        workflow = client.get("/workflow/workflow-a")
+        audit = client.get("/audit/run-a")
+
+    assert status.status_code == 200
+    assert status.json()["pending_approvals"][0]["approver"] == "Avery Backup"
+    assert ledger.status_code == 200
+    assert 'href="/approval/approval-a"' in ledger.text
+    assert workflow.status_code == 200
+    assert "Compensation" in workflow.text
+    assert "not required" in workflow.text
+    assert 'href="/audit/run-a"' in workflow.text
+    assert audit.status_code == 200
+    assert "Audit explanation for run run-a" in audit.text
+    assert service.requests == [
+        ("status", None),
+        ("status", None),
+        ("workflow", "workflow-a"),
+        ("audit", "run-a"),
+    ]
+
+
+def test_fastapi_testclient_rejects_cross_actor_ledger_access() -> None:
+    """A TestClient request cannot use a visible opaque ID to cross the selected actor boundary."""
+    from fastapi.testclient import TestClient
+
+    from enterprise_agent.application.local_review import LocalReviewAccessDeniedError
+    from enterprise_agent.web import create_app
+
+    class RefusingReviewService(RecordingLocalReviewService):
+        def attention(self, attention_id: str) -> dict[str, object]:
+            raise LocalReviewAccessDeniedError("cross-actor resource")
+
+    with TestClient(create_app(read_service=RefusingReviewService())) as client:
+        denied = client.get("/api/attention/other-actor-attention")
+
+    assert denied.status_code == 403
+    assert denied.json() == {"detail": "The selected demo actor cannot view this resource."}
+    assert "other-actor-attention" not in denied.text
 
 
 async def test_local_ui_rejects_unknown_cross_actor_and_unconfigured_read_resources() -> None:
@@ -583,6 +639,101 @@ async def test_local_ui_refuses_missing_csrf_or_stale_decisions_without_leaking_
     assert "Approval needs a fresh review" in stale.text
     assert "internal stale source detail" not in stale.text
     assert stale_decision_service.decisions == []
+
+
+def test_fastapi_testclient_submits_only_bound_same_origin_forms_and_handles_staleness() -> None:
+    """Browser forms cannot cross-authorize actions, bypass origin checks, or execute stale plans."""
+    from fastapi.testclient import TestClient
+
+    from enterprise_agent.web import create_app
+
+    decisions = RecordingLocalDecisionService()
+    controls = RecordingLocalDemoClockControlService()
+    with TestClient(
+        create_app(
+            read_service=RecordingLocalReviewService(),
+            decision_service=decisions,
+            demo_clock_control_service=controls,
+        )
+    ) as client:
+        clock_page = client.get("/demo-clock")
+        clock_token = re.search(r'name="csrf_token" value="([^"]+)"', clock_page.text)
+        assert clock_token is not None
+        cross_action = client.post(
+            "/approval/approval-a/decision",
+            data={
+                "approval_id": "approval-a",
+                "csrf_token": clock_token.group(1),
+                "decision": "approve",
+            },
+        )
+
+        approval_page = client.get("/approval/approval-a")
+        approval_token = re.search(r'name="csrf_token" value="([^"]+)"', approval_page.text)
+        assert approval_token is not None
+        cross_origin = client.post(
+            "/approval/approval-a/decision",
+            data={
+                "approval_id": "approval-a",
+                "csrf_token": approval_token.group(1),
+                "decision": "approve",
+            },
+            headers={"Origin": "https://untrusted.example"},
+        )
+        submitted = client.post(
+            "/approval/approval-a/decision",
+            data={
+                "approval_id": "approval-a",
+                "csrf_token": approval_token.group(1),
+                "decision": "approve",
+            },
+        )
+
+        decisions.stale = True
+        stale_page = client.get("/approval/approval-a")
+        stale_token = re.search(r'name="csrf_token" value="([^"]+)"', stale_page.text)
+        assert stale_token is not None
+        stale = client.post(
+            "/approval/approval-a/decision",
+            data={
+                "approval_id": "approval-a",
+                "csrf_token": stale_token.group(1),
+                "decision": "approve",
+            },
+        )
+
+    assert cross_action.status_code == 403
+    assert cross_origin.status_code == 403
+    assert submitted.status_code == 200
+    assert "Approval recorded" in submitted.text
+    assert stale.status_code == 409
+    assert "Approval needs a fresh review" in stale.text
+    assert decisions.decisions == [("approval-a", "approve")]
+    assert controls.advances == 0
+
+
+def test_fastapi_testclient_fails_closed_when_demo_mode_is_revoked_after_render() -> None:
+    """A valid rendered token cannot advance time if the guarded demo control becomes unavailable."""
+    from fastapi.testclient import TestClient
+
+    from enterprise_agent.web import create_app
+
+    controls = RecordingLocalDemoClockControlService()
+    with TestClient(
+        create_app(
+            read_service=RecordingLocalReviewService(),
+            demo_clock_control_service=controls,
+        )
+    ) as client:
+        page = client.get("/demo-clock")
+        token = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+        assert token is not None
+        controls.can_advance = False
+        forbidden = client.post("/demo-clock/advance", data={"csrf_token": token.group(1)})
+
+    assert forbidden.status_code == 403
+    assert "Demo clock controls are locked" in forbidden.text
+    assert controls.advances == 0
 
 
 def test_local_ui_module_has_no_direct_database_provider_or_configuration_dependency() -> None:
