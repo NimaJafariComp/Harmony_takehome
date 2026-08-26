@@ -176,6 +176,7 @@ def test_application_depends_on_explicit_provider_and_control_plane_ports() -> N
         actor_id=UserId("dana"),
         attention_id=planned_attention.attention_id,
         workflow_id=None,
+        plan_id=None,
         evidence_ids=(),
         payload={},
         policy_version=None,

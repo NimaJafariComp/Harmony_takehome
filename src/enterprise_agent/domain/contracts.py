@@ -342,6 +342,7 @@ class AuditEvent:
     actor_id: UserId | None
     attention_id: AttentionId | None
     workflow_id: WorkflowId | None
+    plan_id: PlanId | None
     evidence_ids: tuple[EvidenceId, ...]
     payload: Mapping[str, object]
     policy_version: str | None

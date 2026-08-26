@@ -17,12 +17,17 @@ from enterprise_agent.domain import (
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
+    AuditEvent,
+    AuditEventId,
     Evidence,
+    EvidenceId,
     InvalidAttentionTransitionError,
     RunId,
     ScenarioAStockoutTrigger,
     require_attention_transition,
 )
+
+from .audit import append_audit_event
 
 INSERT_ATTENTION = text("""
     INSERT INTO attention_items (
@@ -49,17 +54,6 @@ UPDATE_ATTENTION_STATUS = text("""
     SET status = :target_status, resolved_at = :resolved_at
     WHERE id = CAST(:attention_id AS UUID) AND status = :current_status
     RETURNING id, scenario, cause, dedupe_key, status, source_versions, created_at, resolved_at
-""")
-INSERT_AUDIT_EVENT = text("""
-    INSERT INTO audit_events (
-        id, occurred_at, event_type, run_id, actor_id, attention_id, workflow_instance_id,
-        plan_id, evidence_ids, payload, policy_version, plan_hash, idempotency_key,
-        failure_category
-    ) VALUES (
-        CAST(:event_id AS UUID), :occurred_at, :event_type, :run_id, NULL,
-        CAST(:attention_id AS UUID), NULL, NULL, CAST(:evidence_ids AS JSONB),
-        CAST(:payload AS JSONB), NULL, NULL, NULL, NULL
-    )
 """)
 
 
@@ -198,7 +192,11 @@ class PostgresAttentionAdapter:
                 attention=updated,
                 trigger=None,
                 run_id=run_id,
-                event_type="attention.status_changed",
+                event_type=(
+                    "followup.resolved"
+                    if target is AttentionStatus.RESOLVED
+                    else "attention.status_changed"
+                ),
                 occurred_at=occurred_at,
                 payload={"from_status": attention.status.value, "to_status": target.value},
             )
@@ -282,15 +280,26 @@ def _append_audit_attempt(
                 "production_start_date": trigger.production_start_date.isoformat(),
             }
         )
-    connection.execute(
-        INSERT_AUDIT_EVENT,
-        {
-            "event_id": str(uuid4()),
-            "occurred_at": occurred_at,
-            "event_type": event_type,
-            "run_id": str(run_id),
-            "attention_id": str(attention.attention_id),
-            "evidence_ids": "[]",
-            "payload": json.dumps(base_payload),
-        },
+    append_audit_event(
+        connection,
+        AuditEvent(
+            event_id=AuditEventId(str(uuid4())),
+            occurred_at=occurred_at,
+            event_type=event_type,
+            run_id=run_id,
+            actor_id=None,
+            attention_id=attention.attention_id,
+            workflow_id=None,
+            plan_id=None,
+            evidence_ids=(
+                ()
+                if trigger is None
+                else tuple(EvidenceId(source) for source in sorted(trigger.source_versions))
+            ),
+            payload=base_payload,
+            policy_version=None,
+            plan_hash=None,
+            idempotency_key=None,
+            failure_category=None,
+        ),
     )

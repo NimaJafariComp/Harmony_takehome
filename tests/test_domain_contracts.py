@@ -191,6 +191,7 @@ def test_operational_contracts_capture_workflow_scheduler_and_audit_state() -> N
         actor_id=UserId("dana"),
         attention_id=AttentionId("attention-stockout"),
         workflow_id=workflow.workflow_id,
+        plan_id=PlanId("plan-reroute"),
         evidence_ids=(EvidenceId("evidence-delay-email"),),
         payload={"tool_name": invocation.tool_name},
         policy_version="policy-v1",

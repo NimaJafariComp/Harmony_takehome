@@ -13,6 +13,7 @@ from enterprise_agent.domain import (
     AttentionId,
     AttentionItem,
     AttentionStatus,
+    AuditEvent,
     Evidence,
     EvidenceId,
     InvalidAttentionTransitionError,
@@ -229,6 +230,45 @@ def test_attention_adapter_rejects_a_persisted_transition_race(
         )
 
 
+def test_attention_adapter_delegates_detection_and_resolution_to_shared_audit_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Attention and Tuesday-resolution events share the ledger sanitizer and event vocabulary."""
+    from enterprise_agent.adapters import attention
+
+    detected_row = attention_row()
+    resolved_row = attention_row(status="resolved", resolved_at=NOW + timedelta(minutes=1))
+    engine = configured_engine(
+        mapping_result(one_or_none=detected_row),
+        mapping_result(one_or_none=resolved_row),
+    )
+    emitted: list[AuditEvent] = []
+    monkeypatch.setattr(attention, "create_engine", lambda _: engine)
+    monkeypatch.setattr(
+        attention,
+        "append_audit_event",
+        lambda _connection, event: emitted.append(event),
+    )
+    adapter = attention.PostgresAttentionAdapter("postgresql+psycopg://ignored")
+    original = adapter.register(stockout_trigger(), RunId("run-shared-audit-detected")).attention
+
+    adapter.transition(
+        original,
+        AttentionStatus.RESOLVED,
+        RunId("run-shared-audit-resolved"),
+        NOW + timedelta(minutes=1),
+    )
+
+    assert [event.event_type for event in emitted] == [
+        "attention.detected",
+        "followup.resolved",
+    ]
+    assert emitted[0].attention_id == original.attention_id
+    assert emitted[0].evidence_ids == (
+        EvidenceId("inventory:00000000-0000-0000-0000-000000000501"),
+    )
+
+
 def test_attention_adapter_loads_one_current_item_or_returns_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -399,7 +439,8 @@ def test_postgres_attention_adapter_deduplicates_attempts_and_persists_audit_evi
         "assert attention_count == 2\n"
         "assert audit_types.count('attention.detected') == 2\n"
         "assert audit_types.count('attention.deduplicated') == 1\n"
-        "assert audit_types.count('attention.status_changed') == 3\n"
+        "assert audit_types.count('attention.status_changed') == 2\n"
+        "assert audit_types.count('followup.resolved') == 1\n"
     )
     compose(
         "--profile",

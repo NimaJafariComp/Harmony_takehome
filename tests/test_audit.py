@@ -7,6 +7,7 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 
@@ -139,6 +140,35 @@ def test_audit_writer_sanitizes_sensitive_payloads_and_preserves_typed_provenanc
 
 
 @pytest.mark.unit
+def test_audit_writer_preserves_json_safe_scalar_date_uuid_and_sequence_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ledger retains structured, explainable values without accepting opaque provider objects."""
+    engine = MagicMock()
+    transaction = engine.begin.return_value.__enter__.return_value
+    monkeypatch.setattr(audit, "create_engine", lambda _: engine)
+    adapter = audit.PostgresAuditAdapter("postgresql+psycopg://ignored")
+
+    adapter.append(
+        audit_event(
+            payload={
+                "confidence": 0.75,
+                "expected_receipt_date": NOW.date(),
+                "replacement_id": UUID("00000000-0000-0000-0000-000000000499"),
+                "candidate_ids": ("supplier-z", "supplier-y"),
+            }
+        )
+    )
+
+    assert json.loads(transaction.execute.call_args.args[1]["payload"]) == {
+        "candidate_ids": ["supplier-z", "supplier-y"],
+        "confidence": 0.75,
+        "expected_receipt_date": NOW.date().isoformat(),
+        "replacement_id": "00000000-0000-0000-0000-000000000499",
+    }
+
+
+@pytest.mark.unit
 def test_audit_writer_rejects_unsafe_event_shapes_before_opening_a_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -155,6 +185,12 @@ def test_audit_writer_rejects_unsafe_event_shapes_before_opening_a_transaction(
         adapter.append(audit_event(event_id=AuditEventId("not-a-uuid")))
     with pytest.raises(audit.AuditEventError, match="unsupported payload value"):
         adapter.append(audit_event(payload={"opaque": object()}))
+    with pytest.raises(audit.AuditEventError, match="non-finite float"):
+        adapter.append(audit_event(payload={"confidence": float("inf")}))
+    with pytest.raises(audit.AuditEventError, match="non-finite decimal"):
+        adapter.append(audit_event(payload={"estimated_value": Decimal("NaN")}))
+    with pytest.raises(audit.AuditEventError, match="keys must be strings"):
+        adapter.append(audit_event(payload={1: "not-json"}))  # type: ignore[dict-item]
 
     engine.begin.assert_not_called()
 
@@ -184,6 +220,23 @@ def test_audit_writer_reads_a_chronological_run_ledger_without_mutating_events(
 
     assert events == (first, second)
     assert connection.execute.call_args.args[1] == {"run_id": str(RUN_ID)}
+
+
+@pytest.mark.unit
+def test_audit_writer_rejects_malformed_persisted_json_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A corrupted audit row cannot be silently presented as trustworthy reconstruction evidence."""
+    engine = MagicMock()
+    connection = engine.connect.return_value.__enter__.return_value
+    malformed = audit_row(audit_event())
+    malformed["evidence_ids"] = "not-a-json-list"
+    connection.execute.return_value = mapping_result(all_rows=[malformed])
+    monkeypatch.setattr(audit, "create_engine", lambda _: engine)
+    adapter = audit.PostgresAuditAdapter("postgresql+psycopg://ignored")
+
+    with pytest.raises(audit.AuditEventError, match="invalid JSON shape"):
+        adapter.events_for_run(RUN_ID)
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
