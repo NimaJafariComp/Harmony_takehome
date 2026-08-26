@@ -56,8 +56,10 @@ def test_config_check_reports_safe_selected_profile(monkeypatch: pytest.MonkeyPa
 @pytest.mark.critical
 def test_config_check_reports_missing_key_without_exposing_secret(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Configuration errors name missing variables but never credential values."""
+    monkeypatch.chdir(tmp_path)
     for name, value in configured_openai_environment().items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("OPENAI_API_KEY")

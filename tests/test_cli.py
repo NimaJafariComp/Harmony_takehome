@@ -1,6 +1,7 @@
 """CLI contract tests."""
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -59,8 +60,10 @@ def test_reset_and_seed_commands_need_only_database_configuration(
 
 def test_reset_command_reports_guard_failures_and_missing_database_url(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The CLI preserves reset safety errors and rejects absent database configuration."""
+    monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/not_demo")
 
@@ -155,8 +158,10 @@ def test_audit_explain_command_renders_a_read_only_run_story(
 
 def test_audit_explain_command_fails_clearly_without_database_configuration(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Noninteractive audit reconstruction names the missing required setting instead of prompting."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     result = CliRunner().invoke(cli.app, ["audit", "explain", "run-cli-audit"])

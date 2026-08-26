@@ -3,8 +3,15 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from os import environ
+from typing import Final
 
-SUPPORTED_LLM_PROFILES = frozenset({"anthropic", "openai", "openrouter"})
+SUPPORTED_LLM_PROFILES = frozenset({"claude", "openai", "openrouter"})
+PROFILE_ENVIRONMENT_PREFIXES: Final = {
+    "claude": "ANTHROPIC",
+    "openai": "OPENAI",
+    "openrouter": "OPENROUTER",
+}
+_PROFILE_ALIASES: Final = {"anthropic": "claude"}
 
 
 class ConfigurationError(ValueError):
@@ -42,21 +49,33 @@ class RuntimeConfiguration:
 def load_settings(environment: Mapping[str, str] | None = None) -> RuntimeConfiguration:
     """Validate configuration from an environment mapping without logging values."""
     source = environ if environment is None else environment
-    profile = _required(source, "LLM_PROFILE").lower()
+    provider = load_provider_settings(source)
+    return RuntimeConfiguration(
+        database_url=_required(source, "DATABASE_URL"),
+        provider=provider,
+    )
 
+
+def load_provider_settings(environment: Mapping[str, str] | None = None) -> ProviderConfiguration:
+    """Validate only the selected LLM profile, model, and key for setup and run bootstrap paths."""
+    source = environ if environment is None else environment
+    profile = normalize_llm_profile(_required(source, "LLM_PROFILE"))
+    prefix = PROFILE_ENVIRONMENT_PREFIXES[profile]
+    return ProviderConfiguration(
+        profile=profile,
+        model=_required(source, f"{prefix}_MODEL"),
+        api_key=_required(source, f"{prefix}_API_KEY"),
+    )
+
+
+def normalize_llm_profile(value: str) -> str:
+    """Return the canonical user-facing profile while accepting the prior Anthropic configuration alias."""
+    profile = value.strip().lower()
+    profile = _PROFILE_ALIASES.get(profile, profile)
     if profile not in SUPPORTED_LLM_PROFILES:
         choices = ", ".join(sorted(SUPPORTED_LLM_PROFILES))
         raise ConfigurationError(f"LLM_PROFILE must be one of: {choices}")
-
-    prefix = profile.upper()
-    return RuntimeConfiguration(
-        database_url=_required(source, "DATABASE_URL"),
-        provider=ProviderConfiguration(
-            profile=profile,
-            model=_required(source, f"{prefix}_MODEL"),
-            api_key=_required(source, f"{prefix}_API_KEY"),
-        ),
-    )
+    return profile
 
 
 def _required(environment: Mapping[str, str], name: str) -> str:

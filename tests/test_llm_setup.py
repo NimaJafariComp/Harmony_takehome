@@ -8,10 +8,29 @@ from unittest.mock import MagicMock
 from urllib.request import Request
 
 import pytest
+import typer
+from typer.testing import CliRunner
 
+from enterprise_agent import cli
 from enterprise_agent.config import ConfigurationError, load_settings
 
 pytestmark = pytest.mark.unit
+
+_LLM_ENVIRONMENT_NAMES = (
+    "LLM_PROFILE",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+)
+
+
+def clear_llm_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep process-level user configuration out of isolated first-run setup contracts."""
+    for name in _LLM_ENVIRONMENT_NAMES:
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_curated_model_catalog_has_only_supported_profiles_and_recommended_defaults() -> None:
@@ -189,3 +208,129 @@ def test_load_settings_names_the_missing_claude_key_without_exposing_any_value()
 
     with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
         load_settings(environment)
+
+
+def test_run_interactively_creates_a_hidden_key_profile_with_the_recommended_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A first `run` requests a hidden key, saves the selected profile, and never prints the key."""
+    clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    prompts = iter(("openai", "interactive-openai-key", "1"))
+    prompt_calls: list[tuple[str, bool]] = []
+
+    def fake_prompt(message: str, *args: Any, **kwargs: Any) -> str:
+        prompt_calls.append((message, bool(kwargs.get("hide_input", False))))
+        return next(prompts)
+
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(typer, "prompt", fake_prompt)
+    monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: False)
+
+    result = CliRunner().invoke(cli.app, ["run"])
+
+    env_path = tmp_path / ".env"
+    assert result.exit_code == 0
+    assert prompt_calls[1] == ("Openai API key", True)
+    assert "interactive-openai-key" not in result.output
+    assert "LLM_PROFILE=openai" in env_path.read_text(encoding="utf-8")
+    assert "OPENAI_MODEL=gpt-5.6-luna" in env_path.read_text(encoding="utf-8")
+    assert env_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_explicit_setup_verifies_only_the_selected_provider_and_allows_a_custom_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A user-confirmed verification is injected, successful, and persists the expressly entered model ID."""
+    clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    prompts = iter(("openrouter", "interactive-router-key", "2", "vendor/custom-structured-model"))
+    verification_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: True)
+
+    def record_verification(profile: str, api_key: str) -> bool:
+        verification_calls.append((profile, api_key))
+        return True
+
+    monkeypatch.setattr(
+        cli,
+        "verify_credential",
+        record_verification,
+    )
+
+    result = CliRunner().invoke(cli.app, ["llm-setup"])
+
+    contents = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert result.exit_code == 0
+    assert verification_calls == [("openrouter", "interactive-router-key")]
+    assert "interactive-router-key" not in result.output
+    assert "OPENROUTER_MODEL=vendor/custom-structured-model" in contents
+    assert "key saved without live verification" not in result.output
+
+
+def test_noninteractive_run_names_the_missing_setting_and_setup_command_without_prompting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Scripts and CI fail closed rather than waiting for a secret prompt or reading an ambient profile."""
+    clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: False)
+    monkeypatch.setattr(
+        typer,
+        "prompt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not prompt")),
+    )
+
+    result = CliRunner().invoke(cli.app, ["run"])
+
+    assert result.exit_code == 1
+    assert "LLM_PROFILE" in result.stderr
+    assert "enterprise-agent llm-setup" in result.stderr
+
+
+def test_failed_explicit_verification_does_not_write_or_echo_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed verification refuses persistence and keeps the hidden key out of all terminal output."""
+    clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    prompts = iter(("claude", "rejected-claude-key"))
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(cli, "verify_credential", lambda *_args, **_kwargs: False)
+
+    result = CliRunner().invoke(cli.app, ["llm-setup"])
+
+    assert result.exit_code == 1
+    assert "credential verification failed" in result.stderr
+    assert "rejected-claude-key" not in result.output
+    assert not (tmp_path / ".env").exists()
+
+
+def test_config_check_loads_an_isolated_local_env_file_without_displaying_its_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CLI startup reads the local profile file for noninteractive configuration commands safely."""
+    clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "DATABASE_URL=postgresql+psycopg://agent:agent@localhost:5432/agent\n"
+        "LLM_PROFILE=openrouter\n"
+        "OPENROUTER_API_KEY=local-router-key\n"
+        "OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(cli.app, ["config-check"])
+
+    assert result.exit_code == 0
+    assert "profile: openrouter" in result.stdout
+    assert "local-router-key" not in result.stdout
