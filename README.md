@@ -26,6 +26,8 @@ make demo
 
 This starts the private Compose PostgreSQL service, applies migrations, resets and seeds only the guarded synthetic database, then runs the unattended safety tour. It does not call an LLM, send email, or create a real business-system effect.
 
+No provider profile or API key is required for this command. A failure from the separately opt-in `llm-smoke` or `llm-evaluate` commands is reported as a sanitized nonzero result and never changes, blocks, or becomes hidden inside the deterministic demo.
+
 To inspect the available stories before resetting the local demo data:
 
 ```sh
