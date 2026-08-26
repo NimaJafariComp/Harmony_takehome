@@ -77,9 +77,34 @@ Scenario B and optional Scenario C reuse the control plane without giving the mo
 
 ### What I would change in a production workflow engine
 
-I would not build a larger workflow engine as a growing set of scenario-specific executor branches. This harness keeps the executor compact because it has one declared six-step purchasing workflow and two bounded tool-plan paths. For a broader production engine, I would define an immutable versioned graph with explicit node types for deterministic guards, human approvals, bounded reasoning, connector effects, compensations, and waits. Each running instance would retain the exact graph snapshot it started with, so a later workflow-definition version could not alter in-flight behavior.
+No, not exactly. For the take-home, PostgreSQL plus a small persisted runner, deterministic step definitions, idempotency, compensation, and restart recovery make the mechanics visible and keep the system achievable in the time box. In production, I would retain the business flow and safety boundaries but replace the custom orchestration substrate with a mature durable workflow platform, such as Temporal.
 
-The tradeoff is deliberate. A graph runtime needs transition validation, version-migration rules, richer observability, and a larger test surface. That abstraction would obscure the required Scenario A proof in this time-boxed harness. The current declaration, persisted state, idempotency keys, and compensation model preserve the safety properties that a future graph runtime must retain.
+The main change is responsibility allocation:
+
+| Concern | Take-home implementation | Production direction |
+|---|---|---|
+| Business state | PostgreSQL control-plane records | PostgreSQL remains the source of truth for users, roles/scopes, attention items, business-facing plans, approvals, audit records, and application metadata. |
+| Workflow progression | Custom persisted runner advances declared steps | A durable workflow platform owns progression, retries, timers, waits, recovery, execution history, and workflow-version handling. |
+| External systems | Seeded ERP, mail, calendar, and tool adapters | Real ERP, Microsoft Graph, notification, and knowledge-system adapters own their respective business data. |
+
+Instead of a custom runner manually deciding which step is next, which worker owns it, when a lease expires, when to retry or resume after a crash, how to wait until Tuesday, and how to persist human-approval waits, a durable workflow engine would own those orchestration concerns. The business flow would remain the same:
+
+```text
+detect shortage -> gather ERP/mail/calendar context -> call bounded LLM planner
+-> deterministically validate recommendation -> wait for human approval
+-> execute fixed PO reroute -> wait until Tuesday -> check receipt
+-> resolve or create a new attention item
+```
+
+In that design, Scenario A would be one durable workflow: activities gather authorized context and call the LLM planner; deterministic code validates its typed recommendation; the workflow waits for a human approval signal; fixed reroute activities execute; a durable timer waits until Tuesday; and a receipt-check activity resolves or follows up. The LLM remains one bounded node in the flow, never its controller.
+
+The current application contracts still apply: `LLMPort`, `ERPPort`, `MailPort`, `CalendarPort`, the tool catalog, policy/gate layer, approval model, audit model, actor/scopes model, and typed workflow parameters. Idempotency also remains necessary: an external API can succeed while a worker loses connectivity, so effects should continue to use stable idempotency keys wherever the external system supports them. Compensation stays explicit as well: a replacement PO can be cancelled, an original PO can be restored where business rules allow, and a sent notification requires a corrective notification because it cannot be unsent.
+
+The production platform would not become the authorization system. Before every write activity, the current user permissions, policy, approval, and source state would still be checked. This preserves the core design principle: **LLM recommends; code validates; policy authorizes; a human approves; a deterministic workflow executes.**
+
+At larger scale, I would use separate worker pools for ERP activities, mail/calendar activities, LLM activities, notification activities, and background detection. That permits independent rate limits and failure isolation: a slow LLM provider should not block ERP writes, and Microsoft Graph throttling should not stop purchase-order execution. I would also combine ERP change events for quick reaction with scheduled reconciliation to recover from missed events.
+
+The tradeoff is deliberate. A durable workflow platform introduces infrastructure, operational expertise, workflow versioning, and a broader test surface that would obscure the required Scenario A proof in a three-day take-home. The custom runner is therefore a transparent bounded implementation, not a claim that it should run unchanged for thousands of employees. Its persisted state, declared steps, idempotency keys, compensation, approval checks, and audit model are the safety properties I would preserve in production.
 
 ## Time, scheduling, and recovery
 
