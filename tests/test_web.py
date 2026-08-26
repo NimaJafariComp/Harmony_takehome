@@ -300,7 +300,7 @@ async def test_local_ui_renders_semantic_evidence_ledger_pages_from_the_safe_rea
     assert 'href="/workflow/workflow-a"' in status.text
     assert "rerouted" in status.text
     assert "<script" not in status.text
-    assert "data-state=\"rerouted\"" in status.text
+    assert 'data-state="rerouted"' in status.text
 
     assert approval.status_code == 200
     assert "Approval / approval-a" in approval.text

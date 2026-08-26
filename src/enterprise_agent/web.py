@@ -112,13 +112,19 @@ def create_app(read_service: LocalReviewReadPort | None = None) -> FastAPI:
     @application.get("/", response_class=HTMLResponse)
     def local_review(request: Request) -> HTMLResponse:
         """Render the safe status ledger, keeping an unconfigured imported app database-free."""
-        status = None if isinstance(review_service, UnconfiguredLocalReviewService) else review_service.status()
+        status = (
+            None
+            if isinstance(review_service, UnconfiguredLocalReviewService)
+            else review_service.status()
+        )
         return render_page(request, "status.html", status=status)
 
     @application.get("/attention/{attention_id}", response_class=HTMLResponse)
     def attention_page(request: Request, attention_id: str) -> HTMLResponse:
         """Render one safe evidence-reference page through the injected actor-scoped reader."""
-        return render_page(request, "attention.html", attention=review_service.attention(attention_id))
+        return render_page(
+            request, "attention.html", attention=review_service.attention(attention_id)
+        )
 
     @application.get("/approval/{approval_id}", response_class=HTMLResponse)
     def approval_page(request: Request, approval_id: str) -> HTMLResponse:
