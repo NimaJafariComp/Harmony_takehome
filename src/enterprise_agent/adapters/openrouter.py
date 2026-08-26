@@ -1,4 +1,4 @@
-"""OpenRouter Chat Completions adapter with strict shared-schema validation and safe routing."""
+"""OpenRouter Chat Completions adapter with canonical validation and safe routing."""
 
 from __future__ import annotations
 
@@ -166,11 +166,12 @@ class OpenRouterChatCompletionsAdapter:
 
 
 def _request_for(prompt: PromptEnvelope, *, model: str) -> dict[str, object]:
-    """Build the only provider request, requiring strict schema support and no routing fallback."""
-    response_schema = _strict_schema(json_schema_for_recommendation(prompt.response_schema))
+    """Build the only provider request without claiming unsupported response-format enforcement."""
+    output_schema = json_schema_for_recommendation(prompt.response_schema)
     prompt_data = {
         "purpose": prompt.purpose,
         "response_schema": prompt.response_schema,
+        "output_schema": output_schema,
         "messages": [
             {"role": message.role, "content": message.content} for message in prompt.messages
         ],
@@ -183,14 +184,6 @@ def _request_for(prompt: PromptEnvelope, *, model: str) -> dict[str, object]:
             {"role": "system", "content": _STRUCTURED_OUTPUT_INSTRUCTIONS},
             {"role": "user", "content": json.dumps(prompt_data, default=_json_default)},
         ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": prompt.response_schema.replace(":", "_"),
-                "schema": response_schema,
-                "strict": True,
-            },
-        },
         "provider": dict(_SAFE_PROVIDER_ROUTING),
     }
 
@@ -256,17 +249,3 @@ def _json_default(value: object) -> object:
     if isinstance(value, Mapping):
         return dict(value)
     raise TypeError(f"cannot JSON encode {type(value).__name__}")
-
-
-def _strict_schema(value: object) -> object:
-    """Make every nested object strict before asking OpenRouter to enforce the shared schema."""
-    if isinstance(value, Mapping):
-        normalized = {key: _strict_schema(child) for key, child in value.items()}
-        properties = normalized.get("properties")
-        if isinstance(properties, Mapping):
-            normalized["additionalProperties"] = False
-            normalized["required"] = list(properties)
-        return normalized
-    if isinstance(value, list):
-        return [_strict_schema(item) for item in value]
-    return value
