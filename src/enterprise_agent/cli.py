@@ -14,6 +14,10 @@ from enterprise_agent.adapters import (
     PostgresDemoClock,
 )
 from enterprise_agent.application import AuditExplainer, AuditExplanationError
+from enterprise_agent.application.scenario_c_demo import (
+    ScenarioCDeterministicRunError,
+    stage_scenario_c_pending,
+)
 from enterprise_agent.config import (
     ConfigurationError,
     ProviderConfiguration,
@@ -153,6 +157,26 @@ def seed() -> None:
         raise typer.Exit(code=1) from error
 
     typer.echo("database: seeded")
+
+
+@app.command(name="scenario-c")
+def scenario_c() -> None:
+    """Stage the fixed local supplier-risk scenario for human review without any automatic write."""
+    database_url = _database_url(action="scenario-c")
+    try:
+        _require_local_demo_database(database_url, allow_test_database=False)
+        staged = stage_scenario_c_pending(database_url, run_id=RunId("run-scenario-c-cli"))
+    except (ScenarioCDeterministicRunError, SeedSafetyError, ValueError) as error:
+        typer.echo(f"scenario-c: refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        "scenario-c: pending approval\n"
+        f"run: {staged.run_id}\n"
+        f"attention: {staged.attention_id}\n"
+        f"approval: {staged.approval_id}\n"
+        f"workflow: {staged.workflow_id}\n"
+        "next: review and approve this exact plan before it can execute"
+    )
 
 
 @clock_app.command("advance")

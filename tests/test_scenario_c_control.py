@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -258,3 +259,26 @@ def test_manual_supplier_risk_recommendation_creates_no_approval_or_workflow() -
     assert result.workflow is None
     approvals.request_pending_plan.assert_not_called()
     workflow_state.stage_bounded_tool_plan.assert_not_called()
+
+
+@pytest.mark.critical
+def test_supplier_risk_control_denies_an_actor_without_the_hold_scope_before_persistence() -> None:
+    """A planner cannot use the notification scope to smuggle an unauthorized purchase-order hold."""
+    context = replace(
+        _context(),
+        actor=replace(DANA, scopes=frozenset({Scope("production:notify")})),
+    )
+    control, approval_store, workflow_store = _control()
+
+    with pytest.raises(ScenarioCControlRejectedError, match="missing_required_scope"):
+        control.request_pending(
+            context=context,
+            recommendation=_recommendation(context),
+            current_source_versions=context.source_versions,
+            policy_version="scenario_c_policy:v1",
+            requested_at=NOW,
+            expires_at=NOW + timedelta(hours=4),
+        )
+
+    approval_store.create_pending.assert_not_called()
+    workflow_store.create.assert_not_called()
