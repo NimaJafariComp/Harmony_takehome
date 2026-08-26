@@ -36,6 +36,11 @@ from enterprise_agent.application.local_guided_demo import (
     LocalGuidedDemoService,
     UnconfiguredLocalGuidedDemoService,
 )
+from enterprise_agent.application.local_live_demo import (
+    LocalLiveDemoPort,
+    LocalLiveDemoService,
+    UnconfiguredLocalLiveDemoService,
+)
 from enterprise_agent.application.local_llm_evaluation import (
     LocalLLMEvaluationPort,
     LocalLLMEvaluationService,
@@ -163,6 +168,30 @@ def create_local_llm_evaluation_service() -> LocalLLMEvaluationPort:
     if not configurations:
         return UnconfiguredLocalLLMEvaluationService()
     return LocalLLMEvaluationService(configurations=tuple(configurations))
+
+
+def create_local_live_demo_service() -> LocalLiveDemoPort:
+    """Compose guarded live A/B/C proposals only for a strict local target and complete profiles."""
+    try:
+        environment = load_local_environment(default_env_path())
+    except ValueError:
+        return UnconfiguredLocalLiveDemoService()
+    database_url = environment.get("DATABASE_URL", "").strip()
+    if not database_url:
+        return UnconfiguredLocalLiveDemoService()
+    try:
+        _require_local_demo_database(database_url, allow_test_database=False)
+    except SeedSafetyError:
+        return UnconfiguredLocalLiveDemoService()
+    configurations = []
+    for profile in sorted(SUPPORTED_LLM_PROFILES):
+        try:
+            configurations.append(load_provider_profile(profile, environment))
+        except ConfigurationError:
+            continue
+    if not configurations:
+        return UnconfiguredLocalLiveDemoService()
+    return LocalLiveDemoService(database_url=database_url, configurations=tuple(configurations))
 
 
 def _selected_actor_id(environment: Mapping[str, str]) -> UserId | None:

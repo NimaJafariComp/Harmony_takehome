@@ -40,6 +40,13 @@ from enterprise_agent.application.local_guided_demo import (
     LocalGuidedDemoUnavailableError,
     UnconfiguredLocalGuidedDemoService,
 )
+from enterprise_agent.application.local_live_demo import (
+    LocalLiveDemoDisabledError,
+    LocalLiveDemoPort,
+    LocalLiveDemoSelectionError,
+    LocalLiveDemoUnavailableError,
+    UnconfiguredLocalLiveDemoService,
+)
 from enterprise_agent.application.local_llm_evaluation import (
     LocalLLMEvaluationPort,
     LocalLLMEvaluationSelectionError,
@@ -58,6 +65,7 @@ from enterprise_agent.local_review_composition import (
     create_local_approval_decision_service,
     create_local_demo_clock_control_service,
     create_local_guided_demo_service,
+    create_local_live_demo_service,
     create_local_llm_evaluation_service,
     create_local_review_service,
 )
@@ -71,6 +79,7 @@ _TEMPLATES = Jinja2Templates(directory=_PACKAGE_ROOT / "templates")
 _CSRF_COOKIE_NAME = "enterprise_agent_local_csrf"
 _MAX_DECISION_FORM_BYTES = 4096
 _MAX_GUIDED_DEMO_FORM_BYTES = 4096
+_MAX_LIVE_DEMO_FORM_BYTES = 4096
 
 
 class _DecisionRequestError(ValueError):
@@ -84,6 +93,7 @@ def create_app(
     demo_catalogue_service: LocalDemoCataloguePort | None = None,
     guided_demo_service: LocalGuidedDemoPort | None = None,
     llm_evaluation_service: LocalLLMEvaluationPort | None = None,
+    live_demo_service: LocalLiveDemoPort | None = None,
 ) -> FastAPI:
     """Create a loopback UI with injected read and approval-decision service boundaries."""
     review_service = read_service if read_service is not None else UnconfiguredLocalReviewService()
@@ -111,6 +121,9 @@ def create_app(
         llm_evaluation_service
         if llm_evaluation_service is not None
         else UnconfiguredLocalLLMEvaluationService()
+    )
+    live_demo = (
+        live_demo_service if live_demo_service is not None else UnconfiguredLocalLiveDemoService()
     )
     csrf_signing_key = secrets.token_bytes(32)
     application = FastAPI(
@@ -318,6 +331,42 @@ def create_app(
             raise _DecisionRequestError("invalid LLM evaluation token")
         return profile_id, case_id
 
+    async def read_live_demo_form(request: Request) -> tuple[str, str]:
+        """Accept one confirmed same-origin profile and fixed local live-demo case only."""
+        content_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0]
+        if content_type != "application/x-www-form-urlencoded":
+            raise _DecisionRequestError("unsupported live-demo request")
+        body = await request.body()
+        if not body or len(body) > _MAX_LIVE_DEMO_FORM_BYTES:
+            raise _DecisionRequestError("invalid live-demo request")
+        try:
+            values = parse_qs(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=4,
+            )
+        except (UnicodeDecodeError, ValueError) as error:
+            raise _DecisionRequestError("invalid live-demo request") from error
+        if set(values) != {"csrf_token", "profile_id", "case_id", "confirm"}:
+            raise _DecisionRequestError("invalid live-demo request")
+        csrf_token = _one_form_value(values, "csrf_token")
+        profile_id = _one_form_value(values, "profile_id")
+        case_id = _one_form_value(values, "case_id")
+        if _one_form_value(values, "confirm") != "live":
+            raise _DecisionRequestError("invalid live-demo request")
+        origin = request.headers.get("origin")
+        expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if origin is not None and not hmac.compare_digest(origin, expected_origin):
+            raise _DecisionRequestError("cross-origin live-demo request")
+        session = request.cookies.get(_CSRF_COOKIE_NAME)
+        if session is None or not hmac.compare_digest(
+            csrf_token,
+            _live_demo_csrf_token(csrf_signing_key, session=session),
+        ):
+            raise _DecisionRequestError("invalid live-demo token")
+        return profile_id, case_id
+
     @application.exception_handler(LocalReviewAccessDeniedError)
     async def local_review_access_denied(
         request: Request, error: LocalReviewAccessDeniedError
@@ -450,14 +499,17 @@ def create_app(
         controls = demo_clock_controls.availability()
         guided_demo_availability = guided_demo.availability()
         llm_evaluation_availability = llm_evaluation.availability()
+        live_demo_availability = live_demo.availability()
         csrf_session: str | None = None
         csrf_token: str | None = None
         guided_demo_csrf_token: str | None = None
         llm_evaluation_csrf_token: str | None = None
+        live_demo_csrf_token: str | None = None
         if (
             controls.can_advance
             or guided_demo_availability.can_run
             or llm_evaluation_availability.can_evaluate
+            or live_demo_availability.can_run
         ):
             csrf_session = secrets.token_urlsafe(32)
         if csrf_session is not None and controls.can_advance:
@@ -468,6 +520,8 @@ def create_app(
             llm_evaluation_csrf_token = _llm_evaluation_csrf_token(
                 csrf_signing_key, session=csrf_session
             )
+        if csrf_session is not None and live_demo_availability.can_run:
+            live_demo_csrf_token = _live_demo_csrf_token(csrf_signing_key, session=csrf_session)
         response = render_page(
             request,
             "demo_clock.html",
@@ -479,6 +533,8 @@ def create_app(
             guided_demo_csrf_token=guided_demo_csrf_token,
             llm_evaluation_availability=llm_evaluation_availability,
             llm_evaluation_csrf_token=llm_evaluation_csrf_token,
+            live_demo_availability=live_demo_availability,
+            live_demo_csrf_token=live_demo_csrf_token,
         )
         if csrf_session is not None:
             response.set_cookie(
@@ -560,6 +616,45 @@ def create_app(
                 message="Configure a supported local provider profile, then reload Demo mode.",
             )
         response = render_page(request, "llm_evaluation_result.html", receipt=receipt)
+        response.delete_cookie(_CSRF_COOKIE_NAME, path="/")
+        return response
+
+    @application.post("/demo/live", response_class=HTMLResponse)
+    async def run_live_demo_page(request: Request) -> Response:
+        """Run one confirmed local A/B/C provider proposal through the existing guarded control plane."""
+        try:
+            profile_id, case_id = await read_live_demo_form(request)
+        except _DecisionRequestError:
+            return review_error(
+                request,
+                status_code=403,
+                title="Live demo request expired",
+                message="Reload Demo mode before selecting a configured profile and fixed local scenario.",
+            )
+        try:
+            receipt = live_demo.run(profile_id=profile_id, case_id=case_id)
+        except LocalLiveDemoDisabledError:
+            return review_error(
+                request,
+                status_code=403,
+                title="Live local demo is unavailable",
+                message="Use the exact local synthetic demo database, then reload Demo mode.",
+            )
+        except LocalLiveDemoSelectionError:
+            return review_error(
+                request,
+                status_code=400,
+                title="Live demo selection is invalid",
+                message="Choose one listed configured profile and one fixed Scenario A, B, or C story.",
+            )
+        except LocalLiveDemoUnavailableError:
+            return review_error(
+                request,
+                status_code=503,
+                title="Live local demo could not be prepared",
+                message="Confirm local provider configuration and demo database availability, then retry.",
+            )
+        response = render_page(request, "live_demo_result.html", receipt=receipt)
         response.delete_cookie(_CSRF_COOKIE_NAME, path="/")
         return response
 
@@ -653,6 +748,7 @@ def main() -> None:
             demo_clock_control_service=create_local_demo_clock_control_service(),
             guided_demo_service=create_local_guided_demo_service(),
             llm_evaluation_service=create_local_llm_evaluation_service(),
+            live_demo_service=create_local_live_demo_service(),
         ),
         host=_ui_bind_host(),
         port=LOCAL_UI_PORT,
@@ -699,6 +795,11 @@ def _llm_evaluation_csrf_token(signing_key: bytes, *, session: str) -> str:
     return hmac.new(
         signing_key, f"{session}\x1fllm-evaluation.run".encode(), hashlib.sha256
     ).hexdigest()
+
+
+def _live_demo_csrf_token(signing_key: bytes, *, session: str) -> str:
+    """Sign a token that applies only to one locally guarded live A/B/C proposal request."""
+    return hmac.new(signing_key, f"{session}\x1flive-demo.run".encode(), hashlib.sha256).hexdigest()
 
 
 def _one_form_value(values: dict[str, list[str]], name: str) -> str:

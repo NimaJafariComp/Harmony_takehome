@@ -27,6 +27,13 @@ from enterprise_agent.application.local_guided_demo import (
     GuidedDemoReceiptCase,
     LocalGuidedDemoDisabledError,
 )
+from enterprise_agent.application.local_live_demo import (
+    LiveDemoCaseOption,
+    LiveDemoProfile,
+    LocalLiveDemoAvailability,
+    LocalLiveDemoPort,
+    LocalLiveDemoReceipt,
+)
 from enterprise_agent.application.local_llm_evaluation import (
     LLMEvaluationAvailability,
     LLMEvaluationCaseOption,
@@ -297,6 +304,60 @@ class RecordingLocalLLMEvaluationService(LocalLLMEvaluationPort):
         )
 
 
+@dataclass
+class RecordingLocalLiveDemoService(LocalLiveDemoPort):
+    """Capture a browser-approved fixed live proposal without constructing a real provider adapter."""
+
+    can_run: bool = True
+    runs: list[tuple[str, str]] = field(default_factory=list)
+
+    def availability(self) -> LocalLiveDemoAvailability:
+        return LocalLiveDemoAvailability(
+            can_run=self.can_run,
+            profiles=(LiveDemoProfile(profile="openai", model="gpt-5.6-luna"),),
+            cases=(
+                LiveDemoCaseOption(
+                    case_id="scenario-a-reroute",
+                    scenario="scenario_a",
+                    title="Scenario A — supplier reroute proposal",
+                ),
+            ),
+        )
+
+    def run(self, *, profile_id: str, case_id: str) -> LocalLiveDemoReceipt:
+        from enterprise_agent.review_provenance import (
+            GateStatus,
+            PlannerMode,
+            PlannerProvenance,
+            SchemaValidation,
+        )
+
+        self.runs.append((profile_id, case_id))
+        return LocalLiveDemoReceipt(
+            case_id=case_id,
+            case_title="Scenario A — supplier reroute proposal",
+            profile="openai",
+            model="gpt-5.6-luna",
+            planner_status="succeeded",
+            outcome="ENTER_WORKFLOW",
+            provenance=PlannerProvenance(
+                mode=PlannerMode.LIVE,
+                provider="openai",
+                profile="openai",
+                model="gpt-5.6-luna",
+                schema_validation=SchemaValidation.PASSED,
+                gate_status=GateStatus.PENDING_APPROVAL,
+            ),
+            run_id="live-demo:scenario-a-reroute",
+            attention_id="00000000-0000-0000-0000-000000000901",
+            plan_id="00000000-0000-0000-0000-000000000902",
+            approval_id="00000000-0000-0000-0000-000000000903",
+            workflow_id="00000000-0000-0000-0000-000000000904",
+            escalation_task_id="00000000-0000-0000-0000-000000000905",
+            usage=None,
+        )
+
+
 def _evaluation_usage() -> LLMEvaluationUsage:
     """Build an empty scalar-only report usage summary for the presentation contract."""
     from decimal import Decimal
@@ -442,6 +503,7 @@ async def test_local_ui_exposes_only_selected_actor_read_models_through_the_serv
         ("/demo-clock/advance", "POST"),
         ("/demo/run", "POST"),
         ("/demo/evaluate", "POST"),
+        ("/demo/live", "POST"),
     }
 
 
@@ -807,6 +869,123 @@ async def test_local_ui_runs_one_explicit_csrf_bound_no_write_llm_evaluation() -
     assert "Token total" in result.text
     assert "Cost total" in result.text
     assert evaluator.evaluations == [("openai", "a-unapproved-bait")]
+
+
+async def test_local_ui_runs_one_explicit_csrf_bound_guarded_live_demo() -> None:
+    """The separate live route allows one fixed local story and renders only review-safe control facts."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    live_demo = RecordingLocalLiveDemoService()
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(
+                read_service=RecordingLocalReviewService(),
+                live_demo_service=live_demo,
+            )
+        ),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/demo")
+        token = re.search(
+            r'<form[^>]+action="/demo/live"[^>]*>.*?name="csrf_token" value="([^"]+)"',
+            page.text,
+            flags=re.DOTALL,
+        )
+        assert token is not None
+        result = await client.post(
+            "/demo/live",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "scenario-a-reroute",
+                "confirm": "live",
+            },
+        )
+
+    assert page.status_code == 200
+    assert "Guarded live local demo" in page.text
+    assert "Call the selected provider once" in page.text
+    assert "API key" not in page.text
+    assert result.status_code == 200
+    assert "Guarded live proposal staged" in result.text
+    assert "Planner: LIVE" in result.text
+    assert "Passed to pending approval" in result.text
+    assert 'href="/audit/live-demo:scenario-a-reroute"' in result.text
+    assert 'href="/approval/00000000-0000-0000-0000-000000000903"' in result.text
+    assert 'href="/workflow/00000000-0000-0000-0000-000000000904"' in result.text
+    assert "prompt" in result.text
+    assert "secret-openai" not in result.text
+    assert live_demo.runs == [("openai", "scenario-a-reroute")]
+
+
+def test_fastapi_testclient_keeps_live_demo_tokens_action_bound_and_one_time() -> None:
+    """A live-demo token cannot authorize a no-write evaluation, cross-origin request, or replay."""
+    from fastapi.testclient import TestClient
+
+    from enterprise_agent.web import create_app
+
+    evaluator = RecordingLocalLLMEvaluationService()
+    live_demo = RecordingLocalLiveDemoService()
+    with TestClient(
+        create_app(
+            read_service=RecordingLocalReviewService(),
+            llm_evaluation_service=evaluator,
+            live_demo_service=live_demo,
+        )
+    ) as client:
+        page = client.get("/demo")
+        token = re.search(
+            r'<form[^>]+action="/demo/live"[^>]*>.*?name="csrf_token" value="([^"]+)"',
+            page.text,
+            flags=re.DOTALL,
+        )
+        assert token is not None
+        evaluation_attempt = client.post(
+            "/demo/evaluate",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "a-unapproved-bait",
+                "confirm": "evaluate",
+            },
+        )
+        cross_origin = client.post(
+            "/demo/live",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "scenario-a-reroute",
+                "confirm": "live",
+            },
+            headers={"Origin": "https://untrusted.example"},
+        )
+        completed = client.post(
+            "/demo/live",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "scenario-a-reroute",
+                "confirm": "live",
+            },
+        )
+        replay = client.post(
+            "/demo/live",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "scenario-a-reroute",
+                "confirm": "live",
+            },
+        )
+
+    assert evaluation_attempt.status_code == 403
+    assert cross_origin.status_code == 403
+    assert completed.status_code == 200
+    assert replay.status_code == 403
+    assert evaluator.evaluations == []
+    assert live_demo.runs == [("openai", "scenario-a-reroute")]
 
 
 def test_fastapi_testclient_keeps_live_llm_evaluation_tokens_action_bound_and_one_time() -> None:

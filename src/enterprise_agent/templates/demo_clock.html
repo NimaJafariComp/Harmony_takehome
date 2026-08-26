@@ -113,6 +113,46 @@
     {% endif %}
   </section>
 
+  <section class="ledger-section" aria-labelledby="live-demo-title">
+    <div class="section-heading">
+      <div>
+        <p class="section-label">Guarded live local demo</p>
+        <h2 id="live-demo-title">Stage one provider proposal for review</h2>
+      </div>
+      <p>Choose one configured profile and a fixed Scenario A, B, or C story. This replaces only local synthetic data, validates the provider proposal, and may create a pending approval, workflow record, and escalation task. It never executes a business tool effect.</p>
+    </div>
+    {% if live_demo_availability.can_run and live_demo_csrf_token %}
+      <form class="guided-demo-form" action="/demo/live" method="post">
+        <input name="csrf_token" value="{{ live_demo_csrf_token }}" type="hidden">
+        <div class="llm-evaluation-fields">
+          <label>
+            <span>Configured provider profile</span>
+            <select name="profile_id" required>
+              {% for profile in live_demo_availability.profiles %}
+                <option value="{{ profile.profile }}">{% if profile.profile == 'openai' %}OpenAI{% elif profile.profile == 'openrouter' %}OpenRouter{% else %}Claude{% endif %} · {{ profile.model }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Fixed local scenario</span>
+            <select name="case_id" required>
+              {% for case in live_demo_availability.cases %}
+                <option value="{{ case.case_id }}">{{ case.scenario | replace('_', ' ') }} · {{ case.title }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <label class="guided-demo-confirmation">
+          <input type="checkbox" name="confirm" value="live" required>
+          <span>Call the selected provider once and replace local synthetic demo data. Any resulting plan remains pending human approval.</span>
+        </label>
+        <button class="decision-button approve" type="submit">Run guarded live proposal</button>
+      </form>
+    {% else %}
+      <p class="empty-copy">Guarded live local demo is unavailable. Configure a complete provider profile and use the exact local synthetic demo database.</p>
+    {% endif %}
+  </section>
+
   <section class="ledger-section" aria-labelledby="case-title">
     <div class="section-heading">
       <div>

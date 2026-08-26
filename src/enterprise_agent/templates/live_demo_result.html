@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Guarded live demo result{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/demo">Demo mode</a><span aria-hidden="true">/</span><span>Guarded live demo result</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Planner: {{ receipt.provenance.mode_label }} · fixed local synthetic story</p>
+    <h1>Guarded live proposal staged</h1>
+    <p class="lede">{{ receipt.profile }} · {{ receipt.model }} evaluated {{ receipt.case_title }}. The provider supplied a proposal only; validation, deterministic policy, and human approval remain mandatory before any business effect.</p>
+  </header>
+
+  <section class="record-grid" aria-label="Guarded live-demo summary">
+    <dl class="record-list">
+      <div><dt>Case</dt><dd>{{ receipt.case_id }}</dd></div>
+      <div><dt>Planner status</dt><dd>{{ receipt.planner_status }}</dd></div>
+      <div><dt>Outcome</dt><dd>{{ receipt.outcome or 'none' }}</dd></div>
+      <div><dt>Planner</dt><dd>{{ receipt.provenance.mode_label }}</dd></div>
+      <div><dt>Provider</dt><dd>{{ receipt.provenance.provider_label }}</dd></div>
+      <div><dt>Profile</dt><dd>{{ receipt.provenance.profile_label }}</dd></div>
+      <div><dt>Model</dt><dd>{{ receipt.provenance.model }}</dd></div>
+      <div><dt>Schema validation</dt><dd>{{ receipt.provenance.schema_validation_label }}</dd></div>
+      <div><dt>Gate</dt><dd>{{ receipt.provenance.gate_label }}</dd></div>
+    </dl>
+    <aside class="trace-card">
+      <p class="section-label">Safety boundary</p>
+      <h2>Proposal, not execution</h2>
+      <p>The application does not execute an ERP, mail, quality, or workflow tool effect from this result. If policy permits a plan, a separate human approval and freshness check still control execution.</p>
+      <a class="text-link" href="/demo">Run another selected local demo</a>
+    </aside>
+  </section>
+
+  <section class="ledger-section" aria-labelledby="record-title">
+    <div class="section-heading">
+      <div>
+        <p class="section-label">Durable review records</p>
+        <h2 id="record-title">Inspect the staged control plane</h2>
+      </div>
+      <p>Only durable identifiers and safe request metering appear here. Credentials, prompts, rationales, and raw provider responses are not retained or displayed.</p>
+    </div>
+    <dl class="record-list">
+      <div><dt>Run ID</dt><dd>{{ receipt.run_id }}</dd></div>
+      <div><dt>Attention ID</dt><dd>{{ receipt.attention_id }}</dd></div>
+      <div><dt>Plan ID</dt><dd>{{ receipt.plan_id or 'not created' }}</dd></div>
+      <div><dt>Approval ID</dt><dd>{{ receipt.approval_id or 'not created' }}</dd></div>
+      <div><dt>Workflow ID</dt><dd>{{ receipt.workflow_id or 'not created' }}</dd></div>
+      <div><dt>Escalation task ID</dt><dd>{{ receipt.escalation_task_id or 'not created' }}</dd></div>
+      {% if receipt.usage %}
+        <div><dt>Token total</dt><dd>{{ receipt.usage.total_tokens }}</dd></div>
+        <div><dt>Cost total</dt><dd>{% if receipt.usage.cost_usd is not none %}${{ receipt.usage.cost_usd }}{% else %}unavailable{% endif %}</dd></div>
+      {% endif %}
+    </dl>
+    <div class="result-links" aria-label="Durable review links">
+      <a class="text-link" href="/audit/{{ receipt.run_id }}">Review audit</a>
+      {% if receipt.approval_id %}<a class="text-link" href="/approval/{{ receipt.approval_id }}">Review approval</a>{% endif %}
+      {% if receipt.workflow_id %}<a class="text-link" href="/workflow/{{ receipt.workflow_id }}">Review workflow</a>{% endif %}
+    </div>
+  </section>
+{% endblock %}
