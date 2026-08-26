@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -343,6 +343,42 @@ def test_demo_clock_starts_on_the_seeded_scenario_date() -> None:
     from enterprise_agent.seed import DEMO_CLOCK_START
 
     assert DEMO_CLOCK_START == datetime(2026, 8, 24, 9, tzinfo=UTC)
+
+
+def test_scenario_a_seed_timeline_is_causally_consistent() -> None:
+    """The delayed original shipment threatens production while a replacement can arrive in time."""
+    from enterprise_agent.seed import DEMO_CLOCK_START, SEED_ROWS
+
+    rows_by_table = {
+        table: [row.values for row in SEED_ROWS if row.table == table]
+        for table in ("inventory", "production_orders", "purchase_orders", "suppliers", "messages")
+    }
+    production = next(row for row in rows_by_table["production_orders"] if row["order_number"] == "4812")
+    original_po = next(
+        row for row in rows_by_table["purchase_orders"] if row["po_number"] == "PO-4812-Y"
+    )
+    current_update = next(
+        row
+        for row in rows_by_table["messages"]
+        if row["message_key"] == "shipment-update-po-4812-y-v2"
+    )
+    inventory = rows_by_table["inventory"][0]
+    viable_replacement = next(
+        row for row in rows_by_table["suppliers"] if row["supplier_code"] == "SUP-Z"
+    )
+
+    production_start = production["start_date"]
+    delayed_receipt = original_po["expected_receipt_date"]
+
+    assert DEMO_CLOCK_START.date() < production_start
+    assert delayed_receipt > production_start
+    assert current_update["payload"]["expected_receipt_date"] == delayed_receipt.isoformat()
+    assert DEMO_CLOCK_START.date() + timedelta(days=viable_replacement["lead_time_days"]) <= production_start
+    assert (
+        production["required_quantity"]
+        + inventory["safety_stock_quantity"]
+        - inventory["available_quantity"]
+    ) > 0
 
 
 def test_reset_and_seed_execute_one_safe_transaction_each(
