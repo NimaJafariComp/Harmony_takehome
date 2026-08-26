@@ -8,6 +8,7 @@ from uuid import uuid4
 from enterprise_agent.application.workflows import WorkflowNotDeclaredError, declared_workflow
 from enterprise_agent.domain import (
     Plan,
+    RunId,
     WorkflowId,
     WorkflowState,
     WorkflowStateSnapshot,
@@ -36,6 +37,7 @@ class WorkflowStateService:
         *,
         created_at: datetime,
         workflow_id: WorkflowId | None = None,
+        audit_run_id: RunId | None = None,
     ) -> WorkflowStateSnapshot:
         """Persist every fixed initial step; no approval check, claim, or external tool call occurs."""
         if (
@@ -72,6 +74,8 @@ class WorkflowStateService:
             "plan_parameters": dict(plan.parameters),
             "source_versions": dict(plan.source_versions),
         }
+        if audit_run_id is not None:
+            input_snapshot["audit_run_id"] = str(audit_run_id)
         steps = tuple(
             WorkflowStepState(
                 step_id=WorkflowStepId(str(uuid4())),

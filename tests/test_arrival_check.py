@@ -19,6 +19,7 @@ from enterprise_agent.domain import (
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
+    AuditEvent,
     Evidence,
     EvidenceId,
     RunId,
@@ -129,6 +130,19 @@ class RecordingErp:
 
 
 @dataclass
+class RecordingAudit:
+    """Collect the durable task's audit event without coupling the service to PostgreSQL."""
+
+    events: list[AuditEvent]
+
+    def append(self, event: AuditEvent) -> None:
+        self.events.append(event)
+
+    def events_for_run(self, run_id: RunId) -> tuple[AuditEvent, ...]:
+        return tuple(event for event in self.events if event.run_id == run_id)
+
+
+@dataclass
 class MemoryArrivalAttentionStore:
     """Persist lifecycle changes and deduplicate one source-version-specific follow-up in memory."""
 
@@ -220,6 +234,33 @@ def test_tuesday_full_receipt_resolves_the_original_attention() -> None:
             ),
         )
     ]
+
+
+def test_tuesday_task_uses_its_durable_audit_run_correlation_when_fired() -> None:
+    """A restarted worker needs no caller-memory run ID to preserve the scheduled audit story."""
+    attention = MemoryArrivalAttentionStore({ORIGINAL_ATTENTION_ID: original_attention()})
+    audit = RecordingAudit(events=[])
+    run_id = RunId("run-arrival-task-audit")
+    service = TuesdayArrivalCheckService(
+        erp=RecordingErp((purchase_order(received_quantity="60"),)),
+        identity=RecordingIdentity(),
+        attention=attention,
+        audit=audit,
+    )
+    task = claimed_arrival_task(
+        payload={
+            "purchase_order_id": REPLACEMENT_PURCHASE_ORDER_ID,
+            "original_attention_id": str(ORIGINAL_ATTENTION_ID),
+            "actor_id": str(DANA),
+            "audit_run_id": str(run_id),
+        }
+    )
+
+    result = service.handle_claimed_task(task, checked_at=TUESDAY)
+
+    assert result.outcome is ArrivalCheckOutcome.RESOLVED
+    assert [event.event_type for event in audit.events] == ["schedule.fired"]
+    assert audit.events[0].run_id == run_id
 
 
 @pytest.mark.critical

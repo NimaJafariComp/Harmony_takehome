@@ -19,11 +19,13 @@ from enterprise_agent.domain import (
     ApprovalId,
     ApprovalStatus,
     AttentionId,
+    AuditEvent,
     DateRange,
     Evidence,
     EvidenceId,
     Plan,
     PlanId,
+    RunId,
     ScheduledTask,
     ScheduledTaskId,
     ScheduledTaskStatus,
@@ -225,11 +227,25 @@ class RecordingScheduler:
         """Provide the unused completion port method for structural contract compatibility."""
 
 
+@dataclass
+class RecordingAudit:
+    """Collect routing lifecycle events through the same append-only audit port shape."""
+
+    events: list[AuditEvent]
+
+    def append(self, event: AuditEvent) -> None:
+        self.events.append(event)
+
+    def events_for_run(self, run_id: RunId) -> tuple[AuditEvent, ...]:
+        return tuple(event for event in self.events if event.run_id == run_id)
+
+
 def routing_service(
     *,
     events: tuple[Evidence, ...] = (out_of_office(),),
     original_approver: ActorContext | None = None,
     backup_approver: ActorContext | None = None,
+    audit: RecordingAudit | None = None,
 ) -> tuple[ApprovalRoutingService, MemoryRoutingStore, RecordingCalendar, RecordingScheduler]:
     """Build the service with Dana, an authorized Avery, and one isolated approval record."""
     stored_plan = plan()
@@ -247,7 +263,12 @@ def routing_service(
     identity = RecordingIdentity({DANA: dana, AVERY: avery})
     calendar = RecordingCalendar(events)
     scheduler = RecordingScheduler()
-    return ApprovalRoutingService(store, identity, calendar, scheduler), store, calendar, scheduler
+    return (
+        ApprovalRoutingService(store, identity, calendar, scheduler, audit=audit),
+        store,
+        calendar,
+        scheduler,
+    )
 
 
 @pytest.mark.critical
@@ -286,6 +307,32 @@ def test_end_of_day_routing_schedules_once_and_reroutes_only_for_next_day_absenc
             ),
         )
     ]
+
+
+def test_routing_audits_the_durable_schedule_and_authorized_backup_decision() -> None:
+    """The EOD handoff retains one run correlation through the schedule firing and reroute."""
+    audit = RecordingAudit(events=[])
+    run_id = RunId("run-approval-routing-audit")
+    router, store, _, _ = routing_service(audit=audit)
+    task = router.schedule_escalation(store.approval, run_id=run_id)
+
+    result = router.handle_claimed_task(
+        replace(
+            task,
+            status=ScheduledTaskStatus.CLAIMED,
+            lease_expires_at=END_OF_DAY + timedelta(minutes=5),
+        ),
+        routed_at=END_OF_DAY,
+    )
+
+    assert result.outcome is ApprovalRoutingOutcome.REROUTED
+    assert task.payload["audit_run_id"] == str(run_id)
+    assert [event.event_type for event in audit.events] == [
+        "schedule.created",
+        "schedule.fired",
+        "approval.rerouted",
+    ]
+    assert all(event.run_id == run_id for event in audit.events)
 
 
 @pytest.mark.parametrize(

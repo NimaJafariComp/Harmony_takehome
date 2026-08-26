@@ -290,6 +290,7 @@ class ToolInvocation:
     attempt_count: int
     started_at: datetime | None
     completed_at: datetime | None
+    audit_run_id: RunId | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "parameters", _freeze_mapping(self.parameters))

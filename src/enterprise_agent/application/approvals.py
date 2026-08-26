@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import uuid4
 
@@ -16,8 +16,18 @@ from enterprise_agent.application.planning import (
     EnterWorkflowRecommendation,
     ScenarioARecommendation,
 )
-from enterprise_agent.domain import Approval, ApprovalId, ApprovalStatus, Plan, PlanId, UserId
-from enterprise_agent.ports import PlanApprovalPort
+from enterprise_agent.domain import (
+    Approval,
+    ApprovalId,
+    ApprovalStatus,
+    Plan,
+    PlanId,
+    RunId,
+    UserId,
+)
+from enterprise_agent.ports import AuditPort, PlanApprovalPort
+
+from .audit_trail import append_material_audit_event
 
 
 class PlanNotApprovableError(ValueError):
@@ -50,7 +60,7 @@ class _ScenarioAGate(Protocol):
 class _ApprovalEscalationScheduler(Protocol):
     """Schedule one deterministic end-of-day check after a pending approval is persisted."""
 
-    def schedule_escalation(self, approval: Approval) -> object:
+    def schedule_escalation(self, approval: Approval, *, run_id: RunId | None = None) -> object:
         """Persist the replay-safe escalation task for this exact approval request."""
         ...
 
@@ -64,11 +74,13 @@ class ScenarioAApprovalService:
         *,
         gate: _ScenarioAGate | None = None,
         escalation_scheduler: _ApprovalEscalationScheduler | None = None,
+        audit: AuditPort | None = None,
     ) -> None:
         """Depend on a transactional persistence port and the deterministic Scenario A gate."""
         self._store = store
         self._gate = gate or ScenarioAGate()
         self._escalation_scheduler = escalation_scheduler
+        self._audit = audit
 
     def request_pending(
         self,
@@ -79,6 +91,7 @@ class ScenarioAApprovalService:
         policy_version: str,
         requested_at: datetime,
         expires_at: datetime,
+        run_id: RunId | None = None,
     ) -> PendingPlanApproval:
         """Recheck policy, then atomically persist a pending approval for one immutable intent."""
         if expires_at <= requested_at:
@@ -133,8 +146,21 @@ class ScenarioAApprovalService:
             expires_at=expires_at,
         )
         self._store.create_pending(plan, approval)
+        if self._audit is not None and run_id is not None:
+            _record_pending_plan_audit(
+                self._audit,
+                context=context,
+                recommendation=recommendation,
+                decision=decision,
+                plan=plan,
+                approval=approval,
+                run_id=run_id,
+            )
         if self._escalation_scheduler is not None:
-            self._escalation_scheduler.schedule_escalation(approval)
+            if run_id is None:
+                self._escalation_scheduler.schedule_escalation(approval)
+            else:
+                self._escalation_scheduler.schedule_escalation(approval, run_id=run_id)
         return PendingPlanApproval(plan=plan, approval=approval, gate_decision=decision)
 
     def approve(
@@ -145,6 +171,7 @@ class ScenarioAApprovalService:
         decider_id: UserId,
         current_source_versions: Mapping[str, int],
         decided_at: datetime,
+        run_id: RunId | None = None,
     ) -> Approval:
         """Approve only one unchanged, current plan before any later executor can use it."""
         record = self._store.load(approval_id)
@@ -169,6 +196,20 @@ class ScenarioAApprovalService:
         approved = self._store.approve(approval_id, expected_plan_hash, decider_id, decided_at)
         if approved is None:
             raise PlanNotApprovableError("approval could not be atomically advanced")
+        if self._audit is not None and run_id is not None:
+            append_material_audit_event(
+                self._audit,
+                event_type="approval.approved",
+                run_id=run_id,
+                occurred_at=decided_at,
+                actor_id=decider_id,
+                attention_id=plan.attention_id,
+                plan_id=plan.plan_id,
+                payload={"approver_id": str(decider_id)},
+                evidence_ids=(),
+                policy_version=plan.policy_version,
+                plan_hash=plan.plan_hash,
+            )
         return approved
 
     def reject(
@@ -178,6 +219,7 @@ class ScenarioAApprovalService:
         expected_plan_hash: str,
         decider_id: UserId,
         decided_at: datetime,
+        run_id: RunId | None = None,
     ) -> Approval:
         """Let only the current approver reject the same still-valid immutable plan binding."""
         record = self._store.load(approval_id)
@@ -199,7 +241,81 @@ class ScenarioAApprovalService:
         rejected = self._store.reject(approval_id, expected_plan_hash, decider_id, decided_at)
         if rejected is None:
             raise PlanNotApprovableError("approval could not be atomically advanced")
+        if self._audit is not None and run_id is not None:
+            append_material_audit_event(
+                self._audit,
+                event_type="approval.rejected",
+                run_id=run_id,
+                occurred_at=decided_at,
+                actor_id=decider_id,
+                attention_id=plan.attention_id,
+                plan_id=plan.plan_id,
+                payload={"approver_id": str(decider_id)},
+                evidence_ids=(),
+                policy_version=plan.policy_version,
+                plan_hash=plan.plan_hash,
+            )
         return rejected
+
+
+def _record_pending_plan_audit(
+    audit: AuditPort,
+    *,
+    context: AuthorizedContextBundle,
+    recommendation: ScenarioARecommendation,
+    decision: GateDecision,
+    plan: Plan,
+    approval: Approval,
+    run_id: RunId,
+) -> None:
+    """Record the planning, gate, and human-approval facts after their durable plan exists."""
+    evidence_ids = tuple(item.evidence_id for item in context.evidence)
+    append_material_audit_event(
+        audit,
+        event_type="planner.recommended",
+        run_id=run_id,
+        occurred_at=plan.created_at + timedelta(microseconds=3),
+        actor_id=context.actor.user_id,
+        attention_id=plan.attention_id,
+        plan_id=plan.plan_id,
+        evidence_ids=evidence_ids,
+        payload={
+            "outcome": recommendation.outcome,
+            "workflow_name": plan.workflow_name or "unknown",
+        },
+        policy_version=plan.policy_version,
+        plan_hash=plan.plan_hash,
+    )
+    append_material_audit_event(
+        audit,
+        event_type="gate.allowed",
+        run_id=run_id,
+        occurred_at=plan.created_at + timedelta(microseconds=4),
+        actor_id=context.actor.user_id,
+        attention_id=plan.attention_id,
+        plan_id=plan.plan_id,
+        evidence_ids=evidence_ids,
+        payload={
+            "estimated_value": "unknown"
+            if decision.estimated_value is None
+            else str(decision.estimated_value.amount),
+        },
+        policy_version=plan.policy_version,
+        plan_hash=plan.plan_hash,
+    )
+    append_material_audit_event(
+        audit,
+        event_type="approval.requested",
+        run_id=run_id,
+        occurred_at=plan.created_at + timedelta(microseconds=5),
+        actor_id=context.actor.user_id,
+        attention_id=plan.attention_id,
+        plan_id=plan.plan_id,
+        evidence_ids=evidence_ids,
+        payload={"approver_id": str(approval.approver_id)},
+        policy_version=plan.policy_version,
+        plan_hash=plan.plan_hash,
+    )
 
 
 def recompute_plan_hash(plan: Plan) -> str:

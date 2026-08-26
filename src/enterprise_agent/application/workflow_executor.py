@@ -9,6 +9,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from enterprise_agent.application.approvals import recompute_plan_hash
+from enterprise_agent.application.audit_trail import append_material_audit_event
 from enterprise_agent.application.tools import (
     CreateReplacementPOInput,
     NotifyProductionInput,
@@ -35,16 +36,19 @@ from enterprise_agent.domain import (
     ApprovalStatus,
     Plan,
     PlanId,
+    RunId,
     ToolCompensation,
     ToolInvocation,
     ToolInvocationId,
     ToolInvocationStatus,
+    UserId,
     WorkflowId,
     WorkflowStateSnapshot,
     WorkflowStatus,
     WorkflowStepStatus,
 )
 from enterprise_agent.ports import (
+    AuditPort,
     IdentityPort,
     ToolCompensationPort,
     ToolExecutionPort,
@@ -122,6 +126,7 @@ class ScenarioAWorkflowExecutor:
         identity: IdentityPort,
         tool_executor: ToolExecutionPort | None = None,
         crash_injector: WorkflowCrashInjectorPort | None = None,
+        audit: AuditPort | None = None,
     ) -> None:
         """Keep authorization, approval, and durable transition concerns behind typed ports."""
         self._workflow_store = workflow_store
@@ -129,6 +134,7 @@ class ScenarioAWorkflowExecutor:
         self._identity = identity
         self._tool_executor = tool_executor
         self._crash_injector = crash_injector
+        self._audit = audit
 
     def claim(
         self,
@@ -173,6 +179,13 @@ class ScenarioAWorkflowExecutor:
         )
         if claimed is None:
             raise WorkflowClaimLostError("workflow claim was not acquired")
+        if snapshot.workflow.status is WorkflowStatus.PENDING:
+            self._record_audit(
+                claimed,
+                event_type="workflow.started",
+                occurred_at=now,
+                payload={"workflow_name": definition.name},
+            )
         return claimed
 
     def advance_next_guard(
@@ -206,6 +219,18 @@ class ScenarioAWorkflowExecutor:
         )
         if advanced is None:
             raise WorkflowClaimLostError("workflow guard transition was not acquired")
+        self._record_audit(
+            advanced,
+            event_type="workflow.step_started",
+            occurred_at=completed_at - timedelta(microseconds=1),
+            payload={"step_name": next_step.name.value},
+        )
+        self._record_audit(
+            advanced,
+            event_type="workflow.step_completed",
+            occurred_at=completed_at,
+            payload={"step_name": next_step.name.value, "result": "guard-satisfied"},
+        )
         return advanced
 
     def begin_next_tool(
@@ -281,6 +306,20 @@ class ScenarioAWorkflowExecutor:
             )
             if started is None:
                 raise WorkflowClaimLostError("workflow tool start transition was not acquired")
+            self._record_audit(
+                started,
+                event_type="workflow.step_started",
+                occurred_at=started_at,
+                payload={"step_name": next_step.name.value},
+            )
+            self._record_audit(
+                started,
+                event_type="tool.started",
+                occurred_at=started_at + timedelta(microseconds=1),
+                actor_id=actor.user_id,
+                payload={"tool_name": next_step.tool_name.value},
+                idempotency_key=idempotency_key,
+            )
         return StartedToolExecution(
             actor=actor,
             invocation=ToolInvocation(
@@ -294,6 +333,7 @@ class ScenarioAWorkflowExecutor:
                 attempt_count=stored_step.attempt_count if resuming else 1,
                 started_at=started_at,
                 completed_at=None,
+                audit_run_id=_audit_run_id(claimed),
             ),
             step_index=next_step.index,
         )
@@ -348,6 +388,26 @@ class ScenarioAWorkflowExecutor:
                 raise WorkflowClaimLostError(
                     "workflow terminal-failure transition was not acquired"
                 ) from error
+            failure_category = _safe_terminal_error(error)
+            self._record_audit(
+                failed,
+                event_type="tool.failed",
+                occurred_at=completed_at - timedelta(microseconds=1),
+                actor_id=started.actor.user_id,
+                payload={
+                    "tool_name": invocation.tool_name,
+                    "failure_category": failure_category,
+                },
+                idempotency_key=invocation.idempotency_key,
+                failure_category=failure_category,
+            )
+            self._record_audit(
+                failed,
+                event_type="workflow.failed",
+                occurred_at=completed_at,
+                payload={"failure_category": failure_category},
+                failure_category=failure_category,
+            )
             self.compensate_failed_workflow(
                 workflow.workflow_id,
                 worker_id=worker_id,
@@ -369,6 +429,33 @@ class ScenarioAWorkflowExecutor:
         )
         if completed is None:
             raise WorkflowClaimLostError("workflow tool completion transition was not acquired")
+        self._record_audit(
+            completed,
+            event_type="tool.succeeded",
+            occurred_at=completed_at - timedelta(microseconds=1),
+            actor_id=started.actor.user_id,
+            payload={"tool_name": invocation.tool_name},
+            idempotency_key=invocation.idempotency_key,
+        )
+        self._record_audit(
+            completed,
+            event_type="workflow.step_completed",
+            occurred_at=completed_at,
+            payload={"step_name": next_step.name.value, "result": "tool-succeeded"},
+            idempotency_key=invocation.idempotency_key,
+        )
+        if invocation.tool_name == ToolName.SCHEDULE_ARRIVAL_CHECK.value:
+            self._record_audit(
+                completed,
+                event_type="schedule.created",
+                occurred_at=completed_at + timedelta(microseconds=1),
+                actor_id=started.actor.user_id,
+                payload={
+                    "task_type": "arrival_check",
+                    "due_at": _audit_result_text(result, "due_at"),
+                },
+                idempotency_key=invocation.idempotency_key,
+            )
         return completed
 
     def compensate_failed_workflow(
@@ -425,6 +512,14 @@ class ScenarioAWorkflowExecutor:
             )
             if started is None:
                 raise WorkflowClaimLostError("workflow compensation step was not acquired")
+            self._record_audit(
+                started,
+                event_type="compensation.started",
+                occurred_at=now,
+                actor_id=actor.user_id,
+                payload={"tool_name": step.tool_name},
+                idempotency_key=step.idempotency_key,
+            )
             result = self._tool_executor.compensate(
                 actor,
                 ToolCompensation(
@@ -458,6 +553,14 @@ class ScenarioAWorkflowExecutor:
             )
             if completed is None:
                 raise WorkflowClaimLostError("workflow compensation completion was not acquired")
+            self._record_audit(
+                completed,
+                event_type="compensation.completed",
+                occurred_at=now + timedelta(microseconds=1),
+                actor_id=actor.user_id,
+                payload={"tool_name": step.tool_name},
+                idempotency_key=step.idempotency_key,
+            )
             compensating = completed
         if compensating.workflow.status is not WorkflowStatus.COMPENSATED:
             raise WorkflowExecutionRejectedError(
@@ -476,6 +579,36 @@ class ScenarioAWorkflowExecutor:
             raise WorkflowExecutionRejectedError("workflow actor identity does not match the plan")
         return actor
 
+    def _record_audit(
+        self,
+        snapshot: WorkflowStateSnapshot,
+        *,
+        event_type: str,
+        occurred_at: datetime,
+        payload: Mapping[str, object],
+        actor_id: UserId | None = None,
+        idempotency_key: str | None = None,
+        failure_category: str | None = None,
+    ) -> None:
+        """Append one workflow fact only when this durable workflow carries an audit correlation."""
+        if self._audit is None:
+            return
+        run_id = _audit_run_id(snapshot)
+        if run_id is None:
+            return
+        append_material_audit_event(
+            self._audit,
+            event_type=event_type,
+            run_id=run_id,
+            occurred_at=occurred_at,
+            actor_id=actor_id,
+            workflow_id=snapshot.workflow.workflow_id,
+            plan_id=snapshot.workflow.plan_id,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            failure_category=failure_category,
+        )
+
 
 def _revalidate_execution(
     snapshot: WorkflowStateSnapshot,
@@ -492,7 +625,6 @@ def _revalidate_execution(
         or approval.plan_id != plan.plan_id
         or approval.plan_hash != plan.plan_hash
         or approval.requester_id != plan.actor_id
-        or approval.approver_id != plan.approver_id
         or now >= approval.expires_at
         or now >= plan.expires_at
     ):
@@ -555,6 +687,9 @@ def _declared_definition(
             "plan_parameters": dict(plan.parameters),
             "source_versions": dict(plan.source_versions),
         }
+        audit_run_id = _audit_run_id(snapshot)
+        if audit_run_id is not None:
+            expected_input["audit_run_id"] = str(audit_run_id)
     for stored_step, declared_step in zip(snapshot.steps, definition.steps, strict=True):
         if (
             stored_step.workflow_id != workflow.workflow_id
@@ -749,3 +884,21 @@ def _next_tuesday_at_nine(now: datetime) -> datetime:
 def _safe_terminal_error(error: TerminalToolExecutionError) -> str:
     """Persist a bounded operational failure category without leaking arbitrary provider detail."""
     return str(error).strip()[:500] or "terminal tool execution failed"
+
+
+def _audit_run_id(snapshot: WorkflowStateSnapshot) -> RunId | None:
+    """Recover the immutable run correlation staged with every workflow step input."""
+    if not snapshot.steps:
+        return None
+    value = snapshot.steps[0].input.get("audit_run_id")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise WorkflowExecutionRejectedError("workflow audit_run_id is invalid")
+    return RunId(value)
+
+
+def _audit_result_text(result: Mapping[str, object], name: str) -> str:
+    """Use only a bounded scalar result fact in audit payloads, never arbitrary tool output."""
+    value = result.get(name)
+    return value if isinstance(value, str) and value.strip() else "unknown"

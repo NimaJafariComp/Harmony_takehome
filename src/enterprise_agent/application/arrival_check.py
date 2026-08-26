@@ -20,7 +20,9 @@ from enterprise_agent.domain import (
     ScheduledTaskStatus,
     UserId,
 )
-from enterprise_agent.ports import ErpPort, EvidenceQuery, IdentityPort
+from enterprise_agent.ports import AuditPort, ErpPort, EvidenceQuery, IdentityPort
+
+from .audit_trail import append_material_audit_event
 
 ARRIVAL_CHECK_TASK_TYPE = "arrival_check"
 
@@ -85,22 +87,36 @@ class TuesdayArrivalCheckService:
         erp: ErpPort,
         identity: IdentityPort,
         attention: _ArrivalCheckAttentionPort,
+        audit: AuditPort | None = None,
     ) -> None:
         """Use only current authorized ERP evidence and durable attention operations."""
         self._erp = erp
         self._identity = identity
         self._attention = attention
+        self._audit = audit
 
     def handle_claimed_task(
         self,
         task: ScheduledTask,
         *,
         checked_at: datetime,
-        run_id: RunId,
+        run_id: RunId | None = None,
     ) -> ArrivalCheckResult:
         """Process one due leased task without inferring a receipt from an expected delivery date."""
         _validate_claimed_arrival_task(task, checked_at)
         purchase_order_id, original_attention_id, actor_id = _task_binding(task)
+        effective_run_id = _effective_run_id(task, run_id)
+        if self._audit is not None:
+            append_material_audit_event(
+                self._audit,
+                event_type="schedule.fired",
+                run_id=effective_run_id,
+                occurred_at=checked_at,
+                actor_id=actor_id,
+                attention_id=original_attention_id,
+                payload={"task_type": task.task_type},
+                idempotency_key=task.idempotency_key,
+            )
         original_attention = self._attention.load(original_attention_id)
         if original_attention is None:
             return ArrivalCheckResult(
@@ -130,7 +146,7 @@ class TuesdayArrivalCheckService:
             resolved = self._attention.transition(
                 original_attention,
                 AttentionStatus.RESOLVED,
-                run_id,
+                effective_run_id,
                 checked_at,
             )
             return ArrivalCheckResult(
@@ -142,7 +158,7 @@ class TuesdayArrivalCheckService:
         registration = self._attention.register_arrival_followup(
             original_attention=original_attention,
             purchase_order=purchase_order,
-            run_id=run_id,
+            run_id=effective_run_id,
             detected_at=checked_at,
         )
         return ArrivalCheckResult(
@@ -180,6 +196,21 @@ def _required_payload_text(task: ScheduledTask, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ArrivalCheckError(f"arrival check task lacks {name}")
     return value
+
+
+def _effective_run_id(task: ScheduledTask, run_id: RunId | None) -> RunId:
+    """Prefer the durable correlation and reject a caller attempting to rewrite its audit history."""
+    payload_value = task.payload.get("audit_run_id")
+    if payload_value is not None:
+        if not isinstance(payload_value, str) or not payload_value.strip():
+            raise ArrivalCheckError("arrival check task has an invalid audit_run_id")
+        task_run_id = RunId(payload_value)
+        if run_id is not None and run_id != task_run_id:
+            raise ArrivalCheckError("arrival check task audit_run_id does not match the caller")
+        return task_run_id
+    if run_id is None:
+        raise ArrivalCheckError("arrival check task lacks audit_run_id")
+    return run_id
 
 
 def _current_purchase_order(evidence: Sequence[Evidence], purchase_order_id: str) -> Evidence:

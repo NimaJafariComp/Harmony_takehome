@@ -14,10 +14,12 @@ from enterprise_agent.domain import (
     AttentionId,
     AttentionItem,
     AttentionStatus,
+    AuditEvent,
     DateRange,
     Evidence,
     EvidenceId,
     PlantId,
+    RunId,
     ScenarioAStockoutTrigger,
     Scope,
     UserId,
@@ -200,6 +202,19 @@ class RecordingIdentity:
         return self.actor
 
 
+@dataclass
+class RecordingAudit:
+    """Collect context audit records without making the context service depend on storage."""
+
+    events: list[AuditEvent]
+
+    def append(self, event: AuditEvent) -> None:
+        self.events.append(event)
+
+    def events_for_run(self, run_id: RunId) -> tuple[AuditEvent, ...]:
+        return tuple(event for event in self.events if event.run_id == run_id)
+
+
 def test_context_uses_authorized_evidence_and_newest_current_shipment_update() -> None:
     """The planner-facing bundle retains only current relevant facts and their provenance."""
     from enterprise_agent.application.context import ScenarioAContextAssembler
@@ -227,10 +242,13 @@ def test_context_uses_authorized_evidence_and_newest_current_shipment_update() -
     )
     calendar = RecordingProvider((calendar_event,))
 
-    context = ScenarioAContextAssembler(identity, erp, mail, calendar).assemble(
+    audit = RecordingAudit(events=[])
+    run_id = RunId("run-context-audit")
+    context = ScenarioAContextAssembler(identity, erp, mail, calendar, audit=audit).assemble(
         user_id=DANA.user_id,
         attention=attention(trigger),
         trigger=trigger,
+        run_id=run_id,
     )
 
     assert context.actor == DANA
@@ -258,6 +276,12 @@ def test_context_uses_authorized_evidence_and_newest_current_shipment_update() -
         )
     ]
     assert mail.queries == [EvidenceQuery(record_types=frozenset({"message"}))]
+    assert [event.event_type for event in audit.events] == ["context.gathered", "evidence.observed"]
+    assert [event.occurred_at for event in audit.events] == [
+        NOW.replace(microsecond=1),
+        NOW.replace(microsecond=2),
+    ]
+    assert all(event.run_id == run_id for event in audit.events)
     assert calendar.queries == [
         EvidenceQuery(
             record_types=frozenset({"calendar_event"}),

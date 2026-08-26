@@ -20,6 +20,7 @@ from enterprise_agent.application.tools import (
 )
 from enterprise_agent.domain import (
     ActorContext,
+    RunId,
     Scope,
     ToolCompensation,
     ToolInvocation,
@@ -53,6 +54,7 @@ def invocation(
     parameters: dict[str, object],
     *,
     status: ToolInvocationStatus = ToolInvocationStatus.STARTED,
+    audit_run_id: RunId | None = None,
 ) -> ToolInvocation:
     """Build one externally visible action with the stable key shape produced by the executor."""
     return ToolInvocation(
@@ -66,6 +68,7 @@ def invocation(
         attempt_count=1,
         started_at=NOW,
         completed_at=None,
+        audit_run_id=audit_run_id,
     )
 
 
@@ -338,6 +341,7 @@ def test_each_concrete_effect_persists_only_its_bounded_result() -> None:
                 "purchase_order_id": "replacement-1",
                 "due_at": "2026-08-25T09:00:00+00:00",
             },
+            audit_run_id=RunId("run-scheduled-arrival-audit"),
         ),
         ScheduleArrivalCheckInput(
             purchase_order_id="replacement-1",
@@ -348,6 +352,7 @@ def test_each_concrete_effect_persists_only_its_bounded_result() -> None:
     assert scheduled["due_at"] == "2026-08-25T09:00:00+00:00"
     assert json.loads(scheduler_connection.execute.call_args_list[1].args[1]["payload"]) == {
         "actor_id": "00000000-0000-0000-0000-000000000001",
+        "audit_run_id": "run-scheduled-arrival-audit",
         "original_attention_id": "00000000-0000-0000-0000-000000000601",
         "purchase_order_id": "replacement-1",
     }

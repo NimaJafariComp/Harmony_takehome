@@ -16,6 +16,7 @@ from enterprise_agent.domain import (
     DateRange,
     Evidence,
     Plan,
+    RunId,
     ScheduledTask,
     ScheduledTaskId,
     ScheduledTaskStatus,
@@ -23,12 +24,15 @@ from enterprise_agent.domain import (
     UserId,
 )
 from enterprise_agent.ports import (
+    AuditPort,
     CalendarPort,
     EvidenceQuery,
     IdentityPort,
     PlanApprovalPort,
     SchedulerPort,
 )
+
+from .audit_trail import append_material_audit_event
 
 APPROVAL_ESCALATION_TASK_TYPE = "approval_escalation"
 END_OF_BUSINESS_DAY = time(hour=17)
@@ -70,18 +74,30 @@ class ApprovalRoutingService:
         identity: IdentityPort,
         calendar: CalendarPort,
         scheduler: SchedulerPort,
+        *,
+        audit: AuditPort | None = None,
     ) -> None:
         """Depend only on durable state, current identities, scoped availability, and scheduling ports."""
         self._approvals = approvals
         self._identity = identity
         self._calendar = calendar
         self._scheduler = scheduler
+        self._audit = audit
 
-    def schedule_escalation(self, approval: Approval) -> ScheduledTask:
+    def schedule_escalation(
+        self, approval: Approval, *, run_id: RunId | None = None
+    ) -> ScheduledTask:
         """Persist the deterministic same-day check paired with an unanswered approval request."""
         if approval.status is not ApprovalStatus.PENDING:
             raise ApprovalRoutingError("only a pending approval may receive an escalation task")
         _require_timezone(approval.requested_at, name="approval request time")
+        payload: dict[str, object] = {
+            "approval_id": str(approval.approval_id),
+            "original_approver_id": str(approval.approver_id),
+            "plan_hash": approval.plan_hash,
+        }
+        if run_id is not None:
+            payload["audit_run_id"] = str(run_id)
         task = ScheduledTask(
             task_id=ScheduledTaskId(
                 str(uuid5(NAMESPACE_URL, f"approval-escalation:v1:{approval.approval_id}"))
@@ -90,16 +106,27 @@ class ApprovalRoutingService:
             due_at=_end_of_business_day(approval.requested_at),
             status=ScheduledTaskStatus.PENDING,
             idempotency_key=f"approval-escalation:v1:{approval.approval_id}",
-            payload={
-                "approval_id": str(approval.approval_id),
-                "original_approver_id": str(approval.approver_id),
-                "plan_hash": approval.plan_hash,
-            },
+            payload=payload,
             attempt_count=0,
             lease_expires_at=None,
             completed_at=None,
         )
         self._scheduler.schedule(task)
+        if self._audit is not None and run_id is not None:
+            append_material_audit_event(
+                self._audit,
+                event_type="schedule.created",
+                run_id=run_id,
+                occurred_at=approval.requested_at + timedelta(microseconds=6),
+                actor_id=approval.requester_id,
+                plan_id=approval.plan_id,
+                payload={
+                    "task_type": task.task_type,
+                    "due_at": task.due_at.isoformat(),
+                },
+                idempotency_key=task.idempotency_key,
+                plan_hash=approval.plan_hash,
+            )
         return task
 
     def handle_claimed_task(
@@ -108,6 +135,18 @@ class ApprovalRoutingService:
         """Reroute a due claimed task only when current policy and its persisted facts all agree."""
         _validate_claimed_escalation(task, routed_at)
         approval_id, original_approver_id, plan_hash = _task_binding(task)
+        audit_run_id = _audit_run_id(task)
+        if self._audit is not None and audit_run_id is not None:
+            append_material_audit_event(
+                self._audit,
+                event_type="schedule.fired",
+                run_id=audit_run_id,
+                occurred_at=routed_at,
+                actor_id=original_approver_id,
+                payload={"task_type": task.task_type},
+                idempotency_key=task.idempotency_key,
+                plan_hash=plan_hash,
+            )
         record = self._approvals.load(approval_id)
         if record is None:
             return ApprovalRoutingResult(
@@ -161,6 +200,17 @@ class ApprovalRoutingService:
         )
         if routed is None:
             return ApprovalRoutingResult(outcome=ApprovalRoutingOutcome.RACE_LOST, approval=None)
+        if self._audit is not None and audit_run_id is not None:
+            append_material_audit_event(
+                self._audit,
+                event_type="approval.rerouted",
+                run_id=audit_run_id,
+                occurred_at=routed_at + timedelta(microseconds=1),
+                actor_id=backup_approver_id,
+                plan_id=plan.plan_id,
+                payload={"approver_id": str(backup_approver_id)},
+                plan_hash=plan.plan_hash,
+            )
         return ApprovalRoutingResult(outcome=ApprovalRoutingOutcome.REROUTED, approval=routed)
 
 
@@ -201,6 +251,16 @@ def _required_payload_text(task: ScheduledTask, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ApprovalRoutingError(f"approval escalation task lacks {name}")
     return value
+
+
+def _audit_run_id(task: ScheduledTask) -> RunId | None:
+    """Read an optional durable audit correlation without weakening task business bindings."""
+    value = task.payload.get("audit_run_id")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ApprovalRoutingError("approval escalation task has an invalid audit_run_id")
+    return RunId(value)
 
 
 def _can_decide(

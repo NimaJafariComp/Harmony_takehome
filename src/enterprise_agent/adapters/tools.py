@@ -632,6 +632,13 @@ def _schedule_arrival_check(
     )
     if attention is None:
         raise ToolExecutionError("workflow attention binding is unavailable")
+    payload: dict[str, object] = {
+        "purchase_order_id": input_value.purchase_order_id,
+        "original_attention_id": cast(str, attention["attention_id"]),
+        "actor_id": cast(str, attention["actor_id"]),
+    }
+    if invocation.audit_run_id is not None:
+        payload["audit_run_id"] = str(invocation.audit_run_id)
     scheduled = (
         connection.execute(
             INSERT_ARRIVAL_CHECK,
@@ -641,13 +648,7 @@ def _schedule_arrival_check(
                 "workflow_id": str(invocation.workflow_id),
                 "idempotency_key": invocation.idempotency_key,
                 "due_at": input_value.due_at,
-                "payload": _as_json(
-                    {
-                        "purchase_order_id": input_value.purchase_order_id,
-                        "original_attention_id": cast(str, attention["attention_id"]),
-                        "actor_id": cast(str, attention["actor_id"]),
-                    }
-                ),
+                "payload": _as_json(payload),
                 "occurred_at": invocation.started_at,
             },
         )

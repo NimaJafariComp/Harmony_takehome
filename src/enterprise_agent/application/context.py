@@ -13,16 +13,20 @@ from enterprise_agent.domain import (
     AttentionItem,
     DateRange,
     Evidence,
+    RunId,
     ScenarioAStockoutTrigger,
     UserId,
 )
 from enterprise_agent.ports import (
+    AuditPort,
     CalendarPort,
     ErpPort,
     EvidenceQuery,
     IdentityPort,
     MailPort,
 )
+
+from .audit_trail import append_material_audit_event
 
 
 class MissingScenarioAContextEvidenceError(ValueError):
@@ -93,12 +97,15 @@ class ScenarioAContextAssembler:
         erp: ErpPort,
         mail: MailPort,
         calendar: CalendarPort,
+        *,
+        audit: AuditPort | None = None,
     ) -> None:
         """Depend only on provider ports so context assembly cannot bypass authorization SQL."""
         self._identity = identity
         self._erp = erp
         self._mail = mail
         self._calendar = calendar
+        self._audit = audit
 
     def assemble(
         self,
@@ -106,6 +113,7 @@ class ScenarioAContextAssembler:
         user_id: UserId,
         attention: AttentionItem,
         trigger: ScenarioAStockoutTrigger,
+        run_id: RunId | None = None,
     ) -> AuthorizedContextBundle:
         """Return current authorized facts or fail before a planner can receive incomplete truth."""
         _require_attention_matches_trigger(attention, trigger)
@@ -138,7 +146,7 @@ class ScenarioAContextAssembler:
             )
         )
 
-        return AuthorizedContextBundle(
+        context = AuthorizedContextBundle(
             actor=actor,
             attention=attention,
             trigger=trigger,
@@ -154,6 +162,38 @@ class ScenarioAContextAssembler:
             shipment_update=shipment_update,
             calendar_events=calendar_events,
         )
+        if self._audit is not None and run_id is not None:
+            _record_context_audit(self._audit, context, run_id)
+        return context
+
+
+def _record_context_audit(
+    audit: AuditPort,
+    context: AuthorizedContextBundle,
+    run_id: RunId,
+) -> None:
+    """Record the bounded planner-visible evidence after every provider read has succeeded."""
+    evidence_ids = tuple(item.evidence_id for item in context.evidence)
+    append_material_audit_event(
+        audit,
+        event_type="context.gathered",
+        run_id=run_id,
+        occurred_at=context.trigger.detected_at + timedelta(microseconds=1),
+        actor_id=context.actor.user_id,
+        attention_id=context.attention.attention_id,
+        evidence_ids=evidence_ids,
+        payload={"evidence_count": len(evidence_ids)},
+    )
+    append_material_audit_event(
+        audit,
+        event_type="evidence.observed",
+        run_id=run_id,
+        occurred_at=context.trigger.detected_at + timedelta(microseconds=2),
+        actor_id=context.actor.user_id,
+        attention_id=context.attention.attention_id,
+        evidence_ids=evidence_ids,
+        payload={"evidence_count": len(evidence_ids)},
+    )
 
 
 def _require_attention_matches_trigger(

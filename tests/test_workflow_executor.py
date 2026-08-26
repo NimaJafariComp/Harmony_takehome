@@ -16,8 +16,10 @@ from enterprise_agent.domain import (
     ApprovalId,
     ApprovalStatus,
     AttentionId,
+    AuditEvent,
     Plan,
     PlanId,
+    RunId,
     Scope,
     UserId,
     WorkflowId,
@@ -478,6 +480,19 @@ class MemoryIdentity:
         return self.actor
 
 
+@dataclass
+class RecordingAudit:
+    """Collect material workflow events without depending on PostgreSQL in unit contracts."""
+
+    events: list[AuditEvent]
+
+    def append(self, event: AuditEvent) -> None:
+        self.events.append(event)
+
+    def events_for_run(self, run_id: RunId) -> tuple[AuditEvent, ...]:
+        return tuple(event for event in self.events if event.run_id == run_id)
+
+
 class MissingPlanApprovalBinding:
     """Model a durable workflow whose approval record has been removed or is unavailable."""
 
@@ -492,6 +507,8 @@ def executor_setup(
     snapshot: WorkflowStateSnapshot | None = None,
     tool_executor: Any | None = None,
     crash_injector: Any | None = None,
+    audit: RecordingAudit | None = None,
+    audit_run_id: RunId | None = None,
 ) -> tuple[Any, MemoryWorkflowStore, Plan, Approval]:
     """Stage a workflow and construct its executor with only controlled dependencies."""
     from enterprise_agent.application.workflow_executor import ScenarioAWorkflowExecutor
@@ -505,6 +522,7 @@ def executor_setup(
             plan,
             created_at=NOW,
             workflow_id=WORKFLOW_ID,
+            audit_run_id=audit_run_id,
         )
     else:
         store.create(snapshot)
@@ -517,6 +535,8 @@ def executor_setup(
         executor_arguments["tool_executor"] = tool_executor
     if crash_injector is not None:
         executor_arguments["crash_injector"] = crash_injector
+    if audit is not None:
+        executor_arguments["audit"] = audit
     executor = ScenarioAWorkflowExecutor(**executor_arguments)
     return executor, store, plan, stored_approval
 
@@ -571,6 +591,28 @@ def test_executor_fails_closed_before_claim_on_approval_freshness_or_scope_loss(
 
     assert store.claim_calls == []
     assert store.complete_guard_calls == []
+
+
+@pytest.mark.critical
+def test_executor_accepts_a_backup_approval_bound_to_the_immutable_original_plan() -> None:
+    """A valid M5 reroute changes the active decider, not the durable plan's original approver."""
+    plan = approved_plan()
+    backup_approval = replace(
+        approval_for(plan),
+        approver_id=UserId("00000000-0000-0000-0000-000000000002"),
+    )
+    executor, store, _, _ = executor_setup(approval=backup_approval)
+
+    claimed = executor.claim(
+        WORKFLOW_ID,
+        worker_id="workflow-worker-a",
+        now=NOW + timedelta(minutes=2),
+        lease_expires_at=NOW + timedelta(minutes=10),
+        current_source_versions=plan.source_versions,
+    )
+
+    assert claimed.workflow.status is WorkflowStatus.RUNNING
+    assert store.claim_calls == [(WORKFLOW_ID, "workflow-worker-a")]
 
 
 @pytest.mark.critical
@@ -1219,7 +1261,13 @@ def test_terminal_tool_failure_compensates_only_completed_effects_in_reverse_ord
     tools = CompensatingScenarioAToolExecutor(
         compensation_actions=[], terminal_tool_name="schedule_arrival_check"
     )
-    executor, store, plan, _ = executor_setup(tool_executor=tools)
+    audit = RecordingAudit(events=[])
+    run_id = RunId("run-workflow-compensation-audit")
+    executor, store, plan, _ = executor_setup(
+        tool_executor=tools,
+        audit=audit,
+        audit_run_id=run_id,
+    )
     _advance_to_first_tool(executor, plan)
 
     for minute in (5, 7, 9):
@@ -1269,6 +1317,36 @@ def test_terminal_tool_failure_compensates_only_completed_effects_in_reverse_ord
     ]
     assert [call[2] for call in store.start_compensation_calls] == [5, 4, 3]
     assert [call[2] for call in store.complete_compensation_calls] == [5, 4, 3]
+    assert [event.event_type for event in audit.events] == [
+        "workflow.started",
+        "workflow.step_started",
+        "workflow.step_completed",
+        "workflow.step_started",
+        "workflow.step_completed",
+        "workflow.step_started",
+        "tool.started",
+        "tool.succeeded",
+        "workflow.step_completed",
+        "workflow.step_started",
+        "tool.started",
+        "tool.succeeded",
+        "workflow.step_completed",
+        "workflow.step_started",
+        "tool.started",
+        "tool.succeeded",
+        "workflow.step_completed",
+        "workflow.step_started",
+        "tool.started",
+        "tool.failed",
+        "workflow.failed",
+        "compensation.started",
+        "compensation.completed",
+        "compensation.started",
+        "compensation.completed",
+        "compensation.started",
+        "compensation.completed",
+    ]
+    assert {event.run_id for event in audit.events} == {run_id}
 
 
 @pytest.mark.critical
@@ -1323,7 +1401,13 @@ def test_compensation_cancels_a_succeeded_arrival_task_before_earlier_effects() 
 
 def test_executor_runs_all_declared_tool_inputs_in_order_and_finishes_the_workflow() -> None:
     """Later effects use only prior durable results and continue the existing active workflow lease."""
-    executor, store, plan, _ = executor_setup(tool_executor=ScenarioAToolExecutor())
+    audit = RecordingAudit(events=[])
+    run_id = RunId("run-workflow-success-audit")
+    executor, store, plan, _ = executor_setup(
+        tool_executor=ScenarioAToolExecutor(),
+        audit=audit,
+        audit_run_id=run_id,
+    )
     _advance_to_first_tool(executor, plan)
 
     current = None
@@ -1349,6 +1433,9 @@ def test_executor_runs_all_declared_tool_inputs_in_order_and_finishes_the_workfl
     assert [call[2] for call in store.start_tool_calls] == [3, 4, 5, 6]
     assert [call[2] for call in store.complete_tool_calls] == [3, 4, 5, 6]
     assert current.steps[5].input["plan_parameters"]["original_purchase_order_id"] == "po-4812-y"
+    assert current.steps[5].input["audit_run_id"] == str(run_id)
+    assert [event.event_type for event in audit.events].count("schedule.created") == 1
+    assert audit.events[-1].payload == {"task_type": "arrival_check", "due_at": "unknown"}
 
 
 def test_executor_rejects_unavailable_or_lost_external_tool_execution_before_an_effect() -> None:

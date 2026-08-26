@@ -26,12 +26,14 @@ from enterprise_agent.domain import (
     AttentionId,
     AttentionItem,
     AttentionStatus,
+    AuditEvent,
     Evidence,
     EvidenceId,
     Money,
     Plan,
     PlanId,
     PlantId,
+    RunId,
     ScenarioAStockoutTrigger,
     Scope,
     UserId,
@@ -271,9 +273,22 @@ class RecordingEscalationScheduler:
 
     approvals: list[Approval] = field(default_factory=list)
 
-    def schedule_escalation(self, approval: Approval) -> None:
+    def schedule_escalation(self, approval: Approval, *, run_id: RunId | None = None) -> None:
         """Retain the exact newly persisted approval passed to the routing service."""
         self.approvals.append(approval)
+
+
+@dataclass
+class RecordingAudit:
+    """Collect plan-decision audit events while preserving the service's typed port boundary."""
+
+    events: list[AuditEvent]
+
+    def append(self, event: AuditEvent) -> None:
+        self.events.append(event)
+
+    def events_for_run(self, run_id: RunId) -> tuple[AuditEvent, ...]:
+        return tuple(event for event in self.events if event.run_id == run_id)
 
 
 def _pending_decision() -> GateDecision:
@@ -540,11 +555,13 @@ def test_postgres_adapter_reroutes_only_the_current_pending_approval(
     }
 
 
-def _service() -> tuple[ScenarioAApprovalService, MemoryPlanApprovalStore, RecordingGate]:
+def _service(
+    *, audit: RecordingAudit | None = None
+) -> tuple[ScenarioAApprovalService, MemoryPlanApprovalStore, RecordingGate]:
     """Build the application service with deterministic control-plane collaborators."""
     store = MemoryPlanApprovalStore()
     gate = RecordingGate(_pending_decision())
-    return ScenarioAApprovalService(store, gate=gate), store, gate
+    return ScenarioAApprovalService(store, gate=gate, audit=audit), store, gate
 
 
 def test_service_persists_a_pending_plan_and_approval_bound_to_the_full_intent_hash() -> None:
@@ -585,10 +602,13 @@ def test_service_schedules_the_escalation_only_after_persisting_a_pending_approv
     """Approval creation hands the exact durable pending request to the EOD routing policy."""
     store = MemoryPlanApprovalStore()
     scheduler = RecordingEscalationScheduler()
+    audit = RecordingAudit(events=[])
+    run_id = RunId("run-pending-approval-audit")
     service = ScenarioAApprovalService(
         store,
         gate=RecordingGate(_pending_decision()),
         escalation_scheduler=scheduler,
+        audit=audit,
     )
     context = _context()
 
@@ -599,10 +619,19 @@ def test_service_schedules_the_escalation_only_after_persisting_a_pending_approv
         policy_version="scenario_a_policy:v1",
         requested_at=NOW,
         expires_at=EXPIRES_AT,
+        run_id=run_id,
     )
 
     assert store.records[result.approval.approval_id] == (result.plan, result.approval)
     assert scheduler.approvals == [result.approval]
+    assert [event.event_type for event in audit.events] == [
+        "planner.recommended",
+        "gate.allowed",
+        "approval.requested",
+    ]
+    assert all(
+        event.run_id == run_id and event.plan_id == result.plan.plan_id for event in audit.events
+    )
 
 
 def test_service_refuses_to_persist_a_plan_when_the_gate_did_not_hold_it_for_approval() -> None:
@@ -662,7 +691,9 @@ def test_service_refuses_an_already_expired_plan_request_before_calling_the_gate
 def test_service_approves_only_an_unexpired_hash_and_source_version_match() -> None:
     """The approval decision is a compare-and-swap over the exact approved plan snapshot."""
 
-    service, store, _ = _service()
+    audit = RecordingAudit(events=[])
+    run_id = RunId("run-approval-decision-audit")
+    service, store, _ = _service(audit=audit)
     context = _context()
     result = service.request_pending(
         context,
@@ -671,6 +702,7 @@ def test_service_approves_only_an_unexpired_hash_and_source_version_match() -> N
         policy_version="scenario_a_policy:v1",
         requested_at=NOW,
         expires_at=EXPIRES_AT,
+        run_id=run_id,
     )
 
     approval = service.approve(
@@ -679,11 +711,18 @@ def test_service_approves_only_an_unexpired_hash_and_source_version_match() -> N
         decider_id=result.approval.approver_id,
         current_source_versions=context.source_versions,
         decided_at=NOW + timedelta(minutes=1),
+        run_id=run_id,
     )
 
     assert store.approve_calls == 1
     assert approval.status is ApprovalStatus.APPROVED
     assert approval.decided_at == NOW + timedelta(minutes=1)
+    assert [event.event_type for event in audit.events] == [
+        "planner.recommended",
+        "gate.allowed",
+        "approval.requested",
+        "approval.approved",
+    ]
 
 
 def test_only_the_rerouted_backup_may_make_the_terminal_approval_decision() -> None:
