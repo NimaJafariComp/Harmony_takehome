@@ -82,6 +82,37 @@ def test_usage_normalization_keeps_a_provider_reported_openrouter_cost() -> None
     assert usage.cost_source is LLMCostSource.PROVIDER_REPORTED
 
 
+def test_usage_normalization_marks_an_unreviewed_model_rate_as_unavailable() -> None:
+    """Custom or future model IDs retain token counts without inventing a dollar amount."""
+    from enterprise_agent.llm_usage import usage_from_response
+    from enterprise_agent.ports import LLMCostSource
+
+    usage = usage_from_response(
+        "openai",
+        "unreviewed-custom-model",
+        {"usage": {"input_tokens": 1000, "output_tokens": 500}},
+    )
+
+    assert usage is not None
+    assert usage.total_tokens == 1500
+    assert usage.cost_usd is None
+    assert usage.cost_source is LLMCostSource.UNAVAILABLE
+
+
+def test_reviewed_rate_card_covers_every_model_the_cli_can_suggest() -> None:
+    """A catalog addition must also declare transparent cost treatment before setup may recommend it."""
+    from enterprise_agent.llm_setup import CURATED_MODEL_CATALOG
+    from enterprise_agent.llm_usage import REVIEWED_MODEL_RATES
+
+    profile_to_provider = {"openai": "openai", "claude": "claude", "openrouter": "openrouter"}
+
+    assert {
+        (profile_to_provider[profile], model.model_id)
+        for profile, models in CURATED_MODEL_CATALOG.items()
+        for model in models
+    } <= set(REVIEWED_MODEL_RATES)
+
+
 @pytest.mark.parametrize(
     "response",
     (
@@ -91,7 +122,9 @@ def test_usage_normalization_keeps_a_provider_reported_openrouter_cost() -> None
         {"usage": {"input_tokens": -1, "output_tokens": 20}},
     ),
 )
-def test_usage_normalization_discards_missing_or_malformed_metering(response: dict[str, object]) -> None:
+def test_usage_normalization_discards_missing_or_malformed_metering(
+    response: dict[str, object],
+) -> None:
     """A malformed metering block cannot turn into invented accounting or a provider failure."""
     from enterprise_agent.llm_usage import usage_from_response
 
@@ -146,6 +179,47 @@ def test_usage_summary_groups_safe_audit_metadata_and_exposes_unknown_costs() ->
     assert summary.lines[0].estimated_request_count == 1
     assert summary.lines[1].unknown_cost_request_count == 1
     assert summary.total_cost_usd == Decimal("0.000764")
+
+
+def test_usage_summary_keeps_estimated_and_provider_reported_cost_subtotals_separate() -> None:
+    """Mixed historical cost sources cannot be rendered under one misleading label."""
+    from enterprise_agent.llm_usage import summarize_llm_usage
+
+    summary = summarize_llm_usage(
+        (
+            _usage_event(
+                "event-usage-estimated",
+                {
+                    "provider": "openrouter",
+                    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+                    "input_tokens": 10,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                    "cost_usd": "0",
+                    "cost_source": "estimated",
+                },
+            ),
+            _usage_event(
+                "event-usage-reported",
+                {
+                    "provider": "openrouter",
+                    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+                    "input_tokens": 10,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                    "cost_usd": "0.000321",
+                    "cost_source": "provider_reported",
+                },
+            ),
+        )
+    )
+
+    line = summary.lines[0]
+    assert line.estimated_cost_usd == Decimal(0)
+    assert line.provider_reported_cost_usd == Decimal("0.000321")
+    assert line.cost_usd == Decimal("0.000321")
 
 
 def _usage_event(event_id: str, payload: dict[str, object]) -> AuditEvent:

@@ -251,6 +251,34 @@ def test_openai_adapter_normalizes_metering_and_audits_only_safe_usage_facts() -
     }
 
 
+def test_openai_adapter_retains_safe_metering_when_a_charged_response_fails_validation() -> None:
+    """A charged but incomplete provider response remains a safe failure while its usage is auditable."""
+    from enterprise_agent.adapters.openai import OpenAIResponsesAdapter
+
+    audit = RecordingAudit()
+    result = OpenAIResponsesAdapter(
+        api_key=API_KEY,
+        model="gpt-5.6-luna",
+        transport=RecordingTransport(
+            {
+                "status": "incomplete",
+                "output": [],
+                "usage": {"input_tokens": 1000, "output_tokens": 0, "total_tokens": 1000},
+            }
+        ),
+        audit=audit,
+        clock=FixedClock(),
+    ).generate(prompt())
+
+    assert result.status is LLMGenerationStatus.PROVIDER_FAILURE
+    assert result.output is None
+    assert result.usage is not None
+    assert result.usage.total_tokens == 1000
+    assert audit.events[0].failure_category == "provider_failure"
+    assert audit.events[0].payload["total_tokens"] == 1000
+    assert audit.events[0].payload["cost_source"] == "estimated"
+
+
 def test_openai_adapter_uses_the_declared_scenario_b_schema() -> None:
     """The common adapter selects and validates the other application-owned recommendation contract."""
     from enterprise_agent.adapters.openai import OpenAIResponsesAdapter

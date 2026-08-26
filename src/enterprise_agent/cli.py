@@ -32,6 +32,7 @@ from enterprise_agent.llm_setup import (
     save_llm_profile,
     verify_credential,
 )
+from enterprise_agent.llm_usage import render_llm_usage, summarize_llm_usage
 from enterprise_agent.seed import (
     SeedSafetyError,
     _require_local_demo_database,
@@ -119,6 +120,13 @@ def llm_smoke() -> None:
         typer.echo(message, err=True)
         raise typer.Exit(code=1)
     typer.echo(message)
+
+
+@app.command(name="llm-usage")
+def llm_usage() -> None:
+    """Summarize safe provider token and cost facts from the append-only audit ledger."""
+    events = PostgresAuditAdapter(_database_url(action="llm usage")).llm_usage_events()
+    typer.echo(render_llm_usage(summarize_llm_usage(events)))
 
 
 @app.command()

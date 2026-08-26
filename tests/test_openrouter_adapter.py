@@ -156,6 +156,7 @@ def test_openrouter_adapter_supplies_output_schema_without_provider_fallbacks_an
     }
     assert request["model"] == MODEL
     assert request["stream"] is False
+    assert request["usage"] == {"include": True}
     assert request["provider"] == {"allow_fallbacks": False, "require_parameters": True}
     messages = cast(list[dict[str, Any]], request["messages"])
     assert "untrusted data" in messages[0]["content"]
@@ -195,9 +196,7 @@ def test_openrouter_adapter_supplies_output_schema_without_provider_fallbacks_an
     assert API_KEY not in repr(audit.events[0])
 
 
-def test_openrouter_adapter_preserves_provider_reported_metering_cost_in_safe_audit_facts() -> (
-    None
-):
+def test_openrouter_adapter_preserves_provider_reported_metering_cost_in_safe_audit_facts() -> None:
     """OpenRouter's provider-reported cost is stored as exact metering, never as a raw response."""
     from enterprise_agent.adapters.openrouter import OpenRouterChatCompletionsAdapter
     from enterprise_agent.ports import LLMCostSource

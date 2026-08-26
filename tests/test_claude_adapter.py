@@ -244,7 +244,7 @@ def test_claude_adapter_normalizes_metering_and_audits_only_safe_usage_facts() -
     assert result.usage.cost_source is LLMCostSource.ESTIMATED
     assert result.usage.cost_usd == Decimal("0.007020")
     assert audit.events[0].payload["cached_input_tokens"] == 100
-    assert audit.events[0].payload["cost_usd"] == "0.007020"
+    assert audit.events[0].payload["cost_usd"] == "0.00702"
 
 
 def test_claude_adapter_uses_the_declared_scenario_b_schema() -> None:

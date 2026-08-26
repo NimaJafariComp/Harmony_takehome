@@ -223,6 +223,36 @@ def test_audit_writer_reads_a_chronological_run_ledger_without_mutating_events(
 
 
 @pytest.mark.unit
+def test_audit_writer_reads_only_llm_completion_events_for_usage_reporting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The operator cost report has a narrow read path and cannot mutate or scan another event type."""
+    metered_event = audit_event(
+        event_type="llm.completed",
+        payload={
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "input_tokens": 10,
+            "cached_input_tokens": 0,
+            "output_tokens": 5,
+            "total_tokens": 15,
+            "cost_source": "estimated",
+            "cost_usd": "0.000008",
+        },
+    )
+    engine = MagicMock()
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value = mapping_result(all_rows=[audit_row(metered_event)])
+    monkeypatch.setattr(audit, "create_engine", lambda _: engine)
+    adapter = audit.PostgresAuditAdapter("postgresql+psycopg://ignored")
+
+    events = adapter.llm_usage_events()
+
+    assert events == (metered_event,)
+    assert connection.execute.call_args.args == (audit.SELECT_LLM_USAGE_EVENTS,)
+
+
+@pytest.mark.unit
 def test_audit_writer_rejects_malformed_persisted_json_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

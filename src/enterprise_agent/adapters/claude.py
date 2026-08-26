@@ -16,11 +16,13 @@ from enterprise_agent.application.planning import (
     validate_recommendation,
 )
 from enterprise_agent.domain import Evidence
+from enterprise_agent.llm_usage import usage_audit_payload, usage_from_response
 from enterprise_agent.ports import (
     AuditPort,
     ClockPort,
     LLMGenerationResult,
     LLMGenerationStatus,
+    LLMUsage,
     PromptEnvelope,
 )
 
@@ -128,28 +130,36 @@ class ClaudeMessagesAdapter:
         if not isinstance(raw_response, Mapping):
             return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
 
+        usage = usage_from_response("claude", self._model, raw_response)
         status, output_text = _output_text(raw_response)
         if status is not LLMGenerationStatus.SUCCEEDED:
-            return _failed(model=self._model, status=status)
+            return _failed(model=self._model, status=status, usage=usage)
         assert output_text is not None
 
         try:
             output = json.loads(output_text)
         except json.JSONDecodeError:
-            return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
+            return _failed(
+                model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE, usage=usage
+            )
         if not isinstance(output, Mapping):
-            return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
+            return _failed(
+                model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE, usage=usage
+            )
 
         try:
             recommendation = validate_recommendation(
                 prompt.response_schema, _unwrap_recommendation_output(output)
             )
         except (UnsupportedRecommendationSchemaError, ValueError):
-            return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
+            return _failed(
+                model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE, usage=usage
+            )
         return LLMGenerationResult.succeeded(
             provider=_PROVIDER_NAME,
             model=self._model,
             output=recommendation.model_dump(mode="json"),
+            usage=usage,
         )
 
     def _record_result(self, prompt: PromptEnvelope, result: LLMGenerationResult) -> None:
@@ -167,7 +177,8 @@ class ClaudeMessagesAdapter:
                 "model": result.model,
                 "status": result.status.value,
                 "response_schema": prompt.response_schema,
-            },
+            }
+            | (usage_audit_payload(result.usage) if result.usage is not None else {}),
             failure_category=None if result.is_success else result.status.value,
         )
 
@@ -254,9 +265,19 @@ def _unwrap_recommendation_output(output: Mapping[str, object]) -> Mapping[str, 
     return recommendation if isinstance(recommendation, Mapping) else output
 
 
-def _failed(*, model: str, status: LLMGenerationStatus) -> LLMGenerationResult:
+def _failed(
+    *,
+    model: str,
+    status: LLMGenerationStatus,
+    usage: LLMUsage | None = None,
+) -> LLMGenerationResult:
     """Create one failure result through the shared invariant-preserving result constructor."""
-    return LLMGenerationResult.failed(provider=_PROVIDER_NAME, model=model, status=status)
+    return LLMGenerationResult.failed(
+        provider=_PROVIDER_NAME,
+        model=model,
+        status=status,
+        usage=usage,
+    )
 
 
 def _json_default(value: object) -> object:

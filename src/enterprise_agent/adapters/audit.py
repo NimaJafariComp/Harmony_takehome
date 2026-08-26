@@ -91,6 +91,14 @@ SELECT_AUDIT_EVENTS_FOR_RUN = text("""
     WHERE run_id = :run_id
     ORDER BY occurred_at ASC, id ASC
 """)
+SELECT_LLM_USAGE_EVENTS = text("""
+    SELECT id, occurred_at, event_type, run_id, actor_id, attention_id, workflow_instance_id,
+           plan_id, evidence_ids, payload, policy_version, plan_hash, idempotency_key,
+           failure_category
+    FROM audit_events
+    WHERE event_type = 'llm.completed'
+    ORDER BY occurred_at ASC, id ASC
+""")
 
 
 class AuditEventError(ValueError):
@@ -118,6 +126,12 @@ class PostgresAuditAdapter:
                 .mappings()
                 .all()
             )
+        return tuple(_event_from_row(row) for row in rows)
+
+    def llm_usage_events(self) -> Sequence[AuditEvent]:
+        """Return immutable LLM completion events for read-only metering aggregation only."""
+        with self._engine.connect() as connection:
+            rows = connection.execute(SELECT_LLM_USAGE_EVENTS).mappings().all()
         return tuple(_event_from_row(row) for row in rows)
 
 

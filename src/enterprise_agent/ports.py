@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Protocol, Self, runtime_checkable
@@ -73,6 +74,51 @@ class LLMGenerationStatus(StrEnum):
     REFUSAL = "refusal"
 
 
+class LLMCostSource(StrEnum):
+    """Whether a cost is reported by the selected provider or estimated from a reviewed public rate."""
+
+    ESTIMATED = "estimated"
+    PROVIDER_REPORTED = "provider_reported"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LLMUsage:
+    """Normalized safe metering returned by a selected provider without raw provider payload retention."""
+
+    input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: Decimal | None
+    cost_source: LLMCostSource
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cost_source, LLMCostSource):
+            raise TypeError("LLM cost source must be a supported value")
+        for value, name in (
+            (self.input_tokens, "input tokens"),
+            (self.cached_input_tokens, "cached input tokens"),
+            (self.output_tokens, "output tokens"),
+            (self.total_tokens, "total tokens"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"LLM {name} must be a non-negative integer")
+        if self.total_tokens < self.input_tokens + self.output_tokens:
+            raise ValueError("LLM total tokens cannot be less than input plus output tokens")
+        if self.cost_source is LLMCostSource.UNAVAILABLE:
+            if self.cost_usd is not None:
+                raise ValueError("unavailable LLM cost must be absent")
+            return
+        if (
+            self.cost_usd is None
+            or not isinstance(self.cost_usd, Decimal)
+            or not self.cost_usd.is_finite()
+            or self.cost_usd < 0
+        ):
+            raise ValueError("known LLM cost must be a non-negative finite decimal")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class LLMGenerationResult:
     """One provider-neutral structured success or sanitized failure that cannot become prompt input."""
@@ -81,6 +127,7 @@ class LLMGenerationResult:
     model: str
     status: LLMGenerationStatus = LLMGenerationStatus.SUCCEEDED
     output: Mapping[str, object] | None = None
+    usage: LLMUsage | None = None
 
     def __post_init__(self) -> None:
         provider = self.provider.strip()
@@ -105,10 +152,15 @@ class LLMGenerationResult:
         provider: str,
         model: str,
         output: Mapping[str, object],
+        usage: LLMUsage | None = None,
     ) -> Self:
         """Normalize one transport-validated structured provider response."""
         return cls(
-            provider=provider, model=model, status=LLMGenerationStatus.SUCCEEDED, output=output
+            provider=provider,
+            model=model,
+            status=LLMGenerationStatus.SUCCEEDED,
+            output=output,
+            usage=usage,
         )
 
     @classmethod
@@ -118,11 +170,12 @@ class LLMGenerationResult:
         provider: str,
         model: str,
         status: LLMGenerationStatus,
+        usage: LLMUsage | None = None,
     ) -> Self:
         """Normalize a safe failure category without retaining provider error text or payloads."""
         if status is LLMGenerationStatus.SUCCEEDED:
             raise ValueError("failed LLM result requires a failure status")
-        return cls(provider=provider, model=model, status=status)
+        return cls(provider=provider, model=model, status=status, usage=usage)
 
     @property
     def is_success(self) -> bool:
