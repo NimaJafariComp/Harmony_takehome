@@ -6,8 +6,14 @@ from os import environ
 import typer
 
 from enterprise_agent import __version__
-from enterprise_agent.adapters import DemoClockNotInitializedError, PostgresDemoClock
+from enterprise_agent.adapters import (
+    DemoClockNotInitializedError,
+    PostgresAuditAdapter,
+    PostgresDemoClock,
+)
+from enterprise_agent.application import AuditExplainer, AuditExplanationError
 from enterprise_agent.config import ConfigurationError, load_settings
+from enterprise_agent.domain import RunId
 from enterprise_agent.seed import (
     SeedSafetyError,
     _require_local_demo_database,
@@ -20,7 +26,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 clock_app = typer.Typer(help="Inspect and advance deterministic local-demo time.")
+audit_app = typer.Typer(help="Reconstruct read-only operator stories from the audit ledger.")
 app.add_typer(clock_app, name="clock")
+app.add_typer(audit_app, name="audit")
 
 
 @app.callback()
@@ -88,11 +96,26 @@ def clock_advance(
     typer.echo(f"clock: advanced to {advanced_to.isoformat()}")
 
 
-def _database_url() -> str:
+@audit_app.command("explain")
+def audit_explain(
+    run_id: str = typer.Argument(..., help="Run ID to reconstruct from audit events."),
+) -> None:
+    """Print a chronological Scenario A story using only the selected run's audit ledger."""
+    try:
+        explanation = AuditExplainer(
+            PostgresAuditAdapter(_database_url(action="audit explain"))
+        ).explain(RunId(run_id))
+    except AuditExplanationError as error:
+        typer.echo(f"audit: explain refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(explanation.render())
+
+
+def _database_url(*, action: str = "reset") -> str:
     """Read only the database setting needed by local reset and seed commands."""
     database_url = environ.get("DATABASE_URL", "").strip()
     if not database_url:
-        typer.echo("database: reset refused (DATABASE_URL is required)", err=True)
+        typer.echo(f"database: {action} refused (DATABASE_URL is required)", err=True)
         raise typer.Exit(code=1)
     return database_url
 

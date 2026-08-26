@@ -151,3 +151,15 @@ def test_audit_explain_command_renders_a_read_only_run_story(
     assert "Audit explanation for run run-cli-audit (1 events)" in result.stdout
     assert "Detected stockout risk for part part-101" in result.stdout
     assert created_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
+
+
+def test_audit_explain_command_fails_clearly_without_database_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Noninteractive audit reconstruction names the missing required setting instead of prompting."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    result = CliRunner().invoke(cli.app, ["audit", "explain", "run-cli-audit"])
+
+    assert result.exit_code == 1
+    assert "database: audit explain refused (DATABASE_URL is required)" in result.stderr

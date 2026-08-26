@@ -20,6 +20,7 @@ from .arrival_check import (
     ArrivalCheckResult,
     TuesdayArrivalCheckService,
 )
+from .audit_explain import AuditExplainer, AuditExplanation, AuditExplanationError
 from .candidates import (
     SupplierCandidate,
     SupplierCandidateFilter,
@@ -92,6 +93,9 @@ __all__ = [
     "ArrivalCheckError",
     "ArrivalCheckOutcome",
     "ArrivalCheckResult",
+    "AuditExplainer",
+    "AuditExplanation",
+    "AuditExplanationError",
     "AuthorizedContextBundle",
     "CompensationAction",
     "CreateReplacementPOInput",

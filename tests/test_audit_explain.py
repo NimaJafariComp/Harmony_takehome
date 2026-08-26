@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from enterprise_agent.application.audit_explain import AuditExplainer, AuditExplanationError
 
+from enterprise_agent.application.audit_explain import AuditExplainer, AuditExplanationError
 from enterprise_agent.domain import AuditEvent, AuditEventId, RunId
 
 NOW = datetime(2026, 8, 25, 9, tzinfo=UTC)
@@ -180,6 +180,115 @@ def test_audit_explain_never_renders_sensitive_or_unrecognized_payload_content()
     assert "Created" in rendered
     assert "create_replacement_po" in rendered
     assert "must-not-appear" not in rendered
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("event_type", "payload", "expected_description"),
+    [
+        (
+            "attention.deduplicated",
+            {},
+            "Deduplicated a repeated stockout detection without creating duplicate work.",
+        ),
+        ("evidence.observed", {"evidence_count": -1}, "Recorded unknown evidence references."),
+        (
+            "gate.denied",
+            {"reason": "stale evidence"},
+            "Gate denied the proposed action: stale evidence.",
+        ),
+        ("approval.requested", {"approver_id": "avery"}, "Requested approval from avery."),
+        (
+            "approval.rerouted",
+            {"approver_id": " "},
+            "Rerouted approval to backup approver unknown.",
+        ),
+        ("approval.rejected", {"approver_id": "avery"}, "Approval was rejected by avery."),
+        ("workflow.started", {"workflow_name": 42}, "Started workflow 42."),
+        (
+            "workflow.step_started",
+            {"step_name": "create_replacement_po"},
+            "Workflow started create_replacement_po.",
+        ),
+        ("workflow.failed", {}, "Workflow failed: unknown."),
+        (
+            "tool.started",
+            {"tool_name": "create_replacement_po"},
+            "Started tool create_replacement_po.",
+        ),
+        ("tool.succeeded", {"tool_name": "notify_production"}, "Tool notify_production succeeded."),
+        (
+            "tool.failed",
+            {"tool_name": "create_replacement_po", "failure_category": "timeout"},
+            "Tool create_replacement_po failed: timeout.",
+        ),
+        (
+            "compensation.started",
+            {"tool_name": "create_replacement_po"},
+            "Started compensation for create_replacement_po.",
+        ),
+        (
+            "compensation.completed",
+            {"tool_name": "create_replacement_po"},
+            "Completed compensation for create_replacement_po.",
+        ),
+        ("schedule.fired", {"task_type": "arrival_check"}, "Fired scheduled arrival_check work."),
+        (
+            "followup.reopened",
+            {"purchase_order_id": "replacement-499"},
+            "Receipt is still missing for replacement PO replacement-499; reopened the follow-up.",
+        ),
+        (
+            "attention.status_changed",
+            {"from_status": "open", "to_status": "resolved"},
+            "Changed attention status from open to resolved.",
+        ),
+    ],
+)
+def test_audit_explain_renders_every_remaining_controlled_event_type(
+    event_type: str,
+    payload: dict[str, object],
+    expected_description: str,
+) -> None:
+    """Every persisted event type has a bounded, reviewer-readable description."""
+    audit = RecordingAudit(
+        events=(
+            event(
+                event_id=f"event-{event_type}",
+                event_type=event_type,
+                offset_seconds=0,
+                payload=payload,
+            ),
+        ),
+        requested_run_ids=[],
+    )
+
+    rendered = AuditExplainer(audit).explain(RUN_ID).render()
+
+    assert rendered.endswith(expected_description)
+
+
+@pytest.mark.unit
+def test_audit_explain_rejects_unsupported_event_types_and_ambiguous_event_times() -> None:
+    """A reconstruction fails rather than narrating unknown history or local wall-clock time."""
+    unsupported = RecordingAudit(
+        events=(event(event_id="event-unsupported", event_type="unknown.event", offset_seconds=0),),
+        requested_run_ids=[],
+    )
+    naive = RecordingAudit(
+        events=(
+            replace(
+                event(event_id="event-naive", event_type="workflow.started", offset_seconds=0),
+                occurred_at=datetime(2026, 8, 25, 9, tzinfo=UTC).replace(tzinfo=None),
+            ),
+        ),
+        requested_run_ids=[],
+    )
+
+    with pytest.raises(AuditExplanationError, match="unsupported audit event type"):
+        AuditExplainer(unsupported).explain(RUN_ID)
+    with pytest.raises(AuditExplanationError, match="must include a timezone"):
+        AuditExplainer(naive).explain(RUN_ID)
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
