@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from rich.console import Console
+from sqlalchemy.exc import SQLAlchemyError
 from typer.testing import CliRunner
 
 from enterprise_agent import cli
@@ -18,6 +20,8 @@ from enterprise_agent.application.operator_status import (
     RecoveryState,
     WorkflowStatusSummary,
 )
+from enterprise_agent.config import ProviderConfiguration
+from enterprise_agent.ports import LLMGenerationResult
 from enterprise_agent.presentation import TerminalPresenter, TerminalTheme
 
 pytestmark = pytest.mark.unit
@@ -340,4 +344,129 @@ def test_json_confirmation_protected_writes_refuse_without_prompting(
             "code": "interactive_confirmation_required",
             "message": "No local data was written.",
         },
+    }
+
+
+def test_json_operational_reads_and_demo_catalogue_keep_safe_structured_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configured reads and the demo catalogue use the same envelope without exposing secret data."""
+    configuration = ProviderConfiguration(
+        profile="openai", model="gpt-5.6-luna", api_key="json-smoke-secret"
+    )
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "load_provider_settings", lambda _environment: configuration)
+    monkeypatch.setattr(
+        cli,
+        "run_smoke",
+        lambda _configuration: LLMGenerationResult.succeeded(
+            provider="openai",
+            model="gpt-5.6-luna",
+            output={"outcome": "MANUAL_REVIEW", "reason": "safe fixture"},
+        ),
+    )
+
+    class Audit:
+        """Return no metering events, proving the zero-state remains structured and safe."""
+
+        def __init__(self, _: str) -> None:
+            pass
+
+        def llm_usage_events(self) -> tuple[object, ...]:
+            return ()
+
+    monkeypatch.setattr(cli, "PostgresAuditAdapter", Audit)
+    runner = CliRunner()
+
+    run_result = runner.invoke(cli.app, ["--output", "json", "run"])
+    smoke_result = runner.invoke(cli.app, ["--output", "json", "llm-smoke"])
+    usage_result = runner.invoke(cli.app, ["--output", "json", "llm-usage"])
+    demo_list_result = runner.invoke(cli.app, ["--output", "json", "demo", "--list"])
+    demo_error_result = runner.invoke(cli.app, ["--output", "json", "demo", "--case", "not-a-case"])
+
+    assert json.loads(run_result.stdout)["data"] == {
+        "profile": "openai",
+        "model": "gpt-5.6-luna",
+    }
+    smoke_payload = json.loads(smoke_result.stdout)
+    assert smoke_payload["status"] == "succeeded"
+    assert smoke_payload["data"]["business_data_sent"] is False
+    assert "json-smoke-secret" not in smoke_result.output
+    assert json.loads(usage_result.stdout)["data"] == {"lines": [], "total_cost_usd": "0"}
+    assert json.loads(demo_list_result.stdout)["data"]["cases"][0]["case_id"] == (
+        "scenario-a-reroute-bait"
+    )
+    assert demo_error_result.exit_code == 2
+    assert json.loads(demo_error_result.stdout)["error"]["code"] == "invalid_demo_selection"
+
+
+def test_json_status_clock_and_audit_paths_cover_safe_success_and_error_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operator reads and clock actions keep their state and failures structured without raw internals."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "_require_local_demo_database", lambda *_args, **_kwargs: None)
+
+    class Clock:
+        """Return a fixed persisted demo time without connecting to PostgreSQL."""
+
+        def __init__(self, _: str) -> None:
+            pass
+
+        def advance(self, _duration: object) -> datetime:
+            return datetime(2026, 8, 26, 12, tzinfo=UTC)
+
+    class Audit:
+        """Supply only the audit object required by the isolated explanation boundary."""
+
+        def __init__(self, _: str) -> None:
+            pass
+
+    class Explanation:
+        """Represent a safe ledger-only explanation result."""
+
+        def render(self) -> str:
+            return "Audit explanation for run run-terminal-json (1 events)"
+
+    class Explainer:
+        """Avoid a database while preserving the CLI's audit-explanation boundary."""
+
+        def __init__(self, _: object) -> None:
+            pass
+
+        def explain(self, _run_id: object) -> Explanation:
+            return Explanation()
+
+    monkeypatch.setattr(cli, "PostgresDemoClock", Clock)
+    monkeypatch.setattr(cli, "PostgresAuditAdapter", Audit)
+    monkeypatch.setattr(cli, "AuditExplainer", Explainer)
+    runner = CliRunner()
+
+    clock_result = runner.invoke(cli.app, ["--output", "json", "clock", "advance", "--hours", "2"])
+    audit_result = runner.invoke(
+        cli.app, ["--output", "json", "audit", "explain", "run-terminal-json"]
+    )
+
+    assert json.loads(clock_result.stdout)["data"]["current_at"] == "2026-08-26T12:00:00+00:00"
+    assert json.loads(audit_result.stdout)["data"] == {
+        "run_id": "run-terminal-json",
+        "explanation": "Audit explanation for run run-terminal-json (1 events)",
+    }
+
+    class UnavailableStatus:
+        """Raise a sanitized database boundary failure."""
+
+        def __init__(self, _: str) -> None:
+            pass
+
+        def read_status(self) -> OperatorStatusSnapshot:
+            raise SQLAlchemyError("connection detail must not be exposed")
+
+    monkeypatch.setattr(cli, "PostgresOperatorStatusAdapter", UnavailableStatus)
+    status_result = runner.invoke(cli.app, ["--output", "json", "status"])
+
+    assert status_result.exit_code == 1
+    assert json.loads(status_result.stdout)["error"] == {
+        "code": "database_unavailable",
+        "message": "The local database is unavailable.",
     }
