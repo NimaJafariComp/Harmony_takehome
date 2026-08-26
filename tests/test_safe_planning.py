@@ -21,6 +21,7 @@ def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.critical
 @pytest.mark.integration
+@pytest.mark.scenario
 def test_seeded_scenario_a_creates_only_one_pending_approval_and_no_erp_writes(
     disposable_database: str,
 ) -> None:
@@ -79,7 +80,7 @@ def test_seeded_scenario_a_creates_only_one_pending_approval_and_no_erp_writes(
         "context = ScenarioAContextAssembler(identity, erp, PostgresMailAdapter(database_url), PostgresCalendarAdapter(database_url)).assemble(user_id=actor.user_id, attention=first[0].registration.attention, trigger=first[0].risk.trigger)\n"
         "candidates = SupplierCandidateFilter().filter(context)\n"
         "assert [candidate.evidence.payload['supplier_code'] for candidate in candidates.candidates] == ['SUP-Z']\n"
-        "assert {entry.evidence.payload['supplier_code'] for entry in candidates.exclusions} == {'SUP-SLOW', 'SUP-W', 'SUP-Y'}\n"
+        "assert {entry.evidence.payload['supplier_code'] for entry in candidates.exclusions} == {'SUP-BAIT', 'SUP-SLOW', 'SUP-W', 'SUP-Y'}\n"
         "candidate = candidates.candidates[0]\n"
         "recommendation = EnterWorkflowRecommendation(outcome='ENTER_WORKFLOW', workflow_name='po_reroute', workflow_version=1, supplier_id=candidate.supplier_id, quantity=Decimal(60), original_purchase_order_id=context.original_purchase_order.record_id, production_order_id=context.production_order.record_id, rationale='The only eligible alternate meets production.')\n"
         "fake = FakeLLMPort({f'{context.attention.scenario}:{context.attention.cause}': recommendation})\n"

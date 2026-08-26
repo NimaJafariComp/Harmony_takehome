@@ -222,6 +222,7 @@ def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.critical
 @pytest.mark.integration
+@pytest.mark.scenario
 def test_seeded_filter_exposes_only_supplier_z_as_the_allowed_alternate(
     disposable_database: str,
 ) -> None:
@@ -265,6 +266,7 @@ def test_seeded_filter_exposes_only_supplier_z_as_the_allowed_alternate(
         "result = SupplierCandidateFilter().filter(context)\n"
         "assert [candidate.evidence.payload['supplier_code'] for candidate in result.candidates] == ['SUP-Z']\n"
         "assert {entry.evidence.payload['supplier_code']: {reason.value for reason in entry.reasons} for entry in result.exclusions} == {\n"
+        "    'SUP-BAIT': {'not_approved'},\n"
         "    'SUP-SLOW': {'lead_time_too_long'},\n"
         "    'SUP-W': {'wrong_part'},\n"
         "    'SUP-Y': {'lead_time_too_long', 'original_supplier'},\n"

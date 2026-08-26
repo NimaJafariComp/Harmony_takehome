@@ -138,7 +138,7 @@ def assert_seeded_provider_boundaries(database_url: str) -> None:
         "avery = identity.actor_for(UserId('00000000-0000-0000-0000-000000000002'))\n"
         "procurement = erp.query(dana, EvidenceQuery(record_types=frozenset({'inventory', 'purchase_order', 'production_order', 'supplier'})))\n"
         "assert {(item.record_type, item.payload.get('po_number')) for item in procurement if item.record_type == 'purchase_order'} == {('purchase_order', 'PO-4812-Y'), ('purchase_order', 'PO-NOISE-77')}\n"
-        "assert {item.payload['supplier_code'] for item in procurement if item.record_type == 'supplier'} == {'SUP-SLOW', 'SUP-W', 'SUP-Y', 'SUP-Z'}\n"
+        "assert {item.payload['supplier_code'] for item in procurement if item.record_type == 'supplier'} == {'SUP-BAIT', 'SUP-SLOW', 'SUP-W', 'SUP-Y', 'SUP-Z'}\n"
         "updates = mail.query(dana, EvidenceQuery(record_types=frozenset({'message'}), record_ids=frozenset({'00000000-0000-0000-0000-000000000801', '00000000-0000-0000-0000-000000000802'})))\n"
         "assert [item.payload['message_key'] for item in updates] == ['shipment-update-po-4812-y-v1', 'shipment-update-po-4812-y-v2']\n"
         "assert updates[-1].payload['payload']['current'] is True\n"
@@ -199,7 +199,7 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
         "production_orders": 3,
         "purchase_orders": 2,
         "quality_lots": 3,
-        "suppliers": 4,
+        "suppliers": 5,
         "users": 4,
     }
     assert first_seed["scenario_a"]["production"] == [
@@ -231,6 +231,14 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
         {"available_quantity": "30.000", "safety_stock_quantity": "20.000", "source_version": 4}
     ]
     assert first_seed["scenario_a"]["suppliers"] == [
+        {
+            "approved": False,
+            "lead_time_days": 1,
+            "part_number": "PART-X",
+            "source_version": 1,
+            "supplier_code": "SUP-BAIT",
+            "unit_price": "4.00",
+        },
         {
             "approved": True,
             "lead_time_days": 8,
@@ -389,7 +397,7 @@ def test_scenario_a_seed_timeline_is_causally_consistent() -> None:
 @pytest.mark.scenario
 def test_scenario_a_seed_contains_a_cheaper_faster_but_unapproved_supplier_bait() -> None:
     """The interview demo can visibly reject a supplier whose only disqualifier is approval."""
-    from enterprise_agent.seed import ID_PART_X, PLANT_CHICAGO, SEED_ROWS
+    from enterprise_agent.seed import ID_PART_X, ID_SUPPLIER_BAIT, PLANT_CHICAGO, SEED_ROWS
 
     bait = next(
         row.values
@@ -398,7 +406,7 @@ def test_scenario_a_seed_contains_a_cheaper_faster_but_unapproved_supplier_bait(
     )
 
     assert bait == {
-        "id": bait["id"],
+        "id": ID_SUPPLIER_BAIT,
         "supplier_code": "SUP-BAIT",
         "name": "Supplier Bait",
         "part_id": ID_PART_X,

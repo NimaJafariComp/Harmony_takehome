@@ -56,7 +56,7 @@ def evidence(
     )
 
 
-def held_lot(*, source_version: int = 3) -> Evidence:
+def held_lot(*, source_version: int = 3, status: str = "held") -> Evidence:
     """Build the exact held lot bound by the detector trigger."""
     return evidence(
         record_type="quality_lot",
@@ -68,7 +68,7 @@ def held_lot(*, source_version: int = 3) -> Evidence:
             "plant_id": "PLANT-CHI",
             "quantity": Decimal(80),
             "allocated_quantity": Decimal(80),
-            "status": "held",
+            "status": status,
             "production_order_id": "production-q7001",
         },
     )
@@ -271,6 +271,32 @@ def test_context_rejects_stale_held_lot_evidence_before_planning() -> None:
     )
 
     with pytest.raises(StaleScenarioBContextEvidenceError, match="held lot source version"):
+        ScenarioBContextAssembler(RecordingIdentity(), quality).assemble(
+            user_id=QUINN.user_id,
+            attention=attention(signal),
+            trigger=signal,
+        )
+
+
+@pytest.mark.scenario
+def test_quality_release_after_recommendation_invalidates_the_old_hold_context() -> None:
+    """A Quality release is a material state change, not permission to execute an old reallocation."""
+    from enterprise_agent.application.quality_context import (
+        ScenarioBContextAssembler,
+        StaleScenarioBContextEvidenceError,
+    )
+
+    signal = trigger()
+    quality = RecordingQualityProvider(
+        (
+            held_lot(source_version=4, status="released"),
+            released_lot(),
+            allocation(),
+            production_impact(),
+        )
+    )
+
+    with pytest.raises(StaleScenarioBContextEvidenceError, match="status"):
         ScenarioBContextAssembler(RecordingIdentity(), quality).assemble(
             user_id=QUINN.user_id,
             attention=attention(signal),

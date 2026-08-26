@@ -193,6 +193,7 @@ def test_tool_adapter_rejects_invalid_started_actions_and_tampered_journal_bindi
         _stored_result({"result": None})
 
 
+@pytest.mark.scenario
 def test_create_replacement_tool_rejects_an_approved_supplier_that_is_still_too_slow() -> None:
     """The external ERP tool repeats the production-date safety invariant at write time."""
     from enterprise_agent.adapters import tools

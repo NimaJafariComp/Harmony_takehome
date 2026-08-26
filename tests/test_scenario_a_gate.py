@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -258,6 +259,38 @@ def test_newer_on_schedule_supplier_update_prevents_a_reroute() -> None:
     assert decision.candidate is None
 
 
+@pytest.mark.scenario
+def test_on_schedule_update_cannot_create_an_approval_or_write_path() -> None:
+    """The approval service refuses a stale reroute after the gate observes current on-schedule data."""
+    from enterprise_agent.application.approvals import (
+        PlanNotApprovableError,
+        ScenarioAApprovalService,
+    )
+
+    context = _with_shipment_update_payload(
+        _context(),
+        {
+            "payload": {
+                "shipment_status": "on_track",
+                "expected_receipt_date": "2026-08-27",
+            }
+        },
+    )
+    store = MagicMock()
+
+    with pytest.raises(PlanNotApprovableError, match="pending approval"):
+        ScenarioAApprovalService(store).request_pending(
+            context,
+            _recommendation(),
+            current_source_versions=context.source_versions,
+            policy_version="scenario_a_policy:v1",
+            requested_at=NOW,
+            expires_at=NOW.replace(hour=13),
+        )
+
+    store.create_pending.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_reason"),
     [
@@ -285,6 +318,7 @@ def test_gate_denies_workflow_parameters_outside_the_context_bound_reroute(
     assert expected_reason in {reason.name for reason in decision.denial_reasons}
 
 
+@pytest.mark.scenario
 def test_gate_denies_missing_write_scope_and_stale_evidence() -> None:
     """A reroute cannot proceed when authority is absent or any planning fact has changed."""
     from enterprise_agent.application.gate import GateDenialReason, GateStatus, ScenarioAGate
@@ -307,6 +341,7 @@ def test_gate_denies_missing_write_scope_and_stale_evidence() -> None:
     }
 
 
+@pytest.mark.scenario
 def test_gate_denies_a_reroute_that_exceeds_the_actors_currency_limit() -> None:
     """A $1,080 replacement cannot be sent for approval through a $1,000 authority."""
     from enterprise_agent.application.gate import GateDenialReason, GateStatus, ScenarioAGate

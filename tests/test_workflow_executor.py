@@ -1324,6 +1324,7 @@ def test_executor_leaves_a_durable_started_tool_for_safe_retry_when_the_effect_f
 
 
 @pytest.mark.critical
+@pytest.mark.scenario
 def test_crash_after_replacement_effect_restarts_with_the_same_started_key() -> None:
     """A process crash before local completion replays one started provider action without a second start."""
     from enterprise_agent.application.tools import ToolName

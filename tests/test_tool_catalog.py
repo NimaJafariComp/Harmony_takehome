@@ -127,6 +127,30 @@ def test_tool_authorization_requires_every_declared_scope(name: str) -> None:
         authorize_tool(actor_with(), tool_name)
 
 
+@pytest.mark.scenario
+def test_quality_manager_cannot_create_a_replacement_purchase_order() -> None:
+    """Quality-only authority cannot cross into a purchasing write, even if a plan claims approval."""
+    from enterprise_agent.application.tools import ToolAuthorizationError, ToolName, authorize_tool
+
+    quality_manager = ActorContext(
+        user_id=UserId("00000000-0000-0000-0000-000000000003"),
+        role="quality_manager",
+        scopes=frozenset(
+            {
+                Scope("quality:lot:read"),
+                Scope("erp:lot:write"),
+                Scope("production:notify"),
+            }
+        ),
+        plant_ids=frozenset({PlantId("PLANT-CHI")}),
+        backup_approver_id=None,
+        approval_limits={},
+    )
+
+    with pytest.raises(ToolAuthorizationError, match="create_replacement_po"):
+        authorize_tool(quality_manager, ToolName.CREATE_REPLACEMENT_PO)
+
+
 @pytest.mark.critical
 def test_tool_idempotency_key_is_stable_for_a_workflow_step_and_bound_to_its_input() -> None:
     """A retry reaches the same effect; changed intent or a different step cannot collide."""

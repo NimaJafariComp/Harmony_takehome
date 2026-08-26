@@ -272,6 +272,7 @@ def routing_service(
 
 
 @pytest.mark.critical
+@pytest.mark.scenario
 def test_end_of_day_routing_schedules_once_and_reroutes_only_for_next_day_absence() -> None:
     """A pending approval reaches its designated capable backup without changing plan hash input."""
     router, store, calendar, scheduler = routing_service()
@@ -342,6 +343,7 @@ def test_routing_audits_the_durable_schedule_and_authorized_backup_decision() ->
         ((out_of_office(),), ApprovalStatus.APPROVED, "NOT_PENDING"),
     ],
 )
+@pytest.mark.scenario
 def test_routing_leaves_answered_or_available_approvals_with_the_original_approver(
     events: tuple[Evidence, ...],
     approval_status: ApprovalStatus | None,

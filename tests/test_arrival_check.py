@@ -210,6 +210,7 @@ def arrival_service(
 
 
 @pytest.mark.critical
+@pytest.mark.scenario
 def test_tuesday_full_receipt_resolves_the_original_attention() -> None:
     """A full explicit receipt satisfies the follow-up and closes only its causal attention item."""
     service, attention, erp = arrival_service((purchase_order(received_quantity="60"),))
@@ -264,6 +265,7 @@ def test_tuesday_task_uses_its_durable_audit_run_correlation_when_fired() -> Non
 
 
 @pytest.mark.critical
+@pytest.mark.scenario
 def test_partial_or_missing_receipt_opens_one_source_version_specific_follow_up() -> None:
     """A partial receipt never masquerades as arrival and retrying the task cannot duplicate follow-up."""
     service, attention, _ = arrival_service((purchase_order(received_quantity="20"),))

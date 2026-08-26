@@ -21,6 +21,7 @@ def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.critical
 @pytest.mark.integration
+@pytest.mark.scenario
 def test_seeded_scenario_b_requires_approval_executes_each_path_once_and_explains_it(
     disposable_database: str,
 ) -> None:
