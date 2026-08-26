@@ -379,8 +379,9 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
     ]
     scopes_by_user = {
         user: {row["scope"] for row in first_seed["scopes"] if row["display_name"] == user}
-        for user in ("Quinn Quality", "Priya Production")
+        for user in ("Dana Buyer", "Quinn Quality", "Priya Production")
     }
+    assert "erp:po:hold" in scopes_by_user["Dana Buyer"]
     assert scopes_by_user["Quinn Quality"] == {
         "erp:lot:write",
         "production:notify",
@@ -391,7 +392,14 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
     assert scopes_by_user["Priya Production"] == {"production:notify", "production:read"}
     assert not (
         scopes_by_user["Quinn Quality"]
-        & {"erp:po:read", "erp:po:create", "erp:po:cancel", "mail:read", "calendar:read"}
+        & {
+            "erp:po:read",
+            "erp:po:create",
+            "erp:po:cancel",
+            "erp:po:hold",
+            "mail:read",
+            "calendar:read",
+        }
     )
 
 

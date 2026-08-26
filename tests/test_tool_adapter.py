@@ -13,6 +13,7 @@ from enterprise_agent.application.tools import (
     CompensationAction,
     CreateReplacementPOInput,
     NotifyProductionInput,
+    PlacePurchaseOrderHoldInput,
     ReduceOrCancelPOInput,
     ScheduleArrivalCheckInput,
     ToolAuthorizationError,
@@ -39,6 +40,7 @@ ACTOR = ActorContext(
         {
             Scope("erp:po:create"),
             Scope("erp:po:cancel"),
+            Scope("erp:po:hold"),
             Scope("production:notify"),
             Scope("scheduler:write"),
         }
@@ -120,6 +122,15 @@ def mapping_result(
                 "quantity": "60",
             },
             ReduceOrCancelPOInput,
+        ),
+        (
+            ToolName.PLACE_PURCHASE_ORDER_HOLD,
+            {
+                "purchase_order_id": "00000000-0000-0000-0000-000000000403",
+                "production_order_id": "00000000-0000-0000-0000-000000000304",
+                "expected_purchase_order_version": 1,
+            },
+            PlacePurchaseOrderHoldInput,
         ),
         (
             ToolName.NOTIFY_PRODUCTION,
@@ -357,6 +368,97 @@ def test_each_concrete_effect_persists_only_its_bounded_result() -> None:
         "original_attention_id": "00000000-0000-0000-0000-000000000601",
         "purchase_order_id": "replacement-1",
     }
+
+
+def test_purchase_order_hold_requires_current_open_correlated_source_and_has_bounded_reversal() -> (
+    None
+):
+    """The new ERP capability cannot hold a stale, closed, or unrelated PO and reverses by effect state."""
+    from enterprise_agent.adapters import tools
+    from enterprise_agent.adapters.tools import ToolExecutionError
+
+    request = invocation(
+        ToolName.PLACE_PURCHASE_ORDER_HOLD,
+        {
+            "purchase_order_id": "po-c-9001-w",
+            "production_order_id": "production-c-9001",
+            "expected_purchase_order_version": 1,
+        },
+    )
+    input_value = PlacePurchaseOrderHoldInput.model_validate(dict(request.parameters))
+    hold_connection = MagicMock()
+    hold_connection.execute.side_effect = [
+        mapping_result(
+            one_or_none={
+                "purchase_order_id": "po-c-9001-w",
+                "purchase_order_status": "open",
+                "purchase_order_source_version": 1,
+                "purchase_order_part_id": "part-noise",
+                "purchase_order_plant_id": "PLANT-CHI",
+                "production_order_id": "production-c-9001",
+                "production_order_status": "scheduled",
+                "production_order_part_id": "part-noise",
+                "production_order_plant_id": "PLANT-CHI",
+            }
+        ),
+        mapping_result(
+            one_or_none={
+                "purchase_order_id": "po-c-9001-w",
+                "status": "on_hold",
+                "source_version": 2,
+            }
+        ),
+    ]
+
+    held = tools._execute_effect(hold_connection, request, input_value)
+
+    assert held == {
+        "purchase_order_id": "po-c-9001-w",
+        "previous_status": "open",
+        "status": "on_hold",
+        "source_version": 2,
+    }
+    assert hold_connection.execute.call_args_list[1].args[1]["expected_purchase_order_version"] == 1
+
+    stale_connection = MagicMock()
+    stale_connection.execute.return_value = mapping_result(
+        one_or_none={
+            "purchase_order_id": "po-c-9001-w",
+            "purchase_order_status": "open",
+            "purchase_order_source_version": 2,
+            "purchase_order_part_id": "part-noise",
+            "purchase_order_plant_id": "PLANT-CHI",
+            "production_order_id": "production-c-9001",
+            "production_order_status": "scheduled",
+            "production_order_part_id": "part-noise",
+            "production_order_plant_id": "PLANT-CHI",
+        }
+    )
+    with pytest.raises(ToolExecutionError, match="hold source is not currently actionable"):
+        tools._execute_effect(stale_connection, request, input_value)
+
+    reversal_connection = MagicMock()
+    reversal_connection.execute.return_value = mapping_result(
+        one_or_none={
+            "purchase_order_id": "po-c-9001-w",
+            "status": "open",
+            "source_version": 3,
+        }
+    )
+    restored = tools._execute_compensation_effect(
+        reversal_connection,
+        compensation(
+            CompensationAction.RESTORE_HELD_PURCHASE_ORDER,
+            held,
+            original_tool=ToolName.PLACE_PURCHASE_ORDER_HOLD,
+        ),
+    )
+    assert restored == {
+        "purchase_order_id": "po-c-9001-w",
+        "status": "open",
+        "source_version": 3,
+    }
+    assert reversal_connection.execute.call_args.args[1]["expected_source_version"] == 2
 
 
 def test_each_concrete_compensation_reverses_only_the_bound_provider_result() -> None:

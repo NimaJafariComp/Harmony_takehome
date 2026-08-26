@@ -26,7 +26,7 @@ def actor_with(*scopes: Scope) -> ActorContext:
 
 
 @pytest.mark.critical
-def test_catalog_declares_exactly_the_six_approved_tools() -> None:
+def test_catalog_declares_exactly_the_seven_approved_tools() -> None:
     """Workflow code can select only the reviewed tools and their declared authority."""
     from enterprise_agent.application.tools import (
         TOOL_CATALOG,
@@ -38,6 +38,7 @@ def test_catalog_declares_exactly_the_six_approved_tools() -> None:
     assert {name: definition.required_scopes for name, definition in TOOL_CATALOG.items()} == {
         ToolName.CREATE_REPLACEMENT_PO: frozenset({Scope("erp:po:create")}),
         ToolName.REDUCE_OR_CANCEL_PO: frozenset({Scope("erp:po:cancel")}),
+        ToolName.PLACE_PURCHASE_ORDER_HOLD: frozenset({Scope("erp:po:hold")}),
         ToolName.NOTIFY_PRODUCTION: frozenset({Scope("production:notify")}),
         ToolName.SCHEDULE_ARRIVAL_CHECK: frozenset({Scope("scheduler:write")}),
         ToolName.REALLOCATE_LOT: frozenset({Scope("erp:lot:write")}),
@@ -46,6 +47,7 @@ def test_catalog_declares_exactly_the_six_approved_tools() -> None:
     assert {name: definition.compensation for name, definition in TOOL_CATALOG.items()} == {
         ToolName.CREATE_REPLACEMENT_PO: CompensationAction.CANCEL_CREATED_REPLACEMENT_PO,
         ToolName.REDUCE_OR_CANCEL_PO: CompensationAction.RESTORE_ORIGINAL_PURCHASE_ORDER,
+        ToolName.PLACE_PURCHASE_ORDER_HOLD: CompensationAction.RESTORE_HELD_PURCHASE_ORDER,
         ToolName.NOTIFY_PRODUCTION: CompensationAction.SEND_CORRECTION_NOTIFICATION,
         ToolName.SCHEDULE_ARRIVAL_CHECK: CompensationAction.CANCEL_ARRIVAL_CHECK,
         ToolName.REALLOCATE_LOT: CompensationAction.RESTORE_PRIOR_ALLOCATION,
@@ -57,6 +59,7 @@ def test_tool_inputs_are_closed_and_reject_non_actionable_values() -> None:
     """Untrusted workflow arguments cannot add fields or create zero-quantity effects."""
     from enterprise_agent.application.tools import (
         CreateReplacementPOInput,
+        PlacePurchaseOrderHoldInput,
         ReallocateLotInput,
         ScheduleArrivalCheckInput,
     )
@@ -67,6 +70,11 @@ def test_tool_inputs_are_closed_and_reject_non_actionable_values() -> None:
         production_order_id="production-4812",
         quantity=Decimal(60),
     )
+    hold = PlacePurchaseOrderHoldInput(
+        purchase_order_id="po-c-9001-w",
+        production_order_id="production-c-9001",
+        expected_purchase_order_version=1,
+    )
     scheduled_check = ScheduleArrivalCheckInput(purchase_order_id="po-4812-y", due_at=NOW)
     allocation = ReallocateLotInput(
         quality_lot_id="lot-1",
@@ -76,6 +84,7 @@ def test_tool_inputs_are_closed_and_reject_non_actionable_values() -> None:
     )
 
     assert replacement.quantity == Decimal(60)
+    assert hold.expected_purchase_order_version == 1
     assert scheduled_check.due_at == NOW
     assert allocation.to_production_order_id == "production-4813"
     with pytest.raises(ValidationError):
