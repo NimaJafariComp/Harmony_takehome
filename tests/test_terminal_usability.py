@@ -265,3 +265,42 @@ def test_json_setup_refuses_sensitive_interaction_without_prompting_or_writing(
         },
     }
     assert not (tmp_path / ".env").exists()
+
+
+def test_json_mode_envelopes_static_and_configured_read_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The root output option has one meaning for ordinary diagnostics as well as operator paths."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setenv("LLM_PROFILE", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "terminal-usability-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.6-luna")
+    runner = CliRunner()
+
+    version_result = runner.invoke(cli.app, ["--output", "json", "version"])
+    config_result = runner.invoke(cli.app, ["--output", "json", "config-check"])
+
+    assert version_result.exit_code == 0
+    assert json.loads(version_result.stdout) == {
+        "schema_version": 1,
+        "status": "succeeded",
+        "summary": "Installed harness version.",
+        "data": {"version": "0.1.0"},
+        "next_actions": [],
+        "error": None,
+    }
+    assert config_result.exit_code == 0
+    assert json.loads(config_result.stdout) == {
+        "schema_version": 1,
+        "status": "succeeded",
+        "summary": "Runtime configuration is valid.",
+        "data": {
+            "profile": "openai",
+            "model": "gpt-5.6-luna",
+            "database_configured": True,
+        },
+        "next_actions": ["enterprise-agent guide"],
+        "error": None,
+    }
