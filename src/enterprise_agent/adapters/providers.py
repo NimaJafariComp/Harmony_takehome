@@ -105,6 +105,75 @@ ERP_QUERIES = {
         ORDER BY suppliers.supplier_code
     """),
 }
+QUALITY_QUERIES = {
+    "quality_lot": _scoped_statement("""
+        SELECT
+            quality_lots.id,
+            quality_lots.lot_number,
+            quality_lots.part_id,
+            parts.part_number,
+            quality_lots.plant_id,
+            quality_lots.quantity,
+            quality_lots.status,
+            quality_lots.production_order_id,
+            quality_lots.allocated_quantity,
+            quality_lots.source_version,
+            quality_lots.updated_at
+        FROM quality_lots
+        JOIN parts ON parts.id = quality_lots.part_id
+        WHERE quality_lots.plant_id IN :plant_ids
+          AND (
+              :has_record_filter = FALSE
+              OR CAST(quality_lots.id AS TEXT) = ANY(CAST(:record_ids AS TEXT[]))
+          )
+        ORDER BY quality_lots.lot_number
+    """),
+    "production_allocation": _scoped_statement("""
+        SELECT
+            production_allocations.id,
+            production_allocations.quality_lot_id,
+            production_allocations.production_order_id,
+            production_allocations.allocated_quantity,
+            quality_lots.part_id,
+            quality_lots.plant_id,
+            quality_lots.status AS quality_lot_status,
+            production_allocations.source_version,
+            production_allocations.updated_at
+        FROM production_allocations
+        JOIN quality_lots ON quality_lots.id = production_allocations.quality_lot_id
+        WHERE quality_lots.plant_id IN :plant_ids
+          AND (
+              :has_record_filter = FALSE
+              OR CAST(production_allocations.id AS TEXT) = ANY(CAST(:record_ids AS TEXT[]))
+          )
+        ORDER BY production_allocations.id
+    """),
+    "production_impact": _scoped_statement("""
+        SELECT DISTINCT
+            production_orders.id,
+            production_orders.order_number,
+            production_orders.part_id,
+            production_orders.plant_id,
+            production_orders.required_quantity,
+            production_orders.start_date,
+            production_orders.status,
+            production_orders.supervisor_id,
+            users.email AS supervisor_email,
+            1 AS source_version,
+            production_orders.updated_at
+        FROM production_orders
+        JOIN production_allocations
+          ON production_allocations.production_order_id = production_orders.id
+        JOIN quality_lots ON quality_lots.id = production_allocations.quality_lot_id
+        LEFT JOIN users ON users.id = production_orders.supervisor_id
+        WHERE quality_lots.plant_id IN :plant_ids
+          AND (
+              :has_record_filter = FALSE
+              OR CAST(production_orders.id AS TEXT) = ANY(CAST(:record_ids AS TEXT[]))
+          )
+        ORDER BY production_orders.order_number
+    """),
+}
 MAIL_QUERY = text("""
     SELECT
         messages.id,
@@ -169,6 +238,25 @@ class PostgresErpAdapter(_PostgresProvider):
             for record_type in requested_types:
                 rows = connection.execute(ERP_QUERIES[record_type], parameters).mappings().all()
                 evidence.extend(_erp_evidence(record_type, row) for row in rows)
+        return tuple(evidence)
+
+
+class PostgresQualityAdapter(_PostgresProvider):
+    """Return only plant-scoped quality facts to actors with the dedicated quality-read scope."""
+
+    def query(self, actor: ActorContext, query: EvidenceQuery) -> tuple[Evidence, ...]:
+        """Enforce quality ownership before mapping lots or production-impact projections."""
+        requested_types = _validate_record_types(query.record_types, QUALITY_QUERIES, "quality")
+        if not requested_types or "quality:lot:read" not in actor.scopes or not actor.plant_ids:
+            return ()
+
+        parameters = _record_filter_parameters(query.record_ids)
+        parameters["plant_ids"] = sorted(actor.plant_ids)
+        evidence: list[Evidence] = []
+        with self._engine.connect() as connection:
+            for record_type in requested_types:
+                rows = connection.execute(QUALITY_QUERIES[record_type], parameters).mappings().all()
+                evidence.extend(_quality_evidence(record_type, row) for row in rows)
         return tuple(evidence)
 
 
@@ -249,6 +337,24 @@ def _erp_evidence(record_type: str, row: RowMapping) -> Evidence:
     return Evidence(
         evidence_id=EvidenceId(f"erp:{record_type}:{row['id']}"),
         source="erp",
+        record_type=record_type,
+        record_id=str(row["id"]),
+        source_version=cast(int, row["source_version"]),
+        observed_at=cast(datetime, row["updated_at"]),
+        payload=payload,
+    )
+
+
+def _quality_evidence(record_type: str, row: RowMapping) -> Evidence:
+    """Map quality-owned rows to evidence without claiming general ERP visibility."""
+    payload = {
+        key: value
+        for key, value in row.items()
+        if key not in {"id", "source_version", "updated_at"}
+    }
+    return Evidence(
+        evidence_id=EvidenceId(f"quality:{record_type}:{row['id']}"),
+        source="quality",
         record_type=record_type,
         record_id=str(row["id"]),
         source_version=cast(int, row["source_version"]),

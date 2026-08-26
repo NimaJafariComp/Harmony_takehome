@@ -12,11 +12,11 @@ from enterprise_agent.domain import (
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
+    AttentionTrigger,
     Evidence,
     EvidenceId,
     PlantId,
     RunId,
-    ScenarioBQualityHoldTrigger,
     Scope,
     UserId,
 )
@@ -68,9 +68,9 @@ def quality_lot(
             "lot_number": record_id.upper(),
             "part_id": part_id,
             "plant_id": plant_id,
-            "quantity": Decimal("80"),
+            "quantity": Decimal(80),
             "status": status,
-            "allocated_quantity": Decimal("80"),
+            "allocated_quantity": Decimal(80),
             "production_order_id": "production-q7001",
         },
     )
@@ -110,7 +110,7 @@ def production_impact(
         payload={
             "part_id": "part-quality",
             "plant_id": "PLANT-CHI",
-            "required_quantity": Decimal("80"),
+            "required_quantity": Decimal(80),
             "start_date": start_date,
             "status": status,
             "supervisor_id": "00000000-0000-0000-0000-000000000004",
@@ -148,11 +148,9 @@ class FixedClock:
 class RecordingAttention:
     """Capture quality triggers and emulate one durable open attention registration."""
 
-    triggers: list[ScenarioBQualityHoldTrigger] = field(default_factory=list)
+    triggers: list[AttentionTrigger] = field(default_factory=list)
 
-    def register(
-        self, trigger: ScenarioBQualityHoldTrigger, run_id: RunId
-    ) -> AttentionRegistration:
+    def register(self, trigger: AttentionTrigger, run_id: RunId) -> AttentionRegistration:
         """Record the detector result without requiring a concrete persistence adapter."""
         del run_id
         self.triggers.append(trigger)
@@ -204,7 +202,7 @@ def test_detector_registers_a_held_lot_allocated_within_the_three_day_horizon() 
     assert detections[0].risk.production_allocation_id == "allocation-held"
     assert detections[0].risk.production_order_id == "production-q7001"
     assert detections[0].risk.days_until_consumption == 3
-    assert detections[0].risk.allocated_quantity == Decimal("80")
+    assert detections[0].risk.allocated_quantity == Decimal(80)
     assert attention.triggers[0].source_versions == {
         "production_allocation:allocation-held": 3,
         "production_impact:production-q7001": 1,
@@ -228,7 +226,11 @@ def test_detector_ignores_released_unallocated_and_out_of_horizon_lots() -> None
             production_impact(),
             quality_lot(record_id="lot-unallocated"),
             quality_lot(record_id="lot-late"),
-            allocation(record_id="allocation-late", quality_lot_id="lot-late"),
+            allocation(
+                record_id="allocation-late",
+                quality_lot_id="lot-late",
+                production_order_id="production-late",
+            ),
             production_impact(
                 record_id="production-late",
                 start_date=NOW.date() + timedelta(days=4),

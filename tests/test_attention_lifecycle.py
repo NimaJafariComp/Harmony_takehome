@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -207,9 +208,8 @@ def test_attention_adapter_registers_a_quality_hold_through_the_shared_trigger_c
     connection = engine.begin.return_value.__enter__.return_value
     assert registration.attention.scenario == "scenario_b"
     assert connection.execute.call_args_list[0].args[1]["cause"] == "quality_hold"
-    assert (
-        connection.execute.call_args_list[1].args[1]["payload"]["detector"]
-        == "quality_hold_detector:v1"
+    assert json.loads(connection.execute.call_args_list[1].args[1]["payload"])["detector"] == (
+        "quality_hold_detector:v1"
     )
 
 

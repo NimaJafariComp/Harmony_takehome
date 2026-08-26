@@ -15,13 +15,13 @@ from enterprise_agent.domain import (
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
+    AttentionTrigger,
     AuditEvent,
     DateRange,
     Evidence,
     Plan,
     PlanId,
     RunId,
-    ScenarioAStockoutTrigger,
     ScheduledTask,
     ScheduledTaskId,
     ToolCompensation,
@@ -84,6 +84,15 @@ class ErpPort(Protocol):
 
 
 @runtime_checkable
+class QualityPort(Protocol):
+    """Read quality-owned lot, allocation, and production-impact evidence without ERP access."""
+
+    def query(self, actor: ActorContext, query: EvidenceQuery) -> Sequence[Evidence]:
+        """Return only quality records visible to the supplied actor."""
+        ...
+
+
+@runtime_checkable
 class MailPort(Protocol):
     """Read scoped mail facts without exposing mailbox implementation details."""
 
@@ -114,7 +123,7 @@ class IdentityPort(Protocol):
 class AttentionPort(Protocol):
     """Create and advance durable, deduplicated business-attention items."""
 
-    def register(self, trigger: ScenarioAStockoutTrigger, run_id: RunId) -> AttentionRegistration:
+    def register(self, trigger: AttentionTrigger, run_id: RunId) -> AttentionRegistration:
         """Persist one detector attempt and return its unique attention item."""
         ...
 

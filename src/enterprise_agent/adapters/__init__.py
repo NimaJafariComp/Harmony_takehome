@@ -11,6 +11,7 @@ from .providers import (
     PostgresCalendarAdapter,
     PostgresErpAdapter,
     PostgresMailAdapter,
+    PostgresQualityAdapter,
     UnsupportedEvidenceTypeError,
 )
 from .scheduler import (
@@ -34,6 +35,7 @@ __all__ = [
     "PostgresIdentityAdapter",
     "PostgresMailAdapter",
     "PostgresPlanApprovalAdapter",
+    "PostgresQualityAdapter",
     "PostgresScenarioAToolAdapter",
     "PostgresSchedulerAdapter",
     "PostgresWorkflowStateAdapter",

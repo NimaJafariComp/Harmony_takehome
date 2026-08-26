@@ -189,7 +189,7 @@ SEED_ROWS = (
     *(
         _scope_row(ID_QUINN, scope)
         for scope in (
-            "erp:lot:reallocate",
+            "erp:lot:write",
             "production:notify",
             "purchasing:shortage:notify",
             "quality:lot:read",

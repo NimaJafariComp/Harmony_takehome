@@ -17,13 +17,13 @@ from enterprise_agent.domain import (
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
+    AttentionTrigger,
     AuditEvent,
     AuditEventId,
     Evidence,
     EvidenceId,
     InvalidAttentionTransitionError,
     RunId,
-    ScenarioAStockoutTrigger,
     require_attention_transition,
 )
 
@@ -64,7 +64,7 @@ class PostgresAttentionAdapter:
         """Connect this attention adapter to one durable PostgreSQL database."""
         self._engine: Engine = create_engine(database_url)
 
-    def register(self, trigger: ScenarioAStockoutTrigger, run_id: RunId) -> AttentionRegistration:
+    def register(self, trigger: AttentionTrigger, run_id: RunId) -> AttentionRegistration:
         """Create one open attention item or return the existing item for an equivalent signal."""
         with self._engine.begin() as connection:
             row = (
@@ -206,12 +206,12 @@ class PostgresAttentionAdapter:
 _TERMINAL_STATUSES = frozenset({AttentionStatus.RESOLVED, AttentionStatus.CANCELLED})
 
 
-def _insert_parameters(trigger: ScenarioAStockoutTrigger) -> dict[str, object]:
+def _insert_parameters(trigger: AttentionTrigger) -> dict[str, object]:
     """Bind one immutable trigger into the insert statement without caller SQL interpolation."""
     return {
         "attention_id": str(uuid4()),
-        "scenario": "scenario_a",
-        "cause": "projected_stockout",
+        "scenario": trigger.scenario,
+        "cause": trigger.cause,
         "dedupe_key": trigger.dedupe_key,
         "status": AttentionStatus.OPEN.value,
         "source_versions": json.dumps(dict(trigger.source_versions)),
@@ -257,7 +257,7 @@ def _append_audit_attempt(
     *,
     connection: Connection,
     attention: AttentionItem,
-    trigger: ScenarioAStockoutTrigger | None,
+    trigger: AttentionTrigger | None,
     run_id: RunId,
     event_type: str,
     occurred_at: datetime,
@@ -271,15 +271,7 @@ def _append_audit_attempt(
         **payload,
     }
     if trigger is not None:
-        base_payload.update(
-            {
-                "detector": trigger.detector,
-                "part_id": trigger.part_id,
-                "production_order_id": trigger.production_order_id,
-                "inventory_version": trigger.inventory_version,
-                "production_start_date": trigger.production_start_date.isoformat(),
-            }
-        )
+        base_payload.update(trigger.audit_payload)
     append_audit_event(
         connection,
         AuditEvent(

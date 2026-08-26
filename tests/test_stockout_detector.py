@@ -15,11 +15,11 @@ from enterprise_agent.domain import (
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
+    AttentionTrigger,
     Evidence,
     EvidenceId,
     PlantId,
     RunId,
-    ScenarioAStockoutTrigger,
     Scope,
     UserId,
 )
@@ -115,9 +115,9 @@ class FixedClock:
 class RecordingAttention:
     """Capture emitted triggers while returning a minimal durable registration result."""
 
-    triggers: list[ScenarioAStockoutTrigger] = field(default_factory=list)
+    triggers: list[AttentionTrigger] = field(default_factory=list)
 
-    def register(self, trigger: ScenarioAStockoutTrigger, run_id: RunId) -> AttentionRegistration:
+    def register(self, trigger: AttentionTrigger, run_id: RunId) -> AttentionRegistration:
         """Record a trigger and return its open attention representation."""
         del run_id
         self.triggers.append(trigger)

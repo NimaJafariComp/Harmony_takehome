@@ -44,6 +44,18 @@ from .planning import (
     ScenarioARecommendation,
     validate_scenario_a_recommendation,
 )
+from .quality_context import (
+    MissingScenarioBContextEvidenceError,
+    ScenarioBContextAssembler,
+    ScenarioBContextBundle,
+    StaleScenarioBContextEvidenceError,
+)
+from .quality_hold import (
+    QualityHoldDetection,
+    QualityHoldDetector,
+    QualityHoldEvidenceError,
+    QualityHoldRisk,
+)
 from .stockout import StockoutDetection, StockoutDetector, StockoutRisk
 from .tools import (
     TOOL_CATALOG,
@@ -108,10 +120,15 @@ __all__ = [
     "InvalidScenarioARecommendationError",
     "ManualReviewRecommendation",
     "MissingScenarioAContextEvidenceError",
+    "MissingScenarioBContextEvidenceError",
     "NoActionRecommendation",
     "NotifyProductionInput",
     "PendingPlanApproval",
     "PlanNotApprovableError",
+    "QualityHoldDetection",
+    "QualityHoldDetector",
+    "QualityHoldEvidenceError",
+    "QualityHoldRisk",
     "ReallocateLotInput",
     "ReduceOrCancelPOInput",
     "ScenarioAApprovalService",
@@ -119,8 +136,11 @@ __all__ = [
     "ScenarioAGate",
     "ScenarioARecommendation",
     "ScenarioAWorkflowExecutor",
+    "ScenarioBContextAssembler",
+    "ScenarioBContextBundle",
     "ScheduleArrivalCheckInput",
     "StaleAttentionEvidenceError",
+    "StaleScenarioBContextEvidenceError",
     "StockoutDetection",
     "StockoutDetector",
     "StockoutRisk",

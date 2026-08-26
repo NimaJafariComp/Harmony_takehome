@@ -2,8 +2,10 @@
 
 from .attention import (
     AttentionRegistration,
+    AttentionTrigger,
     InvalidAttentionTransitionError,
     ScenarioAStockoutTrigger,
+    ScenarioBQualityHoldTrigger,
     require_attention_transition,
 )
 from .contracts import (
@@ -51,6 +53,7 @@ __all__ = [
     "AttentionItem",
     "AttentionRegistration",
     "AttentionStatus",
+    "AttentionTrigger",
     "AuditEvent",
     "AuditEventId",
     "DateRange",
@@ -63,6 +66,7 @@ __all__ = [
     "PlantId",
     "RunId",
     "ScenarioAStockoutTrigger",
+    "ScenarioBQualityHoldTrigger",
     "ScheduledTask",
     "ScheduledTaskId",
     "ScheduledTaskStatus",
