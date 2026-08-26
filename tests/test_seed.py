@@ -57,7 +57,7 @@ def inspect_seed(database_url: str) -> dict[str, Any]:
         "    def rows(sql):\n"
         "        return [dict(row) for row in connection.execute(text(sql)).mappings()]\n"
         "    snapshot = {\n"
-        "        'counts': {table: connection.execute(text(f'SELECT COUNT(*) FROM {table}')).scalar_one() for table in ('users', 'parts', 'suppliers', 'purchase_orders', 'production_orders', 'quality_lots', 'production_allocations', 'inventory', 'messages', 'calendar_events')},\n"
+        "        'counts': {table: connection.execute(text(f'SELECT COUNT(*) FROM {table}')).scalar_one() for table in ('users', 'parts', 'suppliers', 'supplier_risk_bulletins', 'purchase_orders', 'production_orders', 'quality_lots', 'production_allocations', 'inventory', 'messages', 'calendar_events')},\n"
         "        'scopes': rows(\"SELECT users.display_name, user_scopes.scope FROM user_scopes JOIN users ON users.id = user_scopes.user_id ORDER BY users.display_name, user_scopes.scope\"),\n"
         "        'scenario_a': {\n"
         "            'production': rows(\"SELECT order_number, required_quantity::text, start_date::text FROM production_orders WHERE order_number = '4812'\"),\n"
@@ -71,6 +71,11 @@ def inspect_seed(database_url: str) -> dict[str, Any]:
         "            'production': rows(\"SELECT orders.order_number, orders.required_quantity::text, orders.start_date::text, users.display_name AS supervisor FROM production_orders orders JOIN users ON users.id = orders.supervisor_id WHERE orders.order_number LIKE 'Q-%' ORDER BY orders.order_number\"),\n"
         "            'allocations': rows(\"SELECT lots.lot_number, lots.status, allocations.allocated_quantity::text, orders.order_number FROM production_allocations allocations JOIN quality_lots lots ON lots.id = allocations.quality_lot_id JOIN production_orders orders ON orders.id = allocations.production_order_id ORDER BY lots.lot_number\"),\n"
         "            'lots': rows(\"SELECT lot_number, status, quantity::text, source_version FROM quality_lots ORDER BY lot_number\"),\n"
+        "        },\n"
+        "        'scenario_c': {\n"
+        "            'purchase_order': rows(\"SELECT po.po_number, supplier.supplier_code, po.status, po.ordered_quantity::text, po.expected_receipt_date::text, po.source_version FROM purchase_orders po JOIN suppliers supplier ON supplier.id = po.supplier_id WHERE po.po_number = 'PO-C-9001-W'\"),\n"
+        "            'production': rows(\"SELECT orders.order_number, parts.part_number, orders.required_quantity::text, orders.start_date::text, users.display_name AS supervisor FROM production_orders orders JOIN parts ON parts.id = orders.part_id JOIN users ON users.id = orders.supervisor_id WHERE orders.order_number = 'C-9001'\"),\n"
+        "            'bulletins': rows(\"SELECT bulletin.bulletin_key, supplier.supplier_code, bulletin.status, bulletin.risk_level, bulletin.source_version, successor.bulletin_key AS superseded_by_key FROM supplier_risk_bulletins bulletin JOIN suppliers supplier ON supplier.id = bulletin.supplier_id LEFT JOIN supplier_risk_bulletins successor ON successor.id = bulletin.superseded_by_id ORDER BY bulletin.bulletin_key, bulletin.source_version\"),\n"
         "        },\n"
         "    }\n"
         "print(json.dumps(snapshot, default=str, sort_keys=True))\n"
@@ -137,7 +142,7 @@ def assert_seeded_provider_boundaries(database_url: str) -> None:
         "quinn = identity.actor_for(UserId('00000000-0000-0000-0000-000000000003'))\n"
         "avery = identity.actor_for(UserId('00000000-0000-0000-0000-000000000002'))\n"
         "procurement = erp.query(dana, EvidenceQuery(record_types=frozenset({'inventory', 'purchase_order', 'production_order', 'supplier'})))\n"
-        "assert {(item.record_type, item.payload.get('po_number')) for item in procurement if item.record_type == 'purchase_order'} == {('purchase_order', 'PO-4812-Y'), ('purchase_order', 'PO-NOISE-77')}\n"
+        "assert {(item.record_type, item.payload.get('po_number')) for item in procurement if item.record_type == 'purchase_order'} == {('purchase_order', 'PO-4812-Y'), ('purchase_order', 'PO-C-9001-W'), ('purchase_order', 'PO-NOISE-77')}\n"
         "assert {item.payload['supplier_code'] for item in procurement if item.record_type == 'supplier'} == {'SUP-BAIT', 'SUP-SLOW', 'SUP-W', 'SUP-Y', 'SUP-Z'}\n"
         "updates = mail.query(dana, EvidenceQuery(record_types=frozenset({'message'}), record_ids=frozenset({'00000000-0000-0000-0000-000000000801', '00000000-0000-0000-0000-000000000802'})))\n"
         "assert [item.payload['message_key'] for item in updates] == ['shipment-update-po-4812-y-v1', 'shipment-update-po-4812-y-v2']\n"
@@ -196,9 +201,10 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
         "messages": 3,
         "parts": 3,
         "production_allocations": 2,
-        "production_orders": 3,
-        "purchase_orders": 2,
+        "production_orders": 4,
+        "purchase_orders": 3,
         "quality_lots": 3,
+        "supplier_risk_bulletins": 3,
         "suppliers": 5,
         "users": 4,
     }
@@ -321,6 +327,51 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
             "status": "held",
         },
     ]
+    assert first_seed["scenario_c"]["purchase_order"] == [
+        {
+            "expected_receipt_date": "2026-08-27",
+            "ordered_quantity": "75.000",
+            "po_number": "PO-C-9001-W",
+            "source_version": 1,
+            "status": "open",
+            "supplier_code": "SUP-W",
+        }
+    ]
+    assert first_seed["scenario_c"]["production"] == [
+        {
+            "order_number": "C-9001",
+            "part_number": "PART-NOISE",
+            "required_quantity": "75.000",
+            "start_date": "2026-08-28",
+            "supervisor": "Priya Production",
+        }
+    ]
+    assert first_seed["scenario_c"]["bulletins"] == [
+        {
+            "bulletin_key": "supplier-w-disruption",
+            "risk_level": "medium",
+            "source_version": 1,
+            "status": "superseded",
+            "supplier_code": "SUP-W",
+            "superseded_by_key": "supplier-w-disruption",
+        },
+        {
+            "bulletin_key": "supplier-w-disruption",
+            "risk_level": "high",
+            "source_version": 2,
+            "status": "active",
+            "supplier_code": "SUP-W",
+            "superseded_by_key": None,
+        },
+        {
+            "bulletin_key": "supplier-y-weather",
+            "risk_level": "low",
+            "source_version": 1,
+            "status": "inactive",
+            "supplier_code": "SUP-Y",
+            "superseded_by_key": None,
+        },
+    ]
     scopes_by_user = {
         user: {row["scope"] for row in first_seed["scopes"] if row["display_name"] == user}
         for user in ("Quinn Quality", "Priya Production")
@@ -425,8 +476,10 @@ def test_scenario_c_seed_binds_one_current_bulletin_to_one_open_po_and_productio
     """Scenario C starts with current, superseded, inactive, and unauthorized knowledge facts."""
     from enterprise_agent.seed import (
         ID_DANA,
+        ID_PART_NOISE,
         ID_PO_C9001_W,
         ID_PRODUCTION_C9001,
+        ID_QUINN,
         ID_SUPPLIER_W,
         SEED_ROWS,
     )
@@ -440,16 +493,33 @@ def test_scenario_c_seed_binds_one_current_bulletin_to_one_open_po_and_productio
         for row in SEED_ROWS
         if row.table == "user_scopes" and row.values["user_id"] == ID_DANA
     }
+    quinn_scopes = {
+        row.values["scope"]
+        for row in SEED_ROWS
+        if row.table == "user_scopes" and row.values["user_id"] == ID_QUINN
+    }
+    open_purchase_order = next(
+        row.values
+        for row in SEED_ROWS
+        if row.table == "purchase_orders" and row.values["id"] == ID_PO_C9001_W
+    )
+    production_impact = next(
+        row.values
+        for row in SEED_ROWS
+        if row.table == "production_orders" and row.values["id"] == ID_PRODUCTION_C9001
+    )
 
     assert active["supplier_id"] == ID_SUPPLIER_W
-    assert active["purchase_order_id"] == ID_PO_C9001_W
-    assert active["production_order_id"] == ID_PRODUCTION_C9001
     assert active["source_version"] == 2
+    assert open_purchase_order["supplier_id"] == active["supplier_id"]
+    assert production_impact["part_id"] == open_purchase_order["part_id"] == ID_PART_NOISE
+    assert production_impact["plant_id"] == open_purchase_order["plant_id"] == active["plant_id"]
     assert superseded["superseded_by_id"] == active["id"]
     assert superseded["source_version"] == 1
     assert inactive["supplier_id"] != active["supplier_id"]
     assert inactive["status"] == "inactive"
     assert "knowledge:bulletin:read" in dana_scopes
+    assert "knowledge:bulletin:read" not in quinn_scopes
 
 
 def test_reset_and_seed_execute_one_safe_transaction_each(

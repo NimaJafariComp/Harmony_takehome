@@ -212,6 +212,15 @@ class QualityPort(Protocol):
 
 
 @runtime_checkable
+class KnowledgePort(Protocol):
+    """Read scoped external knowledge evidence without exposing storage or transport details."""
+
+    def query(self, actor: ActorContext, query: EvidenceQuery) -> Sequence[Evidence]:
+        """Return only knowledge records visible to the supplied actor."""
+        ...
+
+
+@runtime_checkable
 class MailPort(Protocol):
     """Read scoped mail facts without exposing mailbox implementation details."""
 

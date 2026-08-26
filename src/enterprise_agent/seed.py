@@ -51,8 +51,10 @@ ID_SUPPLIER_BAIT = UUID("00000000-0000-0000-0000-000000000205")
 ID_PRODUCTION_4812 = UUID("00000000-0000-0000-0000-000000000301")
 ID_PRODUCTION_Q7001 = UUID("00000000-0000-0000-0000-000000000302")
 ID_PRODUCTION_Q7002 = UUID("00000000-0000-0000-0000-000000000303")
+ID_PRODUCTION_C9001 = UUID("00000000-0000-0000-0000-000000000304")
 ID_PO_4812_Y = UUID("00000000-0000-0000-0000-000000000401")
 ID_PO_NOISE = UUID("00000000-0000-0000-0000-000000000402")
+ID_PO_C9001_W = UUID("00000000-0000-0000-0000-000000000403")
 ID_INVENTORY_X = UUID("00000000-0000-0000-0000-000000000501")
 ID_LOT_HELD = UUID("00000000-0000-0000-0000-000000000601")
 ID_LOT_GOOD = UUID("00000000-0000-0000-0000-000000000602")
@@ -63,6 +65,9 @@ ID_MESSAGE_OLD = UUID("00000000-0000-0000-0000-000000000801")
 ID_MESSAGE_NEW = UUID("00000000-0000-0000-0000-000000000802")
 ID_MESSAGE_NOISE = UUID("00000000-0000-0000-0000-000000000803")
 ID_DANA_OOO = UUID("00000000-0000-0000-0000-000000000901")
+ID_BULLETIN_SUPPLIER_W_CURRENT = UUID("00000000-0000-0000-0000-000000001001")
+ID_BULLETIN_SUPPLIER_W_SUPERSEDED = UUID("00000000-0000-0000-0000-000000001002")
+ID_BULLETIN_SUPPLIER_Y_INACTIVE = UUID("00000000-0000-0000-0000-000000001003")
 SCOPE_NAMESPACE = UUID("00000000-0000-0000-0000-000000000999")
 
 JSON_COLUMNS = frozenset({"payload", "source_versions", "parameters", "evidence_ids"})
@@ -79,6 +84,7 @@ TRUNCATE TABLE
     attention_items,
     calendar_events,
     messages,
+    supplier_risk_bulletins,
     production_allocations,
     quality_lots,
     inventory,
@@ -181,6 +187,7 @@ SEED_ROWS = (
             "erp:po:reroute",
             "erp:read",
             "mail:read",
+            "knowledge:bulletin:read",
             "production:notify",
             "scheduler:write",
         )
@@ -339,6 +346,21 @@ SEED_ROWS = (
     SeedRow(
         table="production_orders",
         values={
+            "id": ID_PRODUCTION_C9001,
+            "order_number": "C-9001",
+            "part_id": ID_PART_NOISE,
+            "plant_id": PLANT_CHICAGO,
+            "supervisor_id": ID_PRIYA,
+            "required_quantity": Decimal("75.000"),
+            "start_date": DEMO_TUESDAY.date().replace(day=28),
+            "status": "scheduled",
+            "created_at": DEMO_CREATED_AT,
+            "updated_at": DEMO_CREATED_AT,
+        },
+    ),
+    SeedRow(
+        table="production_orders",
+        values={
             "id": ID_PRODUCTION_Q7001,
             "order_number": "Q-7001",
             "part_id": ID_PART_QUALITY,
@@ -379,6 +401,74 @@ SEED_ROWS = (
             "status": "delayed",
             "expected_receipt_date": SCENARIO_A_DELAYED_RECEIPT,
             "source_version": 2,
+            "created_at": DEMO_CREATED_AT,
+            "updated_at": DEMO_CLOCK_START,
+        },
+    ),
+    SeedRow(
+        table="purchase_orders",
+        values={
+            "id": ID_PO_C9001_W,
+            "po_number": "PO-C-9001-W",
+            "part_id": ID_PART_NOISE,
+            "supplier_id": ID_SUPPLIER_W,
+            "plant_id": PLANT_CHICAGO,
+            "ordered_quantity": Decimal("75.000"),
+            "received_quantity": Decimal("0.000"),
+            "status": "open",
+            "expected_receipt_date": DEMO_TUESDAY.date().replace(day=27),
+            "source_version": 1,
+            "created_at": DEMO_CREATED_AT,
+            "updated_at": DEMO_CREATED_AT,
+        },
+    ),
+    SeedRow(
+        table="supplier_risk_bulletins",
+        values={
+            "id": ID_BULLETIN_SUPPLIER_W_CURRENT,
+            "bulletin_key": "supplier-w-disruption",
+            "supplier_id": ID_SUPPLIER_W,
+            "plant_id": PLANT_CHICAGO,
+            "risk_level": "high",
+            "status": "active",
+            "body": "Port closure may delay Supplier W shipments through the coming week.",
+            "source_version": 2,
+            "superseded_by_id": None,
+            "published_at": datetime(2026, 8, 24, 8, tzinfo=UTC),
+            "created_at": DEMO_CREATED_AT,
+            "updated_at": DEMO_CLOCK_START,
+        },
+    ),
+    SeedRow(
+        table="supplier_risk_bulletins",
+        values={
+            "id": ID_BULLETIN_SUPPLIER_W_SUPERSEDED,
+            "bulletin_key": "supplier-w-disruption",
+            "supplier_id": ID_SUPPLIER_W,
+            "plant_id": PLANT_CHICAGO,
+            "risk_level": "medium",
+            "status": "superseded",
+            "body": "Initial Supplier W disruption notice; use the current update instead.",
+            "source_version": 1,
+            "superseded_by_id": ID_BULLETIN_SUPPLIER_W_CURRENT,
+            "published_at": datetime(2026, 8, 23, 8, tzinfo=UTC),
+            "created_at": DEMO_CREATED_AT,
+            "updated_at": datetime(2026, 8, 24, 8, tzinfo=UTC),
+        },
+    ),
+    SeedRow(
+        table="supplier_risk_bulletins",
+        values={
+            "id": ID_BULLETIN_SUPPLIER_Y_INACTIVE,
+            "bulletin_key": "supplier-y-weather",
+            "supplier_id": ID_SUPPLIER_Y,
+            "plant_id": PLANT_CHICAGO,
+            "risk_level": "low",
+            "status": "inactive",
+            "body": "Supplier Y weather advisory has been resolved.",
+            "source_version": 1,
+            "superseded_by_id": None,
+            "published_at": datetime(2026, 8, 20, 8, tzinfo=UTC),
             "created_at": DEMO_CREATED_AT,
             "updated_at": DEMO_CLOCK_START,
         },

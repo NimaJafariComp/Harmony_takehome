@@ -101,8 +101,8 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert {
         "bulletin_key",
         "supplier_id",
-        "purchase_order_id",
-        "production_order_id",
+        "plant_id",
+        "risk_level",
         "status",
         "source_version",
         "superseded_by_id",
@@ -149,8 +149,6 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     )
     assert {
         "supplier_id->suppliers",
-        "purchase_order_id->purchase_orders",
-        "production_order_id->production_orders",
         "superseded_by_id->supplier_risk_bulletins",
     }.issubset(schema["foreign_keys"]["supplier_risk_bulletins"])
     assert "supervisor_id->users" in schema["foreign_keys"]["production_orders"]
