@@ -8,6 +8,11 @@ from .claude import ClaudeMessagesAdapter, ClaudeMessagesTransport, UrllibClaude
 from .clock import DemoClockNotInitializedError, PostgresDemoClock
 from .identity import IdentityNotFoundError, PostgresIdentityAdapter
 from .openai import OpenAIResponsesAdapter, OpenAIResponsesTransport, UrllibOpenAIResponsesTransport
+from .openrouter import (
+    OpenRouterChatCompletionsAdapter,
+    OpenRouterChatCompletionsTransport,
+    UrllibOpenRouterChatCompletionsTransport,
+)
 from .plan_approvals import PostgresPlanApprovalAdapter
 from .providers import (
     PostgresCalendarAdapter,
@@ -33,6 +38,8 @@ __all__ = [
     "InvalidAttentionTransitionError",
     "OpenAIResponsesAdapter",
     "OpenAIResponsesTransport",
+    "OpenRouterChatCompletionsAdapter",
+    "OpenRouterChatCompletionsTransport",
     "PostgresAttentionAdapter",
     "PostgresAuditAdapter",
     "PostgresCalendarAdapter",
@@ -52,4 +59,5 @@ __all__ = [
     "UnsupportedEvidenceTypeError",
     "UrllibClaudeMessagesTransport",
     "UrllibOpenAIResponsesTransport",
+    "UrllibOpenRouterChatCompletionsTransport",
 ]
