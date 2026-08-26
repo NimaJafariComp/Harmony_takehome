@@ -32,6 +32,7 @@ class ToolName(StrEnum):
 
     CREATE_REPLACEMENT_PO = "create_replacement_po"
     REDUCE_OR_CANCEL_PO = "reduce_or_cancel_po"
+    PLACE_PURCHASE_ORDER_HOLD = "place_purchase_order_hold"
     NOTIFY_PRODUCTION = "notify_production"
     SCHEDULE_ARRIVAL_CHECK = "schedule_arrival_check"
     REALLOCATE_LOT = "reallocate_lot"
@@ -43,6 +44,7 @@ class CompensationAction(StrEnum):
 
     CANCEL_CREATED_REPLACEMENT_PO = "cancel_created_replacement_po"
     RESTORE_ORIGINAL_PURCHASE_ORDER = "restore_original_purchase_order"
+    RESTORE_HELD_PURCHASE_ORDER = "restore_held_purchase_order"
     SEND_CORRECTION_NOTIFICATION = "send_correction_notification"
     CANCEL_ARRIVAL_CHECK = "cancel_arrival_check"
     RESTORE_PRIOR_ALLOCATION = "restore_prior_allocation"
@@ -68,6 +70,14 @@ class ReduceOrCancelPOInput(ToolInputModel):
 
     original_purchase_order_id: NonBlankText
     quantity: PositiveQuantity
+
+
+class PlacePurchaseOrderHoldInput(ToolInputModel):
+    """Place a temporary hold only on the exact current PO affecting one production order."""
+
+    purchase_order_id: NonBlankText
+    production_order_id: NonBlankText
+    expected_purchase_order_version: Annotated[int, Field(ge=1)]
 
 
 class NotifyProductionInput(ToolInputModel):
@@ -120,6 +130,7 @@ class FlagShortageToPurchasingInput(ToolInputModel):
 ToolInput = (
     CreateReplacementPOInput
     | ReduceOrCancelPOInput
+    | PlacePurchaseOrderHoldInput
     | NotifyProductionInput
     | ScheduleArrivalCheckInput
     | ReallocateLotInput
@@ -161,6 +172,12 @@ _TOOL_CATALOG: dict[ToolName, ToolDefinition] = {
         input_model=ReduceOrCancelPOInput,
         required_scopes=frozenset({Scope("erp:po:cancel")}),
         compensation=CompensationAction.RESTORE_ORIGINAL_PURCHASE_ORDER,
+    ),
+    ToolName.PLACE_PURCHASE_ORDER_HOLD: ToolDefinition(
+        name=ToolName.PLACE_PURCHASE_ORDER_HOLD,
+        input_model=PlacePurchaseOrderHoldInput,
+        required_scopes=frozenset({Scope("erp:po:hold")}),
+        compensation=CompensationAction.RESTORE_HELD_PURCHASE_ORDER,
     ),
     ToolName.NOTIFY_PRODUCTION: ToolDefinition(
         name=ToolName.NOTIFY_PRODUCTION,

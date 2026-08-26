@@ -1,4 +1,4 @@
-"""Bounded Scenario A/B recommendations and a deterministic LLM port for tests."""
+"""Bounded Scenario A/B/C recommendations and a deterministic LLM port for tests."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from pydantic import (
 from enterprise_agent.application.tools import (
     FlagShortageToPurchasingInput,
     NotifyProductionInput,
+    PlacePurchaseOrderHoldInput,
     ReallocateLotInput,
 )
 from enterprise_agent.ports import LLMGenerationResult, PromptEnvelope
@@ -31,6 +32,10 @@ class InvalidScenarioARecommendationError(ValueError):
 
 class InvalidScenarioBRecommendationError(ValueError):
     """Raised when a structured model response is outside the bounded Scenario B contract."""
+
+
+class InvalidScenarioCRecommendationError(ValueError):
+    """Raised when a structured model response is outside the bounded Scenario C contract."""
 
 
 class UnsupportedRecommendationSchemaError(ValueError):
@@ -137,6 +142,45 @@ def validate_scenario_b_recommendation(
         raise InvalidScenarioBRecommendationError("invalid Scenario B recommendation") from error
 
 
+class HoldAndNotifyRecommendation(_RecommendationModel):
+    """Propose the only registered Scenario C response: hold the affected PO and notify production."""
+
+    outcome: Literal["HOLD_AND_NOTIFY"]
+    hold_purchase_order: PlacePurchaseOrderHoldInput
+    notify_production: NotifyProductionInput
+    rationale: NonBlankString
+
+    @model_validator(mode="after")
+    def _require_single_production_target(self) -> HoldAndNotifyRecommendation:
+        if (
+            self.hold_purchase_order.production_order_id
+            != self.notify_production.production_order_id
+        ):
+            raise ValueError(
+                "purchase-order hold and notification must target the same production order"
+            )
+        return self
+
+
+ScenarioCRecommendation = Annotated[
+    ManualReviewRecommendation | HoldAndNotifyRecommendation,
+    Field(discriminator="outcome"),
+]
+_SCENARIO_C_RECOMMENDATION_ADAPTER: TypeAdapter[ScenarioCRecommendation] = TypeAdapter(
+    ScenarioCRecommendation
+)
+
+
+def validate_scenario_c_recommendation(
+    output: Mapping[str, object],
+) -> ScenarioCRecommendation:
+    """Accept only manual review or the two registered, causally bound Scenario C tool inputs."""
+    try:
+        return _SCENARIO_C_RECOMMENDATION_ADAPTER.validate_python(output)
+    except ValidationError as error:
+        raise InvalidScenarioCRecommendationError("invalid Scenario C recommendation") from error
+
+
 def json_schema_for_recommendation(response_schema: str) -> dict[str, object]:
     """Return the JSON schema for one application-owned recommendation contract."""
     match response_schema:
@@ -144,6 +188,8 @@ def json_schema_for_recommendation(response_schema: str) -> dict[str, object]:
             return _SCENARIO_A_RECOMMENDATION_ADAPTER.json_schema()
         case "scenario_b_recommendation:v1":
             return _SCENARIO_B_RECOMMENDATION_ADAPTER.json_schema()
+        case "scenario_c_recommendation:v1":
+            return _SCENARIO_C_RECOMMENDATION_ADAPTER.json_schema()
         case _:
             raise UnsupportedRecommendationSchemaError(
                 f"unsupported recommendation schema: {response_schema}"
@@ -160,6 +206,8 @@ def validate_recommendation(
             return validate_scenario_a_recommendation(output)
         case "scenario_b_recommendation:v1":
             return validate_scenario_b_recommendation(output)
+        case "scenario_c_recommendation:v1":
+            return validate_scenario_c_recommendation(output)
         case _:
             raise UnsupportedRecommendationSchemaError(
                 f"unsupported recommendation schema: {response_schema}"
@@ -172,6 +220,7 @@ AnyScenarioRecommendation = (
     | EnterWorkflowRecommendation
     | ReallocateAndNotifyRecommendation
     | FlagShortageToPurchasingRecommendation
+    | HoldAndNotifyRecommendation
 )
 
 

@@ -183,6 +183,7 @@ SEED_ROWS = (
             "calendar:read",
             "erp:po:cancel",
             "erp:po:create",
+            "erp:po:hold",
             "erp:po:read",
             "erp:po:reroute",
             "erp:read",

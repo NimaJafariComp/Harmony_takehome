@@ -18,6 +18,7 @@ from enterprise_agent.application.tools import (
     CreateReplacementPOInput,
     FlagShortageToPurchasingInput,
     NotifyProductionInput,
+    PlacePurchaseOrderHoldInput,
     ReallocateLotInput,
     ReduceOrCancelPOInput,
     ScheduleArrivalCheckInput,
@@ -118,6 +119,32 @@ REDUCE_OR_CANCEL_ORIGINAL_PO = text("""
         updated_at = :occurred_at
     WHERE id = CAST(:original_purchase_order_id AS UUID)
     RETURNING ordered_quantity, received_quantity, status, source_version
+""")
+SELECT_PURCHASE_ORDER_HOLD_SOURCE = text("""
+    SELECT purchase_orders.id::text AS purchase_order_id,
+           purchase_orders.status AS purchase_order_status,
+           purchase_orders.source_version AS purchase_order_source_version,
+           purchase_orders.part_id::text AS purchase_order_part_id,
+           purchase_orders.plant_id AS purchase_order_plant_id,
+           production_orders.id::text AS production_order_id,
+           production_orders.status AS production_order_status,
+           production_orders.part_id::text AS production_order_part_id,
+           production_orders.plant_id AS production_order_plant_id
+    FROM purchase_orders
+    JOIN production_orders
+      ON production_orders.id = CAST(:production_order_id AS UUID)
+    WHERE purchase_orders.id = CAST(:purchase_order_id AS UUID)
+    FOR UPDATE OF purchase_orders, production_orders
+""")
+PLACE_PURCHASE_ORDER_HOLD = text("""
+    UPDATE purchase_orders
+    SET status = 'on_hold',
+        source_version = source_version + 1,
+        updated_at = :occurred_at
+    WHERE id = CAST(:purchase_order_id AS UUID)
+      AND status = 'open'
+      AND source_version = :expected_purchase_order_version
+    RETURNING id::text AS purchase_order_id, status, source_version
 """)
 SELECT_PRODUCTION_RECIPIENT = text("""
     SELECT users.email
@@ -269,6 +296,16 @@ RESTORE_ORIGINAL_PO = text("""
       AND status = :status
       AND source_version = :source_version
     RETURNING id::text AS purchase_order_id, ordered_quantity, received_quantity, status, source_version
+""")
+RESTORE_HELD_PURCHASE_ORDER = text("""
+    UPDATE purchase_orders
+    SET status = :previous_status,
+        source_version = source_version + 1,
+        updated_at = :occurred_at
+    WHERE id = CAST(:purchase_order_id AS UUID)
+      AND status = 'on_hold'
+      AND source_version = :expected_source_version
+    RETURNING id::text AS purchase_order_id, status, source_version
 """)
 SELECT_ORIGINAL_NOTIFICATION = text("""
     SELECT id::text AS message_id, recipient, subject
@@ -567,6 +604,10 @@ def _execute_effect(
         return _create_replacement_purchase_order(connection, invocation, input_value)
     if tool_name is ToolName.REDUCE_OR_CANCEL_PO and isinstance(input_value, ReduceOrCancelPOInput):
         return _reduce_or_cancel_original_purchase_order(connection, invocation, input_value)
+    if tool_name is ToolName.PLACE_PURCHASE_ORDER_HOLD and isinstance(
+        input_value, PlacePurchaseOrderHoldInput
+    ):
+        return _place_purchase_order_hold(connection, invocation, input_value)
     if tool_name is ToolName.NOTIFY_PRODUCTION and isinstance(input_value, NotifyProductionInput):
         return _notify_production(connection, invocation, input_value)
     if tool_name is ToolName.SCHEDULE_ARRIVAL_CHECK and isinstance(
@@ -591,6 +632,8 @@ def _execute_compensation_effect(
         return _cancel_created_replacement_purchase_order(connection, compensation)
     if action is CompensationAction.RESTORE_ORIGINAL_PURCHASE_ORDER:
         return _restore_original_purchase_order(connection, compensation)
+    if action is CompensationAction.RESTORE_HELD_PURCHASE_ORDER:
+        return _restore_held_purchase_order(connection, compensation)
     if action is CompensationAction.SEND_CORRECTION_NOTIFICATION:
         return _send_correction_notification(connection, compensation)
     if action is CompensationAction.CANCEL_ARRIVAL_CHECK:
@@ -694,6 +737,55 @@ def _reduce_or_cancel_original_purchase_order(
         "received_quantity": str(cast(Decimal, updated["received_quantity"])),
         "status": cast(str, updated["status"]),
         "source_version": cast(int, updated["source_version"]),
+    }
+
+
+def _place_purchase_order_hold(
+    connection: Connection,
+    invocation: ToolInvocation,
+    input_value: PlacePurchaseOrderHoldInput,
+) -> dict[str, object]:
+    """Hold only a current open PO that still belongs to the exact runnable production demand."""
+    source = (
+        connection.execute(
+            SELECT_PURCHASE_ORDER_HOLD_SOURCE,
+            {
+                "purchase_order_id": input_value.purchase_order_id,
+                "production_order_id": input_value.production_order_id,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if (
+        source is None
+        or source["purchase_order_status"] != "open"
+        or _required_row_int(source, "purchase_order_source_version")
+        != input_value.expected_purchase_order_version
+        or source["production_order_status"] not in {"scheduled", "in_progress"}
+        or source["purchase_order_part_id"] != source["production_order_part_id"]
+        or source["purchase_order_plant_id"] != source["production_order_plant_id"]
+    ):
+        raise ToolExecutionError("purchase-order hold source is not currently actionable")
+    held = (
+        connection.execute(
+            PLACE_PURCHASE_ORDER_HOLD,
+            {
+                "purchase_order_id": input_value.purchase_order_id,
+                "expected_purchase_order_version": input_value.expected_purchase_order_version,
+                "occurred_at": invocation.started_at,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if held is None:
+        raise ToolExecutionError("purchase-order hold source changed before the hold completed")
+    return {
+        "purchase_order_id": _required_row_text(held, "purchase_order_id"),
+        "previous_status": cast(str, source["purchase_order_status"]),
+        "status": cast(str, held["status"]),
+        "source_version": _required_row_int(held, "source_version"),
     }
 
 
@@ -1091,6 +1183,35 @@ def _restore_original_purchase_order(
         "received_quantity": str(cast(Decimal, restored["received_quantity"])),
         "status": cast(str, restored["status"]),
         "source_version": cast(int, restored["source_version"]),
+    }
+
+
+def _restore_held_purchase_order(
+    connection: Connection, compensation: ToolCompensation
+) -> dict[str, object]:
+    """Restore only the exact hold state committed by the original provider invocation."""
+    result = compensation.effect_result
+    if _required_result_text(result, "status") != "on_hold":
+        raise ToolExecutionError("purchase-order hold is not safely restorable")
+    restored = (
+        connection.execute(
+            RESTORE_HELD_PURCHASE_ORDER,
+            {
+                "purchase_order_id": _required_result_text(result, "purchase_order_id"),
+                "previous_status": _required_result_text(result, "previous_status"),
+                "expected_source_version": _required_result_int(result, "source_version"),
+                "occurred_at": compensation.requested_at,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if restored is None:
+        raise ToolExecutionError("purchase-order hold is not safely restorable")
+    return {
+        "purchase_order_id": _required_row_text(restored, "purchase_order_id"),
+        "status": cast(str, restored["status"]),
+        "source_version": _required_row_int(restored, "source_version"),
     }
 
 
