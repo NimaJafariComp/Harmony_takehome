@@ -99,6 +99,8 @@ class RecordingLocalReviewService:
             "status": "running",
             "current_step": 2,
             "recovery_state": "in_progress",
+            "compensation_state": "not_required",
+            "audit_run_id": "run-a",
             "created_at": "2026-08-24T09:00:00+00:00",
             "updated_at": "2026-08-24T09:01:00+00:00",
             "steps": [
@@ -180,7 +182,7 @@ async def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "Enterprise Agent / Local Review" in response.text
-    assert "Read-only local verification surface" in response.text
+    assert "Local verification surface" in response.text
     assert "No provider call · no credential display · no business-system write" in response.text
     assert "API key" not in response.text
     assert "<script" not in response.text
@@ -403,7 +405,7 @@ async def test_local_ui_advances_one_demo_day_only_with_a_bound_csrf_form() -> N
         ),
         base_url="http://testserver",
     ) as client:
-        page = await client.get("/")
+        page = await client.get("/demo-clock")
         token = re.search(
             r'<form[^>]+action="/demo-clock/advance"[^>]*>.*?'
             r'name="csrf_token" value="([^"]+)"',
@@ -439,7 +441,7 @@ async def test_local_ui_keeps_demo_clock_controls_locked_without_demo_mode() -> 
         ),
         base_url="http://testserver",
     ) as client:
-        page = await client.get("/")
+        page = await client.get("/demo-clock")
         forbidden = await client.post("/demo-clock/advance", data={"csrf_token": "forged"})
 
     assert page.status_code == 200
@@ -447,6 +449,26 @@ async def test_local_ui_keeps_demo_clock_controls_locked_without_demo_mode() -> 
     assert 'action="/demo-clock/advance"' not in page.text
     assert forbidden.status_code == 403
     assert controls.advances == 0
+
+
+async def test_local_ui_reuses_the_shared_a_b_c_demo_catalogue_without_running_it() -> None:
+    """All three scenarios are understandable in one UI view while only the existing CLI owns staging."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(read_service=RecordingLocalReviewService())),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/demo-clock")
+
+    assert page.status_code == 200
+    assert "Scenario A — viable reroute rejects the tempting supplier" in page.text
+    assert "Scenario B — quality-lot capacity respects commitments" in page.text
+    assert "Scenario C — supplier-risk bulletin awaits review" in page.text
+    assert "fixed acceptance-case walkthrough" in page.text
+    assert "does not run or reset the shared demo" in page.text
 
 
 async def test_local_ui_renders_a_safe_html_error_page_for_a_missing_ledger_record() -> None:
