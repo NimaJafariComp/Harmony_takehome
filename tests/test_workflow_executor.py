@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -1029,6 +1030,23 @@ class ScenarioAToolExecutor:
 
 
 @dataclass
+class RecordingBoundedToolExecutor:
+    """Record Scenario B's already-approved catalog calls without inventing any new tool behavior."""
+
+    invocations: list[Any]
+
+    def execute(self, actor: ActorContext, invocation: Any) -> dict[str, object]:
+        """Return one bounded result for each reviewed quality-remediation effect."""
+        assert actor.user_id == UserId("00000000-0000-0000-0000-000000000001")
+        self.invocations.append(invocation)
+        if invocation.tool_name == "reallocate_lot":
+            return {"allocation_id": "allocation-good"}
+        if invocation.tool_name == "notify_production":
+            return {"message_id": "message-quality"}
+        raise AssertionError("unexpected bounded tool")
+
+
+@dataclass
 class CompensatingScenarioAToolExecutor:
     """Record declared compensations while returning the same bounded Scenario A effects."""
 
@@ -1069,6 +1087,124 @@ def _advance_to_first_tool(executor: Any, plan: Plan) -> None:
         worker_id="worker-a",
         completed_at=NOW + timedelta(minutes=4),
     )
+
+
+@pytest.mark.critical
+def test_executor_requires_approval_then_runs_only_the_plan_bound_quality_tools_in_order() -> None:
+    """Scenario B uses the existing durable executor without a static Scenario A workflow branch."""
+    from enterprise_agent.application.bounded_tool_plan import (
+        BoundedToolCall,
+        build_bounded_tool_plan,
+    )
+    from enterprise_agent.application.tools import (
+        NotifyProductionInput,
+        ReallocateLotInput,
+        ToolName,
+    )
+    from enterprise_agent.application.workflow_executor import (
+        ScenarioAWorkflowExecutor,
+        WorkflowExecutionRejectedError,
+    )
+    from enterprise_agent.application.workflow_state import WorkflowStateService
+
+    plan = build_bounded_tool_plan(
+        attention_id=AttentionId("00000000-0000-0000-0000-000000000611"),
+        actor_id=UserId("00000000-0000-0000-0000-000000000001"),
+        approver_id=UserId("00000000-0000-0000-0000-000000000004"),
+        tool_calls=(
+            BoundedToolCall(
+                tool_name=ToolName.REALLOCATE_LOT,
+                input=ReallocateLotInput(
+                    quality_lot_id="lot-good",
+                    to_production_order_id="production-q7001",
+                    quantity=Decimal(80),
+                ),
+            ),
+            BoundedToolCall(
+                tool_name=ToolName.NOTIFY_PRODUCTION,
+                input=NotifyProductionInput(
+                    production_order_id="production-q7001",
+                    message="Released replacement lot will cover the held allocation.",
+                ),
+            ),
+        ),
+        source_versions={"quality:quality_lot:lot-held": 3},
+        policy_version="scenario_b_policy:v1",
+        created_at=NOW,
+        expires_at=NOW + timedelta(hours=4),
+    )
+    store = MemoryWorkflowStore()
+    WorkflowStateService(store).stage_bounded_tool_plan(
+        plan,
+        created_at=NOW,
+        workflow_id=WORKFLOW_ID,
+    )
+    tools = RecordingBoundedToolExecutor(invocations=[])
+    actor = actor_with(frozenset({Scope("erp:lot:write"), Scope("production:notify")}))
+    pending_executor = ScenarioAWorkflowExecutor(
+        workflow_store=store,
+        approvals=MemoryApprovals((plan, approval_for(plan, status=ApprovalStatus.PENDING))),
+        identity=MemoryIdentity(actor),
+        tool_executor=tools,
+    )
+
+    with pytest.raises(WorkflowExecutionRejectedError, match="approved"):
+        pending_executor.begin_next_tool(
+            WORKFLOW_ID,
+            worker_id="worker-a",
+            now=NOW + timedelta(minutes=1),
+            lease_expires_at=NOW + timedelta(minutes=10),
+            current_source_versions=plan.source_versions,
+        )
+
+    executor = ScenarioAWorkflowExecutor(
+        workflow_store=store,
+        approvals=MemoryApprovals((plan, approval_for(plan))),
+        identity=MemoryIdentity(actor),
+        tool_executor=tools,
+    )
+    first = executor.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=1),
+        lease_expires_at=NOW + timedelta(minutes=10),
+        current_source_versions=plan.source_versions,
+    )
+    after_first = executor.execute_started_tool(
+        first,
+        worker_id="worker-a",
+        completed_at=NOW + timedelta(minutes=2),
+    )
+    second = executor.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=3),
+        lease_expires_at=NOW + timedelta(minutes=10),
+        current_source_versions={"quality:quality_lot:lot-held": 4},
+    )
+    completed = executor.execute_started_tool(
+        second,
+        worker_id="worker-a",
+        completed_at=NOW + timedelta(minutes=4),
+    )
+
+    assert after_first.workflow.current_step == 1
+    assert completed.workflow.status is WorkflowStatus.SUCCEEDED
+    assert [invocation.tool_name for invocation in tools.invocations] == [
+        "reallocate_lot",
+        "notify_production",
+    ]
+    assert first.invocation.parameters == {
+        "quality_lot_id": "lot-good",
+        "from_production_order_id": None,
+        "to_production_order_id": "production-q7001",
+        "quantity": "80",
+    }
+    assert second.invocation.parameters == {
+        "production_order_id": "production-q7001",
+        "message": "Released replacement lot will cover the held allocation.",
+    }
+    assert [call[2] for call in store.start_tool_calls] == [1, 2]
 
 
 @pytest.mark.critical

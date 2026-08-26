@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -212,6 +213,48 @@ def test_staging_generates_a_workflow_id_when_no_durable_id_is_supplied() -> Non
     )
 
     assert snapshot.workflow.workflow_id
+
+
+def test_bounded_tool_staging_rejects_a_plan_without_a_valid_selected_tool_sequence() -> None:
+    """The shared state service cannot turn malformed dynamic plan data into runnable steps."""
+    from enterprise_agent.application.bounded_tool_plan import (
+        BoundedToolCall,
+        build_bounded_tool_plan,
+    )
+    from enterprise_agent.application.tools import FlagShortageToPurchasingInput, ToolName
+    from enterprise_agent.application.workflow_state import (
+        WorkflowStateInitializationError,
+        WorkflowStateService,
+    )
+
+    plan = build_bounded_tool_plan(
+        attention_id=AttentionId("00000000-0000-0000-0000-000000000611"),
+        actor_id=UserId("00000000-0000-0000-0000-000000000003"),
+        approver_id=UserId("00000000-0000-0000-0000-000000000004"),
+        tool_calls=(
+            BoundedToolCall(
+                tool_name=ToolName.FLAG_SHORTAGE_TO_PURCHASING,
+                input=FlagShortageToPurchasingInput(
+                    production_order_id="production-q7002",
+                    part_id="part-quality",
+                    shortage_quantity=Decimal(80),
+                ),
+            ),
+        ),
+        source_versions={"quality:quality_lot:lot-held": 3},
+        policy_version="scenario_b_policy:v1",
+        created_at=NOW,
+        expires_at=NOW + timedelta(hours=4),
+    )
+    store = MemoryWorkflowStateStore()
+
+    with pytest.raises(WorkflowStateInitializationError, match="bounded tool workflow"):
+        WorkflowStateService(store).stage_bounded_tool_plan(
+            replace(plan, parameters={"tool_calls": []}),
+            created_at=NOW,
+        )
+
+    assert store.snapshots == {}
 
 
 def mapping_result(

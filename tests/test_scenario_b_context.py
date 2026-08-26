@@ -299,13 +299,16 @@ def test_context_fails_closed_when_the_quality_provider_cannot_name_a_supervisor
 
 
 @pytest.mark.critical
-def test_quality_control_reuses_pending_approval_and_dynamic_tool_workflow_bound_to_context() -> None:
+def test_quality_control_reuses_pending_approval_and_dynamic_tool_workflow_bound_to_context() -> (
+    None
+):
     """A covered quality proposal becomes a reviewed two-tool plan before either effect can run."""
     from enterprise_agent.application.approvals import ScenarioAApprovalService
     from enterprise_agent.application.planning import ReallocateAndNotifyRecommendation
+    from enterprise_agent.application.quality_context import ScenarioBContextAssembler
     from enterprise_agent.application.scenario_b_control import ScenarioBControlService
-    from enterprise_agent.application.workflow_state import WorkflowStateService
     from enterprise_agent.application.tools import NotifyProductionInput, ReallocateLotInput
+    from enterprise_agent.application.workflow_state import WorkflowStateService
     from enterprise_agent.domain import WorkflowId
 
     signal = trigger()
@@ -359,6 +362,7 @@ def test_quality_control_reuses_pending_approval_and_dynamic_tool_workflow_bound
 
     plan, approval = approval_store.create_pending.call_args.args
     staged = workflow_store.create.call_args.args[0]
+    assert result.pending is not None
     assert result.pending.plan == plan
     assert result.pending.approval == approval
     assert plan.actor_id == writable_context.actor.user_id
@@ -387,6 +391,7 @@ def test_quality_control_denies_stale_context_without_creating_an_approval_or_wo
     """A stale evidence version must stop Scenario B before it can enter the shared write path."""
     from enterprise_agent.application.approvals import ScenarioAApprovalService
     from enterprise_agent.application.planning import FlagShortageToPurchasingRecommendation
+    from enterprise_agent.application.quality_context import ScenarioBContextAssembler
     from enterprise_agent.application.scenario_b_control import (
         ScenarioBControlRejectedError,
         ScenarioBControlService,

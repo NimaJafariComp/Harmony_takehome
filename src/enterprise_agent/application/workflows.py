@@ -21,6 +21,8 @@ class WorkflowStepName(StrEnum):
     REDUCE_OR_CANCEL_ORIGINAL_PO = "reduce_or_cancel_original_po"
     NOTIFY_PRODUCTION = "notify_production"
     SCHEDULE_ARRIVAL_CHECK = "schedule_arrival_check"
+    REALLOCATE_LOT = "reallocate_lot"
+    FLAG_SHORTAGE_TO_PURCHASING = "flag_shortage_to_purchasing"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

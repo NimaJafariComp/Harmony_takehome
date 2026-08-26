@@ -9,6 +9,7 @@ from .approval_routing import (
 )
 from .approvals import (
     PendingPlanApproval,
+    PlanApprovalService,
     PlanNotApprovableError,
     ScenarioAApprovalService,
     recompute_plan_hash,
@@ -61,6 +62,12 @@ from .quality_hold import (
     QualityHoldDetector,
     QualityHoldEvidenceError,
     QualityHoldRisk,
+)
+from .scenario_b_control import (
+    ScenarioBControlRejectedError,
+    ScenarioBControlResult,
+    ScenarioBControlService,
+    tool_calls_for_scenario_b_recommendation,
 )
 from .stockout import StockoutDetection, StockoutDetector, StockoutRisk
 from .tools import (
@@ -133,6 +140,7 @@ __all__ = [
     "NoActionRecommendation",
     "NotifyProductionInput",
     "PendingPlanApproval",
+    "PlanApprovalService",
     "PlanNotApprovableError",
     "QualityHoldDetection",
     "QualityHoldDetector",
@@ -148,6 +156,9 @@ __all__ = [
     "ScenarioAWorkflowExecutor",
     "ScenarioBContextAssembler",
     "ScenarioBContextBundle",
+    "ScenarioBControlRejectedError",
+    "ScenarioBControlResult",
+    "ScenarioBControlService",
     "ScenarioBRecommendation",
     "ScheduleArrivalCheckInput",
     "StaleAttentionEvidenceError",
@@ -178,6 +189,7 @@ __all__ = [
     "build_tool_idempotency_key",
     "declared_workflow",
     "recompute_plan_hash",
+    "tool_calls_for_scenario_b_recommendation",
     "tool_definition",
     "validate_scenario_a_recommendation",
     "validate_scenario_b_recommendation",

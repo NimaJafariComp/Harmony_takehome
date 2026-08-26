@@ -1,15 +1,23 @@
-"""Fail-closed claim and declared-guard execution for approved Scenario A workflows."""
+"""Fail-closed claim and execution for approved, plan-bound declared workflows."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import uuid4
 
 from enterprise_agent.application.approvals import recompute_plan_hash
 from enterprise_agent.application.audit_trail import append_material_audit_event
+from enterprise_agent.application.bounded_tool_plan import (
+    BOUNDED_TOOL_PLAN_INTENT,
+    BOUNDED_TOOL_PLAN_WORKFLOW_NAME,
+    BOUNDED_TOOL_PLAN_WORKFLOW_VERSION,
+    BoundedToolCall,
+    BoundedToolPlanError,
+    bounded_tool_calls_from_plan,
+)
 from enterprise_agent.application.tools import (
     CreateReplacementPOInput,
     NotifyProductionInput,
@@ -28,6 +36,7 @@ from enterprise_agent.application.workflows import (
     WorkflowDefinition,
     WorkflowNotDeclaredError,
     WorkflowStepDefinition,
+    WorkflowStepName,
     declared_workflow,
 )
 from enterprise_agent.domain import (
@@ -664,45 +673,156 @@ def _declared_definition(
         raise WorkflowExecutionRejectedError("workflow is not runnable")
     if (workflow.lease_owner is None) != (workflow.lease_expires_at is None):
         raise WorkflowExecutionRejectedError("workflow lease state is invalid")
-    if plan is not None and (
-        workflow.plan_id != plan.plan_id
-        or plan.intent != "enter_workflow"
-        or plan.workflow_name != workflow.definition_name
-        or plan.workflow_version != workflow.definition_version
-    ):
-        raise WorkflowExecutionRejectedError("workflow plan does not match its declaration")
-    try:
-        definition = declared_workflow(workflow.definition_name, workflow.definition_version)
-    except WorkflowNotDeclaredError as error:
-        raise WorkflowExecutionRejectedError("workflow has no declared definition") from error
+    if plan is not None:
+        if (
+            workflow.plan_id != plan.plan_id
+            or plan.workflow_name != workflow.definition_name
+            or plan.workflow_version != workflow.definition_version
+        ):
+            raise WorkflowExecutionRejectedError("workflow plan does not match its declaration")
+        if plan.intent == BOUNDED_TOOL_PLAN_INTENT:
+            definition, expected_inputs = _bounded_tool_definition_from_plan(snapshot, plan)
+        elif plan.intent == "enter_workflow":
+            definition = _static_declared_workflow(
+                workflow.definition_name, workflow.definition_version
+            )
+            expected_inputs = _static_expected_inputs(snapshot, plan)
+        else:
+            raise WorkflowExecutionRejectedError("workflow plan does not match its declaration")
+    elif workflow.definition_name == BOUNDED_TOOL_PLAN_WORKFLOW_NAME:
+        definition = _bounded_tool_definition_from_snapshot(snapshot)
+        expected_inputs = None
+    else:
+        definition = _static_declared_workflow(
+            workflow.definition_name, workflow.definition_version
+        )
+        expected_inputs = None
     if not 0 <= workflow.current_step <= len(definition.steps):
         raise WorkflowExecutionRejectedError("workflow step cursor is invalid")
     if len(snapshot.steps) != len(definition.steps):
         raise WorkflowExecutionRejectedError("workflow stored steps do not match the declaration")
 
-    expected_input = None
-    if plan is not None:
-        expected_input = {
-            "plan_hash": plan.plan_hash,
-            "plan_parameters": dict(plan.parameters),
-            "source_versions": dict(plan.source_versions),
-        }
-        audit_run_id = _audit_run_id(snapshot)
-        if audit_run_id is not None:
-            expected_input["audit_run_id"] = str(audit_run_id)
-    for stored_step, declared_step in zip(snapshot.steps, definition.steps, strict=True):
+    for index, (stored_step, declared_step) in enumerate(
+        zip(snapshot.steps, definition.steps, strict=True)
+    ):
         if (
             stored_step.workflow_id != workflow.workflow_id
             or stored_step.step_index != declared_step.index
             or stored_step.step_name != declared_step.name.value
             or stored_step.tool_name
             != (None if declared_step.tool_name is None else declared_step.tool_name.value)
-            or (expected_input is not None and dict(stored_step.input) != expected_input)
+            or (expected_inputs is not None and dict(stored_step.input) != expected_inputs[index])
         ):
             raise WorkflowExecutionRejectedError(
                 "workflow stored steps do not match the declaration"
             )
     return definition
+
+
+def _static_declared_workflow(name: str, version: int) -> WorkflowDefinition:
+    """Resolve one static reviewed workflow without accepting an undeclared definition name."""
+    try:
+        return declared_workflow(name, version)
+    except WorkflowNotDeclaredError as error:
+        raise WorkflowExecutionRejectedError("workflow has no declared definition") from error
+
+
+def _static_expected_inputs(
+    snapshot: WorkflowStateSnapshot, plan: Plan
+) -> tuple[dict[str, object], ...]:
+    """Build the shared immutable input snapshot used by every static declared workflow step."""
+    input_value: dict[str, object] = {
+        "plan_hash": plan.plan_hash,
+        "plan_parameters": dict(plan.parameters),
+        "source_versions": dict(plan.source_versions),
+    }
+    audit_run_id = _audit_run_id(snapshot)
+    if audit_run_id is not None:
+        input_value["audit_run_id"] = str(audit_run_id)
+    return tuple(dict(input_value) for _ in snapshot.steps)
+
+
+def _bounded_tool_definition_from_plan(
+    snapshot: WorkflowStateSnapshot, plan: Plan
+) -> tuple[WorkflowDefinition, tuple[dict[str, object], ...]]:
+    """Derive and validate the exact reviewed tool sequence that the immutable plan approved."""
+    workflow = snapshot.workflow
+    if (
+        workflow.definition_name != BOUNDED_TOOL_PLAN_WORKFLOW_NAME
+        or workflow.definition_version != BOUNDED_TOOL_PLAN_WORKFLOW_VERSION
+    ):
+        raise WorkflowExecutionRejectedError("workflow plan does not match its declaration")
+    try:
+        tool_calls = bounded_tool_calls_from_plan(plan)
+    except BoundedToolPlanError as error:
+        raise WorkflowExecutionRejectedError("workflow bounded tool plan is invalid") from error
+    definition = _bounded_tool_definition(tool_calls)
+    common_input: dict[str, object] = {
+        "plan_hash": plan.plan_hash,
+        "plan_parameters": dict(plan.parameters),
+        "source_versions": dict(plan.source_versions),
+    }
+    audit_run_id = _audit_run_id(snapshot)
+    if audit_run_id is not None:
+        common_input["audit_run_id"] = str(audit_run_id)
+    expected_inputs = tuple(
+        {**common_input, "tool_input": tool_call.input.model_dump(mode="json")}
+        for tool_call in tool_calls
+    )
+    return definition, expected_inputs
+
+
+def _bounded_tool_definition_from_snapshot(snapshot: WorkflowStateSnapshot) -> WorkflowDefinition:
+    """Validate an already-started bounded workflow from its durable, pre-approved tool steps."""
+    workflow = snapshot.workflow
+    if workflow.definition_version != BOUNDED_TOOL_PLAN_WORKFLOW_VERSION:
+        raise WorkflowExecutionRejectedError("workflow has no declared definition")
+    try:
+        tool_calls = tuple(
+            _tool_call_from_stored_step(step.tool_name, step.input.get("tool_input"))
+            for step in snapshot.steps
+        )
+    except BoundedToolPlanError as error:
+        raise WorkflowExecutionRejectedError(
+            "workflow stored steps do not match the declaration"
+        ) from error
+    return _bounded_tool_definition(tool_calls)
+
+
+def _bounded_tool_definition(tool_calls: tuple[BoundedToolCall, ...]) -> WorkflowDefinition:
+    """Create the validated dynamic declaration only from an immutable bounded tool-call sequence."""
+    if not tool_calls:
+        raise WorkflowExecutionRejectedError("workflow stored steps do not match the declaration")
+    try:
+        steps = tuple(
+            WorkflowStepDefinition(
+                index=index,
+                name=WorkflowStepName(tool_call.tool_name.value),
+                tool_name=tool_call.tool_name,
+            )
+            for index, tool_call in enumerate(tool_calls, start=1)
+        )
+    except ValueError as error:
+        raise WorkflowExecutionRejectedError(
+            "workflow stored steps do not match the declaration"
+        ) from error
+    return WorkflowDefinition(
+        name=BOUNDED_TOOL_PLAN_WORKFLOW_NAME,
+        version=BOUNDED_TOOL_PLAN_WORKFLOW_VERSION,
+        steps=steps,
+    )
+
+
+def _tool_call_from_stored_step(raw_name: str | None, raw_input: object) -> BoundedToolCall:
+    """Revalidate a persisted bounded step through the same immutable plan parser contract."""
+    if raw_name is None or not isinstance(raw_input, Mapping):
+        raise BoundedToolPlanError("bounded tool plan call is invalid")
+    try:
+        tool_name = ToolName(raw_name)
+        input_value = tool_definition(tool_name).input_model.model_validate(dict(raw_input))
+    except ValueError as error:
+        raise BoundedToolPlanError("bounded tool plan call is invalid") from error
+    return BoundedToolCall(tool_name=tool_name, input=cast(ToolInput, input_value))
 
 
 def _validate_next_step(
@@ -794,8 +914,23 @@ def _tool_input_for_step(
     *,
     started_at: datetime,
 ) -> ToolInput:
-    """Build only the reviewed typed tool input for the next exact Scenario A effect."""
-    parameters_value = snapshot.steps[step.index - 1].input.get("plan_parameters")
+    """Build only the reviewed typed input captured by the selected exact workflow step."""
+    stored_input = snapshot.steps[step.index - 1].input
+    if snapshot.workflow.definition_name == BOUNDED_TOOL_PLAN_WORKFLOW_NAME:
+        raw_input = stored_input.get("tool_input")
+        if step.tool_name is None or not isinstance(raw_input, Mapping):
+            raise WorkflowExecutionRejectedError("workflow stored tool parameters are invalid")
+        try:
+            input_value = tool_definition(step.tool_name).input_model.model_validate(
+                dict(raw_input)
+            )
+        except ValueError as error:
+            raise WorkflowExecutionRejectedError(
+                "workflow stored tool parameters are invalid"
+            ) from error
+        return cast(ToolInput, input_value)
+
+    parameters_value = stored_input.get("plan_parameters")
     if not isinstance(parameters_value, Mapping):
         raise WorkflowExecutionRejectedError("workflow stored tool parameters are invalid")
     parameters = dict(parameters_value)

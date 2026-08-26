@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -20,6 +20,7 @@ from enterprise_agent.domain import (
     Approval,
     ApprovalId,
     ApprovalStatus,
+    EvidenceId,
     Plan,
     PlanId,
     RunId,
@@ -65,7 +66,7 @@ class _ApprovalEscalationScheduler(Protocol):
         ...
 
 
-class ScenarioAApprovalService:
+class PlanApprovalService:
     """Persist a write intent only after a fresh gate result requires human approval."""
 
     def __init__(
@@ -76,7 +77,7 @@ class ScenarioAApprovalService:
         escalation_scheduler: _ApprovalEscalationScheduler | None = None,
         audit: AuditPort | None = None,
     ) -> None:
-        """Depend on a transactional persistence port and the deterministic Scenario A gate."""
+        """Depend on transactional plan persistence and a default Scenario A policy gate."""
         self._store = store
         self._gate = gate or ScenarioAGate()
         self._escalation_scheduler = escalation_scheduler
@@ -161,6 +162,50 @@ class ScenarioAApprovalService:
                 self._escalation_scheduler.schedule_escalation(approval)
             else:
                 self._escalation_scheduler.schedule_escalation(approval, run_id=run_id)
+        return PendingPlanApproval(plan=plan, approval=approval, gate_decision=decision)
+
+    def request_pending_plan(
+        self,
+        plan: Plan,
+        decision: GateDecision,
+        *,
+        requested_at: datetime,
+        expires_at: datetime,
+        evidence_ids: Sequence[EvidenceId] = (),
+        run_id: RunId | None = None,
+    ) -> PendingPlanApproval:
+        """Persist any fresh gate-approved immutable plan through the shared approval boundary."""
+        if expires_at <= requested_at:
+            raise PlanNotApprovableError("plan expiry must be after the approval request time")
+        if decision.status is not GateStatus.PENDING_APPROVAL or not decision.approval_required:
+            raise PlanNotApprovableError("only a gate result pending approval may create a plan")
+        if plan.created_at != requested_at or plan.expires_at != expires_at:
+            raise PlanNotApprovableError("plan timestamps do not match the approval request")
+        if recompute_plan_hash(plan) != plan.plan_hash:
+            raise PlanNotApprovableError(
+                "persisted plan hash does not match immutable plan content"
+            )
+
+        approval = Approval(
+            approval_id=ApprovalId(str(uuid4())),
+            plan_id=plan.plan_id,
+            plan_hash=plan.plan_hash,
+            requester_id=plan.actor_id,
+            approver_id=plan.approver_id,
+            status=ApprovalStatus.PENDING,
+            requested_at=requested_at,
+            expires_at=expires_at,
+        )
+        self._store.create_pending(plan, approval)
+        if self._audit is not None and run_id is not None:
+            _record_pending_immutable_plan_audit(
+                self._audit,
+                plan=plan,
+                approval=approval,
+                decision=decision,
+                evidence_ids=evidence_ids,
+                run_id=run_id,
+            )
         return PendingPlanApproval(plan=plan, approval=approval, gate_decision=decision)
 
     def approve(
@@ -258,6 +303,9 @@ class ScenarioAApprovalService:
         return rejected
 
 
+ScenarioAApprovalService = PlanApprovalService
+
+
 def _record_pending_plan_audit(
     audit: AuditPort,
     *,
@@ -309,6 +357,61 @@ def _record_pending_plan_audit(
         run_id=run_id,
         occurred_at=plan.created_at + timedelta(microseconds=5),
         actor_id=context.actor.user_id,
+        attention_id=plan.attention_id,
+        plan_id=plan.plan_id,
+        evidence_ids=evidence_ids,
+        payload={"approver_id": str(approval.approver_id)},
+        policy_version=plan.policy_version,
+        plan_hash=plan.plan_hash,
+    )
+
+
+def _record_pending_immutable_plan_audit(
+    audit: AuditPort,
+    *,
+    plan: Plan,
+    approval: Approval,
+    decision: GateDecision,
+    evidence_ids: Sequence[EvidenceId],
+    run_id: RunId,
+) -> None:
+    """Record scenario-neutral planning, gate, and approval facts for one immutable plan."""
+    append_material_audit_event(
+        audit,
+        event_type="planner.recommended",
+        run_id=run_id,
+        occurred_at=plan.created_at + timedelta(microseconds=3),
+        actor_id=plan.actor_id,
+        attention_id=plan.attention_id,
+        plan_id=plan.plan_id,
+        evidence_ids=evidence_ids,
+        payload={"intent": plan.intent, "workflow_name": plan.workflow_name or "unknown"},
+        policy_version=plan.policy_version,
+        plan_hash=plan.plan_hash,
+    )
+    append_material_audit_event(
+        audit,
+        event_type="gate.allowed",
+        run_id=run_id,
+        occurred_at=plan.created_at + timedelta(microseconds=4),
+        actor_id=plan.actor_id,
+        attention_id=plan.attention_id,
+        plan_id=plan.plan_id,
+        evidence_ids=evidence_ids,
+        payload={
+            "estimated_value": "unknown"
+            if decision.estimated_value is None
+            else str(decision.estimated_value.amount),
+        },
+        policy_version=plan.policy_version,
+        plan_hash=plan.plan_hash,
+    )
+    append_material_audit_event(
+        audit,
+        event_type="approval.requested",
+        run_id=run_id,
+        occurred_at=plan.created_at + timedelta(microseconds=5),
+        actor_id=plan.actor_id,
         attention_id=plan.attention_id,
         plan_id=plan.plan_id,
         evidence_ids=evidence_ids,
