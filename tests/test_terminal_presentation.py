@@ -13,6 +13,7 @@ from enterprise_agent.presentation.terminal import (
     CommandGuideEntry,
     ConfirmationSummary,
     DemoCatalogueEntry,
+    EvaluationCatalogueEntry,
     EvidenceDisposition,
     EvidenceSummary,
     MenuEntry,
@@ -275,3 +276,25 @@ def test_presenter_renders_a_bounded_home_and_demo_catalogue() -> None:
     assert "Rejects the cheaper, faster unapproved supplier." in rendered
     assert "Stages pending approval" in rendered
     assert "Choose a case number, b to return, or q to quit." in rendered
+
+
+def test_presenter_boxes_evaluation_catalogue_entries_on_narrow_terminals() -> None:
+    """The long no-write catalogue uses Rich cards rather than an unbounded prose stream."""
+    presenter, output = _presenter(width=88)
+
+    presenter.render_evaluation_catalogue(
+        (
+            EvaluationCatalogueEntry(
+                case_id="a-hostile-email",
+                scenario="scenario_a",
+                expected_outcomes="MANUAL_REVIEW",
+            ),
+        )
+    )
+
+    rendered = output.getvalue()
+    assert "a-hostile-email" in rendered
+    assert "Scenario" in rendered
+    assert "scenario_a" in rendered
+    assert "Expected" in rendered
+    assert "MANUAL_REVIEW" in rendered

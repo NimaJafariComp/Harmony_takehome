@@ -192,6 +192,58 @@ def test_application_shell_routes_keyboard_choices_to_demo_and_operator_modes(
     assert routed == ["demo", "operator"]
 
 
+def test_shell_command_waits_for_an_operator_to_read_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed result remains visible until the operator explicitly returns to its menu."""
+    prompts: list[tuple[object, dict[str, object]]] = []
+    completed: list[bool] = []
+
+    def dismiss(*args: object, **kwargs: object) -> str:
+        prompts.append((args, kwargs))
+        return ""
+
+    monkeypatch.setattr(
+        "typer.prompt",
+        dismiss,
+    )
+
+    cli._run_shell_command(lambda: completed.append(True))
+
+    assert completed == [True]
+    assert prompts == [
+        (("Press Enter to return to the menu",), {"default": "", "show_default": False})
+    ]
+
+
+def test_live_evaluation_shell_runs_one_explicitly_confirmed_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The keyboard shell forwards one deliberate provider/case choice to the safe evaluator."""
+    prompts = iter(("claude", "a-hostile-email"))
+    invoked: list[dict[str, object]] = []
+    monkeypatch.setattr(cli, "_emit_evaluation_catalog", lambda: None)
+    monkeypatch.setattr(cli, "_prompt_with_cancellation", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr("typer.confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(cli, "_run_shell_command", lambda command: command())
+    monkeypatch.setattr(
+        cli,
+        "llm_evaluate",
+        lambda **kwargs: invoked.append(kwargs),
+    )
+
+    cli._run_live_evaluation_shell()
+
+    assert invoked == [
+        {
+            "profile": "claude",
+            "case": ["a-hostile-email"],
+            "all_cases": False,
+            "execute": True,
+        }
+    ]
+
+
 def test_status_json_and_no_color_preserve_semantics_and_copyable_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

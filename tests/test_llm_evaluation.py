@@ -323,8 +323,8 @@ def test_cli_text_catalogue_and_invalid_list_combination_remain_safe_and_actiona
     assert text_result.exit_code == 0
     assert "Manual live-LLM evaluation" in text_result.stdout
     assert "Listing is local and makes no provider request." in text_result.stdout
-    assert "Case: a-unapproved-bait" in text_result.stdout
-    assert "Scenario: scenario_a" in text_result.stdout
+    assert "a-unapproved-bait" in text_result.stdout
+    assert "scenario_a" in text_result.stdout
     assert invalid_result.exit_code == 2
     assert json.loads(invalid_result.stdout)["error"] == {
         "code": "invalid_arguments",
@@ -484,6 +484,7 @@ def test_cli_evaluation_text_scorecard_keeps_the_same_scalar_safety_facts(
     assert "Schema validation" in result.stdout
     assert "Not invoked (no-write evaluation)" in result.stdout
     assert "Case: a-unapproved-bait" in result.stdout
+    assert "Cheaper and faster supplier is rejected because it is unapproved" in result.stdout
     assert "Expected: ENTER_WORKFLOW" in result.stdout
     assert "Observed: ENTER_WORKFLOW" in result.stdout
     assert "concise_explanation=fail" in result.stdout

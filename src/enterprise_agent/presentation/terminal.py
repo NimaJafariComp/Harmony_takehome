@@ -136,6 +136,15 @@ class CommandGuideEntry:
 
 
 @dataclass(frozen=True)
+class EvaluationCatalogueEntry:
+    """One fixed evaluation case presented without its provider prompt or response."""
+
+    case_id: str
+    scenario: str
+    expected_outcomes: str
+
+
+@dataclass(frozen=True)
 class MenuEntry:
     """One keyboard-selectable operator route with a visible safety boundary."""
 
@@ -378,6 +387,23 @@ class TerminalPresenter:
         table = self._table(title, *columns)
         for row in rows:
             table.add_row(*row)
+        self.console.print(table)
+
+    def render_evaluation_catalogue(self, entries: tuple[EvaluationCatalogueEntry, ...]) -> None:
+        """Keep the long fixed evaluation pack scanable at narrow terminal widths."""
+        if self._is_narrow():
+            for entry in entries:
+                details = self._detail_grid()
+                details.add_row("Case", entry.case_id)
+                details.add_row("Scenario", entry.scenario)
+                details.add_row("Expected", entry.expected_outcomes)
+                self.console.print(
+                    Panel(details, title=entry.case_id, border_style=self.theme.subtitle_style)
+                )
+            return
+        table = self._table("Fixed synthetic cases", "Case", "Scenario", "Expected safe outcomes")
+        for entry in entries:
+            table.add_row(entry.case_id, entry.scenario, entry.expected_outcomes)
         self.console.print(table)
 
     def _add_planner_provenance_rows(self, details: Table, provenance: PlannerProvenance) -> None:

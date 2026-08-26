@@ -71,6 +71,7 @@ from enterprise_agent.presentation import (
     CommandGuideEntry,
     ConfirmationSummary,
     DemoCatalogueEntry,
+    EvaluationCatalogueEntry,
     EvidenceDisposition,
     EvidenceSummary,
     MenuEntry,
@@ -248,7 +249,9 @@ def _run_application_shell() -> None:
         ),
     )
     while True:
-        _terminal_presenter().render_app_shell(
+        presenter = _terminal_presenter()
+        presenter.clear_screen()
+        presenter.render_app_shell(
             title="Enterprise agent",
             subtitle="Purchasing and quality control plane · keyboard-only local operator shell",
             entries=entries,
@@ -294,7 +297,9 @@ def _run_demo_shell() -> None:
         ),
     )
     while True:
-        _terminal_presenter().render_demo_catalogue(
+        presenter = _terminal_presenter()
+        presenter.clear_screen()
+        presenter.render_demo_catalogue(
             entries=entries,
             prompt="Choose a case number. Enter b to return to Home.",
         )
@@ -361,7 +366,9 @@ def _run_operator_shell() -> None:
         ),
     )
     while True:
-        _terminal_presenter().render_app_shell(
+        presenter = _terminal_presenter()
+        presenter.clear_screen()
+        presenter.render_app_shell(
             title="Normal operator mode",
             subtitle="Use existing safe commands through a concise keyboard menu",
             entries=entries,
@@ -398,17 +405,64 @@ def _run_operator_shell() -> None:
             _run_shell_command(llm_smoke)
             continue
         if choice == "6":
-            _run_shell_command(lambda: llm_evaluate(list_cases=True))
+            _run_live_evaluation_shell()
             continue
         typer.echo("Choose 1–6 or b to return.")
 
 
+def _run_live_evaluation_shell() -> None:
+    """Turn the fixed no-write evaluation catalogue into an explicit keyboard action."""
+    _emit_evaluation_catalog()
+    try:
+        profile = normalize_llm_profile(
+            _prompt_with_cancellation(
+                "Provider", default=_runtime_environment().get("LLM_PROFILE", "openai")
+            )
+        )
+        selected_case = _prompt_with_cancellation("Case ID (or all)").strip()
+    except InteractiveFlowCancelled:
+        typer.echo("live evaluation: cancelled; no provider request was made")
+        return
+    except ValueError:
+        typer.echo(
+            "live evaluation: choose openai, claude, or openrouter; no provider request was made"
+        )
+        return
+
+    include_all = selected_case.lower() == "all"
+    if not include_all:
+        try:
+            select_evaluation_cases((selected_case,), include_all=False)
+        except EvaluationCaseSelectionError:
+            typer.echo(
+                "live evaluation: choose a listed case ID or all; no provider request was made"
+            )
+            return
+
+    request_count = len(evaluation_cases()) if include_all else 1
+    if not typer.confirm(
+        f"Send {request_count} fixed synthetic no-write request(s) to {profile}?", default=False
+    ):
+        typer.echo("live evaluation: cancelled; no provider request was made")
+        return
+
+    _run_shell_command(
+        lambda: llm_evaluate(
+            profile=profile,
+            case=None if include_all else [selected_case],
+            all_cases=include_all,
+            execute=True,
+        )
+    )
+
+
 def _run_shell_command(command: Callable[[], None]) -> None:
-    """Keep a TTY menu open after a direct command reports its documented exit outcome."""
+    """Let an operator read a command result before the next menu replaces it."""
     try:
         command()
     except typer.Exit:
-        return
+        pass
+    typer.prompt("Press Enter to return to the menu", default="", show_default=False)
 
 
 @app.command()
@@ -652,7 +706,11 @@ def llm_evaluate(
         if not report.passed:
             raise typer.Exit(code=1)
         return
-    _render_llm_evaluation(configuration, report)
+    _render_llm_evaluation(
+        configuration,
+        report,
+        case_titles={item.case_id: item.title for item in selected_cases},
+    )
     if not report.passed:
         raise typer.Exit(code=1)
 
@@ -676,7 +734,14 @@ def llm_usage() -> None:
             )
         ):
             raise typer.Exit(code=1) from error
-        raise
+        _terminal_presenter().render_status(
+            StatusSummary(
+                state=TerminalState.FAILED,
+                summary="LLM usage ledger is unavailable.",
+                next_action="Start the terminal UI with make tui, then choose LLM usage again.",
+            )
+        )
+        raise typer.Exit(code=1) from error
     summary = summarize_llm_usage(events)
     if _uses_json_output():
         _emit_json_result(_llm_usage_result(summary))
@@ -1653,13 +1718,15 @@ def _emit_evaluation_catalog() -> None:
             next_action="Use --profile PROFILE --case CASE_ID --execute for one deliberate request.",
         )
     )
-    presenter.render_text_table(
-        title="Fixed synthetic cases",
-        columns=("Case", "Scenario", "Expected safe outcomes"),
-        rows=tuple(
-            (item.case_id, item.scenario, ", ".join(sorted(item.expected_outcomes)))
+    presenter.render_evaluation_catalogue(
+        tuple(
+            EvaluationCatalogueEntry(
+                case_id=item.case_id,
+                scenario=item.scenario,
+                expected_outcomes=", ".join(sorted(item.expected_outcomes)),
+            )
             for item in cases
-        ),
+        )
     )
 
 
@@ -1709,8 +1776,10 @@ def _llm_evaluation_result(
 def _render_llm_evaluation(
     configuration: ProviderConfiguration,
     report: LLMEvaluationReport,
+    *,
+    case_titles: dict[str, str],
 ) -> None:
-    """Render a compact scorecard from only sanitized scalars, never a provider response or rationale."""
+    """Render scorecards with reviewed case rules, never a provider response or rationale."""
     presenter = _terminal_presenter()
     provenance = _live_evaluation_provenance(configuration, report)
     presenter.render_header(
@@ -1738,10 +1807,11 @@ def _render_llm_evaluation(
     )
     presenter.render_text_table(
         title="Synthetic evaluation scorecard",
-        columns=("Case", "Expected", "Observed", "Provider status", "Checks"),
+        columns=("Case", "Safety rule", "Expected", "Observed", "Provider status", "Checks"),
         rows=tuple(
             (
                 observation.case_id,
+                case_titles[observation.case_id],
                 ", ".join(observation.expected_outcomes),
                 observation.observed_outcome or "no structured outcome",
                 observation.status.value,

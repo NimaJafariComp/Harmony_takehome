@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 from typer.testing import CliRunner
 
 from enterprise_agent import cli
@@ -404,3 +405,26 @@ def test_llm_usage_command_renders_only_grouped_immutable_metering(
     assert "Requests: 1" in result.stdout
     assert "1500 total (1000 input / 500 output)" in result.stdout
     assert "Known cost (USD): $0.000764" in result.stdout
+
+
+def test_llm_usage_database_failure_is_a_concise_terminal_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host-side database mismatch must not leak a traceback into the operator interface."""
+
+    class UnavailableAudit:
+        def __init__(self, _: str) -> None:
+            pass
+
+        def llm_usage_events(self) -> tuple[AuditEvent, ...]:
+            raise SQLAlchemyError("connection detail must not be exposed")
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "PostgresAuditAdapter", UnavailableAudit, raising=False)
+
+    result = CliRunner().invoke(cli.app, ["llm-usage"])
+
+    assert result.exit_code == 1
+    assert "LLM usage ledger is unavailable." in result.stdout
+    assert "Start the terminal UI with make tui" in result.stdout
+    assert "Traceback" not in result.stdout

@@ -3,12 +3,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
     depends_on:
       db:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent
     networks:
+      - agent_frontend
       - agent_backend
     profiles:
       - tools
@@ -17,6 +21,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
     command: enterprise-agent-ui
     depends_on:
       db:
@@ -25,6 +32,7 @@ services:
       DATABASE_URL: postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent
       ENTERPRISE_AGENT_UI_BIND_HOST: 0.0.0.0
     networks:
+      - agent_frontend
       - agent_backend
     ports:
       - 127.0.0.1:8080:8080
@@ -52,5 +60,6 @@ volumes:
   postgres_data:
 
 networks:
+  agent_frontend:
   agent_backend:
     internal: true
