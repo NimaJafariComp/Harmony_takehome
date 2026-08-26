@@ -68,6 +68,32 @@ class WorkflowToolExecutionUnavailableError(RuntimeError):
     """Raised when a declared effect has no independently authorization-enforcing tool adapter."""
 
 
+class WorkflowCrashInjectedError(RuntimeError):
+    """Raised only by an explicit test injector after an external effect commits locally."""
+
+
+class WorkflowCrashInjectorPort(Protocol):
+    """Inject a deterministic process-stop boundary without participating in normal execution."""
+
+    def after_external_effect(self, invocation: ToolInvocation) -> None:
+        """Stop immediately after the provider result exists and before workflow completion commits."""
+        ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeterministicCrashInjector:
+    """Inject one exact post-effect crash for a declared tool in a controlled restart test."""
+
+    target_tool_name: ToolName
+
+    def after_external_effect(self, invocation: ToolInvocation) -> None:
+        """Raise only after the selected provider call has returned its durable result."""
+        if invocation.tool_name == self.target_tool_name.value:
+            raise WorkflowCrashInjectedError(
+                "injected crash after external effect and before workflow step completion"
+            )
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class StartedToolExecution:
     """A single durable started step whose external effect may now be invoked exactly by its key."""
@@ -95,12 +121,14 @@ class ScenarioAWorkflowExecutor:
         approvals: _WorkflowApprovalPort,
         identity: IdentityPort,
         tool_executor: ToolExecutionPort | None = None,
+        crash_injector: WorkflowCrashInjectorPort | None = None,
     ) -> None:
         """Keep authorization, approval, and durable transition concerns behind typed ports."""
         self._workflow_store = workflow_store
         self._approvals = approvals
         self._identity = identity
         self._tool_executor = tool_executor
+        self._crash_injector = crash_injector
 
     def claim(
         self,
@@ -132,7 +160,10 @@ class ScenarioAWorkflowExecutor:
             current_source_versions=current_source_versions,
             identity=self._identity,
         )
-        _validate_next_step(snapshot, definition)
+        if _next_step_is_started_external_tool(snapshot):
+            _validate_started_tool(snapshot, definition)
+        else:
+            _validate_next_step(snapshot, definition)
 
         claimed = self._workflow_store.claim(
             workflow_id,
@@ -208,7 +239,12 @@ class ScenarioAWorkflowExecutor:
             raise WorkflowExecutionRejectedError("workflow has no approval binding")
         plan, _ = binding
         definition = _declared_definition(claimed, plan=plan)
-        next_step = _validate_next_step(claimed, definition)
+        resuming = _next_step_is_started_external_tool(claimed)
+        next_step = (
+            _validate_started_tool(claimed, definition)
+            if resuming
+            else _validate_next_step(claimed, definition)
+        )
         if next_step.tool_name is None:
             raise WorkflowExecutionRejectedError("workflow next step is a read-only guard")
 
@@ -219,22 +255,32 @@ class ScenarioAWorkflowExecutor:
             raise WorkflowExecutionRejectedError(
                 "workflow actor no longer has the required write scope"
             ) from error
-        input_value = _tool_input_for_step(claimed, next_step, started_at=now)
+        stored_step = claimed.steps[next_step.index - 1]
+        started_at = stored_step.started_at if resuming else now
+        if started_at is None:
+            raise WorkflowExecutionRejectedError("workflow started tool has no start timestamp")
+        input_value = _tool_input_for_step(claimed, next_step, started_at=started_at)
         idempotency_key = build_tool_idempotency_key(
             claimed.workflow.workflow_id,
             next_step.index,
             next_step.tool_name,
             input_value,
         )
-        started = self._workflow_store.start_tool_step(
-            claimed.workflow.workflow_id,
-            worker_id=worker_id,
-            expected_step_index=next_step.index,
-            idempotency_key=idempotency_key,
-            started_at=now,
-        )
-        if started is None:
-            raise WorkflowClaimLostError("workflow tool start transition was not acquired")
+        if resuming:
+            if stored_step.idempotency_key != idempotency_key:
+                raise WorkflowExecutionRejectedError(
+                    "workflow started tool idempotency key does not match its declared input"
+                )
+        else:
+            started = self._workflow_store.start_tool_step(
+                claimed.workflow.workflow_id,
+                worker_id=worker_id,
+                expected_step_index=next_step.index,
+                idempotency_key=idempotency_key,
+                started_at=started_at,
+            )
+            if started is None:
+                raise WorkflowClaimLostError("workflow tool start transition was not acquired")
         return StartedToolExecution(
             actor=actor,
             invocation=ToolInvocation(
@@ -245,8 +291,8 @@ class ScenarioAWorkflowExecutor:
                 status=ToolInvocationStatus.STARTED,
                 parameters=input_value.model_dump(mode="json"),
                 result=None,
-                attempt_count=1,
-                started_at=now,
+                attempt_count=stored_step.attempt_count if resuming else 1,
+                started_at=started_at,
                 completed_at=None,
             ),
             step_index=next_step.index,
@@ -310,6 +356,8 @@ class ScenarioAWorkflowExecutor:
             raise
         if not isinstance(result, Mapping):
             raise WorkflowExecutionRejectedError("tool result must be a mapping")
+        if self._crash_injector is not None:
+            self._crash_injector.after_external_effect(invocation)
         completed = self._workflow_store.complete_tool_step(
             workflow.workflow_id,
             worker_id=worker_id,
@@ -570,6 +618,16 @@ def _validate_started_tool(
     ):
         raise WorkflowExecutionRejectedError("workflow has an invalid future step")
     return next_step
+
+
+def _next_step_is_started_external_tool(snapshot: WorkflowStateSnapshot) -> bool:
+    """Identify the only restartable state: the exact current external step was durably started."""
+    workflow = snapshot.workflow
+    return (
+        workflow.current_step < len(snapshot.steps)
+        and snapshot.steps[workflow.current_step].tool_name is not None
+        and snapshot.steps[workflow.current_step].status is WorkflowStepStatus.RUNNING
+    )
 
 
 def _has_completed_external_tool(snapshot: WorkflowStateSnapshot) -> bool:

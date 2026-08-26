@@ -1098,7 +1098,7 @@ def test_crash_after_replacement_effect_restarts_with_the_same_started_key() -> 
     _advance_to_first_tool(executor, plan)
     started = executor.begin_next_tool(
         WORKFLOW_ID,
-        worker_id="crashed-worker",
+        worker_id="worker-a",
         now=NOW + timedelta(minutes=5),
         lease_expires_at=NOW + timedelta(minutes=7),
         current_source_versions=plan.source_versions,
@@ -1107,7 +1107,7 @@ def test_crash_after_replacement_effect_restarts_with_the_same_started_key() -> 
     with pytest.raises(WorkflowCrashInjectedError, match="after external effect"):
         executor.execute_started_tool(
             started,
-            worker_id="crashed-worker",
+            worker_id="worker-a",
             completed_at=NOW + timedelta(minutes=6),
         )
 
@@ -1422,10 +1422,10 @@ def test_postgres_executor_claims_and_completes_only_the_first_declared_guard(
 
 @pytest.mark.critical
 @pytest.mark.integration
-def test_postgres_external_tool_boundary_runs_the_declared_erp_mail_and_scheduler_effects_once(
+def test_postgres_crash_restart_runs_declared_effects_once_and_compensates_them(
     disposable_database: str,
 ) -> None:
-    """Each external-style effect commits by its key before its separate workflow transition."""
+    """A crash after replacement creation restarts by its key without duplicating any effect."""
     compose(
         "--profile",
         "tools",
@@ -1453,7 +1453,8 @@ def test_postgres_external_tool_boundary_runs_the_declared_erp_mail_and_schedule
         "from enterprise_agent.application.context import ScenarioAContextAssembler\n"
         "from enterprise_agent.application.planning import EnterWorkflowRecommendation\n"
         "from enterprise_agent.application.stockout import StockoutDetector\n"
-        "from enterprise_agent.application.workflow_executor import ScenarioAWorkflowExecutor\n"
+        "from enterprise_agent.application.tools import ToolName\n"
+        "from enterprise_agent.application.workflow_executor import DeterministicCrashInjector, ScenarioAWorkflowExecutor, WorkflowCrashInjectedError\n"
         "from enterprise_agent.application.workflow_state import WorkflowStateService\n"
         "from enterprise_agent.domain import ApprovalStatus, RunId, UserId, WorkflowStatus, WorkflowStepStatus\n"
         "from enterprise_agent.seed import reset_database, seed_database\n"
@@ -1478,13 +1479,25 @@ def test_postgres_external_tool_boundary_runs_the_declared_erp_mail_and_schedule
         "claimed = executor.claim(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=2), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
         "after_first_guard = executor.advance_next_guard(claimed, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=3))\n"
         "executor.advance_next_guard(after_first_guard, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=4))\n"
-        "started = executor.begin_next_tool(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=5), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
-        "first_result = tool_adapter.execute(started.actor, started.invocation)\n"
-        "assert first_result == tool_adapter.execute(started.actor, started.invocation)\n"
-        "current = executor.execute_started_tool(started, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=6))\n"
-        "for minute in (7, 9, 11):\n"
-        "    started = executor.begin_next_tool(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=minute), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
-        "    current = executor.execute_started_tool(started, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=minute + 1))\n"
+        "crashing_executor = ScenarioAWorkflowExecutor(workflow_store=workflows, approvals=approvals, identity=identity, tool_executor=tool_adapter, crash_injector=DeterministicCrashInjector(target_tool_name=ToolName.CREATE_REPLACEMENT_PO))\n"
+        "started = crashing_executor.begin_next_tool(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=5), lease_expires_at=now + timedelta(minutes=7), current_source_versions=context.source_versions)\n"
+        "try:\n"
+        "    crashing_executor.execute_started_tool(started, worker_id='workflow-worker-a', completed_at=now + timedelta(minutes=6))\n"
+        "except WorkflowCrashInjectedError:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise AssertionError('replacement crash was not injected')\n"
+        "crashed = workflows.load(snapshot.workflow.workflow_id)\n"
+        "assert crashed is not None and crashed.workflow.current_step == 2 and crashed.steps[2].status is WorkflowStepStatus.RUNNING\n"
+        "restart = ScenarioAWorkflowExecutor(workflow_store=workflows, approvals=approvals, identity=identity, tool_executor=tool_adapter)\n"
+        "resumed = restart.begin_next_tool(snapshot.workflow.workflow_id, worker_id='workflow-worker-b', now=now + timedelta(minutes=8), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
+        "assert resumed.invocation.idempotency_key == started.invocation.idempotency_key\n"
+        "first_result = tool_adapter.execute(resumed.actor, resumed.invocation)\n"
+        "assert first_result == tool_adapter.execute(resumed.actor, resumed.invocation)\n"
+        "current = restart.execute_started_tool(resumed, worker_id='workflow-worker-b', completed_at=now + timedelta(minutes=9))\n"
+        "for minute in (10, 12, 14):\n"
+        "    started = restart.begin_next_tool(snapshot.workflow.workflow_id, worker_id='workflow-worker-b', now=now + timedelta(minutes=minute), lease_expires_at=now + timedelta(minutes=20), current_source_versions=context.source_versions)\n"
+        "    current = restart.execute_started_tool(started, worker_id='workflow-worker-b', completed_at=now + timedelta(minutes=minute + 1))\n"
         "assert current.workflow.status is WorkflowStatus.SUCCEEDED and current.workflow.current_step == 6\n"
         "assert all(step.status is WorkflowStepStatus.SUCCEEDED for step in current.steps)\n"
         "engine = create_engine(database_url)\n"
