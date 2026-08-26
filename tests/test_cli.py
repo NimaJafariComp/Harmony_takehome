@@ -277,6 +277,58 @@ def test_demo_unattended_starts_only_the_selected_local_case_without_prompting(
     assert len(rendered) == 1
 
 
+def test_guide_command_exposes_examples_and_shell_completion_without_a_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reviewer can discover the safe commands before configuring or resetting anything."""
+    monkeypatch.setattr(
+        cli,
+        "PostgresOperatorStatusAdapter",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("guide must not read a database")),
+        raising=False,
+    )
+
+    result = CliRunner().invoke(cli.app, ["guide"])
+
+    assert result.exit_code == 0
+    assert "Reviewer guide" in result.stdout
+    assert "enterprise-agent demo --list" in result.stdout
+    assert "enterprise-agent status" in result.stdout
+    assert "enterprise-agent audit explain RUN_ID" in result.stdout
+    assert "enterprise-agent --install-completion" in result.stdout
+
+
+def test_status_command_is_read_only_and_renders_the_adapter_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The overview delegates to the operator read adapter and does not prompt or load LLM setup."""
+    created_urls: list[str] = []
+    rendered: list[object] = []
+    snapshot = object()
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(
+        "typer.prompt", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no prompt"))
+    )
+
+    class RecordingReader:
+        """Capture the query boundary without a PostgreSQL process."""
+
+        def __init__(self, database_url: str) -> None:
+            created_urls.append(database_url)
+
+        def read_status(self) -> object:
+            return snapshot
+
+    monkeypatch.setattr(cli, "PostgresOperatorStatusAdapter", RecordingReader, raising=False)
+    monkeypatch.setattr(cli, "_render_operator_status", rendered.append, raising=False)
+
+    result = CliRunner().invoke(cli.app, ["status"])
+
+    assert result.exit_code == 0
+    assert created_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
+    assert rendered == [snapshot]
+
+
 def test_interactive_scenario_c_cancellation_creates_no_pending_plan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

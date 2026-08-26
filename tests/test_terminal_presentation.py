@@ -10,6 +10,7 @@ from enterprise_agent.presentation.terminal import (
     ApprovalSummary,
     AuditTimelineEntry,
     BoundedProgress,
+    CommandGuideEntry,
     ConfirmationSummary,
     EvidenceDisposition,
     EvidenceSummary,
@@ -159,3 +160,29 @@ def test_presenter_renders_a_consequential_action_receipt() -> None:
     assert "order." in rendered
     assert "revalidate the plan's evidence" in rendered
     assert "Type stage to continue or cancel to stop" in rendered
+
+
+def test_presenter_renders_a_compact_command_guide_with_examples() -> None:
+    """Command discovery remains semantic and copyable rather than relying on a help screenshot."""
+    presenter, output = _presenter()
+
+    presenter.render_command_guide(
+        title="Reviewer guide",
+        entries=(
+            CommandGuideEntry(
+                command="enterprise-agent demo --list",
+                purpose="See deterministic local safety cases.",
+            ),
+            CommandGuideEntry(
+                command="enterprise-agent status",
+                purpose="Inspect pending approvals and workflow recovery state.",
+            ),
+        ),
+        completion_command="enterprise-agent --install-completion",
+    )
+
+    rendered = output.getvalue()
+    assert "Reviewer guide" in rendered
+    assert "enterprise-agent demo --list" in rendered
+    assert "enterprise-agent status" in rendered
+    assert "enterprise-agent --install-completion" in rendered
