@@ -119,7 +119,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M6.1 Add quality-lot data and quality actor | `complete` | AC-02, AC-12 | Test: `tests/test_schema_migration.py`, `tests/test_seed.py`, and `tests/test_migrations.py` - PASS (7 focused integration tests).<br>Validation: `make verify` - PASS (261 tests, 93.62% coverage, clean migration).<br>Evidence: seeded Q-7001/Q-7002 each begin in three days and are bound to Priya; their held allocations exercise both 80-unit released-lot coverage and 200-unit no-coverage. Quinn has only quality action/notification scopes, explicitly excluding purchasing reads and PO writes.<br>Commit: `9c39e23` pushed to `origin/main`. |
-| M6.2 Implement quality detector and context | `not_started` | AC-12 | - |
+| M6.2 Implement quality detector and context | `in_progress` | AC-12 | TDD contracts for a quality-only provider, three-day held-allocation detector, source-bound Scenario B attention, fresh alternative-lot context, and authorized production recipient are being added. |
 | M6.3 Define Scenario B proposal schemas | `not_started` | AC-12 | - |
 | M6.4 Implement Scenario B tools | `not_started` | AC-06, AC-09, AC-12 | - |
 | M6.5 Reuse core control plane | `not_started` | AC-12 | - |
@@ -250,3 +250,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M5.7 | Completed timing and audit-completeness behavior. | Test: one seeded cross-boundary Scenario A ledger plus direct context/approval/routing/arrival/executor/state/tool contracts - PASS (110 focused); `make verify` - PASS (261 tests, 93.62% coverage, clean migration). | `e5922a6` pushed to `origin/main`; status completion pending this commit. |
 | 2026-08-25 | M6.1 | Started quality-lot data and quality-actor implementation. | Test: held/allocated and released/no-coverage data, three-day production impact, supervisor ownership, and quality-only scope isolation are being added before the migration and seed changes. | Pending RED checkpoint. |
 | 2026-08-25 | M6.1 | Completed quality-lot data and quality-actor implementation. | Test: schema/seed/migration contracts - PASS (7 focused); `make verify` - PASS (261 tests, 93.62% coverage, clean migration). | `30cbfb5` RED and `9c39e23` GREEN pushed to `origin/main`; status completion pending this commit. |
+| 2026-08-25 | M6.2 | Started quality-hold detector and context implementation. | Test: quality-only provider authorization, imminent held-allocation detection, shared attention registration, stale evidence refusal, alternative-lot filtering, and supervised notification context are being added before production code. | Pending RED checkpoint. |

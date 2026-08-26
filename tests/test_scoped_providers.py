@@ -71,6 +71,43 @@ def test_erp_provider_filters_by_scope_and_plant_inside_the_query(
     assert engine.connect.return_value.__enter__.return_value.execute.call_count == 1
 
 
+def test_quality_provider_returns_only_quality_records_to_a_quality_read_scoped_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quality actor can read scoped lot evidence without acquiring purchasing ERP visibility."""
+    from enterprise_agent.adapters import providers
+
+    engine = configured_engine(
+        [
+            {
+                "id": "lot-held",
+                "lot_number": "LOT-QUALITY-HELD",
+                "part_id": "part-quality",
+                "part_number": "PART-QUALITY",
+                "plant_id": "PLANT-CHI",
+                "quantity": Decimal("80.000"),
+                "allocated_quantity": Decimal("80.000"),
+                "status": "held",
+                "production_order_id": "production-q7001",
+                "source_version": 3,
+                "updated_at": NOW,
+            }
+        ]
+    )
+    monkeypatch.setattr(providers, "create_engine", lambda _: engine)
+    adapter = providers.PostgresQualityAdapter("postgresql+psycopg://ignored")
+    query = EvidenceQuery(record_types=frozenset({"quality_lot"}))
+
+    evidence = adapter.query(actor("quality:lot:read"), query)
+    denied_evidence = adapter.query(actor(), query)
+
+    assert evidence[0].source == "quality"
+    assert evidence[0].record_type == "quality_lot"
+    assert evidence[0].payload["lot_number"] == "LOT-QUALITY-HELD"
+    assert denied_evidence == ()
+    assert engine.connect.return_value.__enter__.return_value.execute.call_count == 1
+
+
 def test_mail_and_calendar_providers_bind_the_actor_to_authorized_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

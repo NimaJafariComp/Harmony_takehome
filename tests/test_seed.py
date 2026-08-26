@@ -317,7 +317,7 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
         for user in ("Quinn Quality", "Priya Production")
     }
     assert scopes_by_user["Quinn Quality"] == {
-        "erp:lot:reallocate",
+        "erp:lot:write",
         "production:notify",
         "purchasing:shortage:notify",
         "quality:lot:read",

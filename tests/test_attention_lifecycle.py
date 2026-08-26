@@ -19,6 +19,7 @@ from enterprise_agent.domain import (
     InvalidAttentionTransitionError,
     RunId,
     ScenarioAStockoutTrigger,
+    ScenarioBQualityHoldTrigger,
 )
 
 NOW = datetime(2026, 8, 24, 9, tzinfo=UTC)
@@ -35,6 +36,27 @@ def stockout_trigger() -> ScenarioAStockoutTrigger:
         production_start_date=date(2026, 8, 27),
         detected_at=NOW,
         source_versions={"inventory:00000000-0000-0000-0000-000000000501": 4},
+    )
+
+
+def quality_hold_trigger() -> ScenarioBQualityHoldTrigger:
+    """Build the Scenario B held-lot signal registered through the shared attention adapter."""
+    return ScenarioBQualityHoldTrigger(
+        detector="quality_hold_detector:v1",
+        part_id="00000000-0000-0000-0000-000000000102",
+        quality_lot_id="00000000-0000-0000-0000-000000000601",
+        quality_lot_version=3,
+        production_allocation_id="00000000-0000-0000-0000-000000000701",
+        production_allocation_version=3,
+        production_order_id="00000000-0000-0000-0000-000000000302",
+        production_order_version=1,
+        production_start_date=date(2026, 8, 27),
+        detected_at=NOW,
+        source_versions={
+            "quality_lot:00000000-0000-0000-0000-000000000601": 3,
+            "production_allocation:00000000-0000-0000-0000-000000000701": 3,
+            "production_impact:00000000-0000-0000-0000-000000000302": 1,
+        },
     )
 
 
@@ -162,6 +184,33 @@ def test_attention_adapter_returns_existing_work_and_audits_a_duplicate_attempt(
     assert registration.attention.dedupe_key == stockout_trigger().dedupe_key
     assert connection.execute.call_count == 3
     assert connection.execute.call_args_list[2].args[1]["event_type"] == "attention.deduplicated"
+
+
+def test_attention_adapter_registers_a_quality_hold_through_the_shared_trigger_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario B uses the same append-only attention boundary without an adapter branch."""
+    from enterprise_agent.adapters import attention
+
+    row = attention_row(
+        cause="quality_hold",
+        dedupe_key=quality_hold_trigger().dedupe_key,
+        source_versions=dict(quality_hold_trigger().source_versions),
+    )
+    row["scenario"] = "scenario_b"
+    engine = configured_engine(mapping_result(one_or_none=row), MagicMock())
+    monkeypatch.setattr(attention, "create_engine", lambda _: engine)
+    adapter = attention.PostgresAttentionAdapter("postgresql+psycopg://ignored")
+
+    registration = adapter.register(quality_hold_trigger(), RunId("run-quality-held"))
+
+    connection = engine.begin.return_value.__enter__.return_value
+    assert registration.attention.scenario == "scenario_b"
+    assert connection.execute.call_args_list[0].args[1]["cause"] == "quality_hold"
+    assert (
+        connection.execute.call_args_list[1].args[1]["payload"]["detector"]
+        == "quality_hold_detector:v1"
+    )
 
 
 def test_attention_adapter_allows_only_forward_lifecycle_transitions(
