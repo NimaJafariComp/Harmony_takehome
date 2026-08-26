@@ -496,7 +496,9 @@ def _run_live_demo_shell() -> None:
         typer.echo("live demo: choose openai, claude, or openrouter; no provider request was made")
         return
     except LiveDemoSelectionError:
-        typer.echo("live demo: choose a listed case ID; no provider request or local write was made")
+        typer.echo(
+            "live demo: choose a listed case ID; no provider request or local write was made"
+        )
         return
 
     _run_shell_command(lambda: live_demo(profile=profile, case=case_id))
@@ -1319,7 +1321,9 @@ def _render_live_demo(result: LiveDemoResult) -> None:
         validation_category=result.validation_category,
     )
     presenter.render_story_brief(
-        StoryBrief(result.case.scenario, result.case.story, result.case.safety_rule, result.case.facts)
+        StoryBrief(
+            result.case.scenario, result.case.story, result.case.safety_rule, result.case.facts
+        )
     )
     presenter.render_text_table(
         title="Live-demo control records",

@@ -165,7 +165,11 @@ _LIVE_DEMO_CASES: tuple[LiveDemoCase, ...] = (
         response_schema="scenario_a_recommendation:v1",
         story="A projected stockout threatens production; one approved alternate supplier can meet the deadline.",
         safety_rule="Reject faster or cheaper suppliers unless they are approved.",
-        facts=(("Production", "planned stockout"), ("Allowed supplier", "Supplier Z — approved"), ("Excluded", "Supplier Bait — unapproved")),
+        facts=(
+            ("Production", "planned stockout"),
+            ("Allowed supplier", "Supplier Z — approved"),
+            ("Excluded", "Supplier Bait — unapproved"),
+        ),
     ),
     LiveDemoCase(
         case_id=LiveDemoCaseId.SCENARIO_B_QUALITY_HOLD,
@@ -174,7 +178,11 @@ _LIVE_DEMO_CASES: tuple[LiveDemoCase, ...] = (
         response_schema="scenario_b_recommendation:v1",
         story="A quality hold blocks production, but one released replacement lot fully covers the requirement.",
         safety_rule="Reallocate only released, uncommitted capacity that fully covers demand.",
-        facts=(("Trigger", "quality hold"), ("Alternative", "released replacement lot"), ("Required result", "full production cover")),
+        facts=(
+            ("Trigger", "quality hold"),
+            ("Alternative", "released replacement lot"),
+            ("Required result", "full production cover"),
+        ),
     ),
     LiveDemoCase(
         case_id=LiveDemoCaseId.SCENARIO_C_SUPPLIER_RISK,
@@ -183,7 +191,11 @@ _LIVE_DEMO_CASES: tuple[LiveDemoCase, ...] = (
         response_schema="scenario_c_recommendation:v1",
         story="A current authorized supplier-risk bulletin affects an open purchase order and future production.",
         safety_rule="Hold and notify only from current authorized risk evidence, after approval.",
-        facts=(("Trigger", "current supplier-risk bulletin"), ("Scope", "purchase order and production"), ("Control", "approval and freshness check")),
+        facts=(
+            ("Trigger", "current supplier-risk bulletin"),
+            ("Scope", "purchase order and production"),
+            ("Control", "approval and freshness check"),
+        ),
     ),
 )
 _LIVE_DEMO_CASES_BY_ID = {str(case.case_id): case for case in _LIVE_DEMO_CASES}
@@ -704,7 +716,10 @@ def _validated_recommendation(
     configuration: ProviderConfiguration,
 ) -> ScenarioARecommendation | ScenarioBRecommendation | ScenarioCRecommendation | LiveDemoResult:
     """Apply the owned schema one more time before a provider result can reach any gate or plan."""
-    if not response.is_success or response.provider != _PROVIDER_NAMES_BY_PROFILE[configuration.profile]:
+    if (
+        not response.is_success
+        or response.provider != _PROVIDER_NAMES_BY_PROFILE[configuration.profile]
+    ):
         return _planner_failure_result(
             case=case,
             run_id=run_id,

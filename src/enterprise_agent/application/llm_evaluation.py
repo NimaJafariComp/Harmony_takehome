@@ -396,7 +396,9 @@ def _case(
         messages=(
             LLMMessage(
                 role="user",
-                content=_evaluation_instruction(expected_values, policy_instruction=policy_instruction),
+                content=_evaluation_instruction(
+                    expected_values, policy_instruction=policy_instruction
+                ),
             ),
         ),
         purpose="manual_synthetic_llm_evaluation",

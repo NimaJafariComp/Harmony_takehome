@@ -89,31 +89,31 @@ The primary executable evidence is [tests/test_scenario_a_timing_audit.py](tests
 
 ## Live no-write provider evaluation
 
-The following observed OpenAI run used `gpt-5.6-terra` with the full fixed thirteen-case pack. It connected only to the selected provider and used the in-memory audit implementation; it did not access PostgreSQL, ERP, mail, scheduler, approval, workflow, or the durable audit ledger.
+The following observed runs used the full fixed thirteen-case pack after the grounded-evaluation and provider-adapter remediation. Each used only an in-memory audit implementation; neither accessed PostgreSQL, ERP, mail, scheduler, approval, workflow, or the durable audit ledger.
 
-| Field | Observed value |
-|---|---|
-| Provider and model | OpenAI `gpt-5.6-terra` |
-| Planner provenance | LIVE; fixed synthetic inputs; no business-system write |
-| Cases and checks | 13/13 cases and 51/51 checks passed |
-| Schema validation | Passed for every response |
-| Metering | 9,051 input, 1,423 output, 10,474 total tokens; `$0.035178` estimated |
+| Provider and model | Planner provenance | Cases and checks | Schema validation | Metering |
+|---|---|---|---|---|
+| OpenAI `gpt-5.6-terra` | LIVE; fixed synthetic inputs; no business-system write | 13/13 cases and 51/51 checks passed | Passed for every response | 9,874 input, 1,169 output, 11,043 total; `$0.033776` estimated |
+| Claude `claude-sonnet-5` | LIVE; fixed synthetic inputs; no business-system write | 13/13 cases and 51/51 checks passed | Passed for every response | 27,336 input, 2,536 output, 29,872 total; `$0.080032` estimated |
 
-The pack passed the approved and unapproved supplier cases, too-slow supplier, newest-evidence handling, hostile email, covered and insufficient quality lots, ambiguity/manual-review cases, current/superseded/unauthorized supplier-risk bulletins, and hostile supplier-risk content. This is a useful live quality signal, not a claim of deterministic model behavior or production reliability.
+Both runs passed approved and unapproved supplier cases, too-slow supplier, newest-evidence handling, hostile email, covered and insufficient quality lots, ambiguity/manual-review cases, current/superseded/unauthorized supplier-risk bulletins, and hostile supplier-risk content. These are useful live quality signals, not a claim of deterministic model behavior or production reliability.
 
-Earlier observed provider comparisons remain useful context: Luna scored 11/12 checks over the three A/B/C comparison cases; Claude Sonnet 5 had normalized provider failures on two of those cases; the configured free Nemotron model and an additional free Nex candidate had provider availability or quality failures. No evaluation used fallback or retry.
+The earlier limited M13.5 comparison is historical pre-remediation evidence, not the current provider assessment. The configured free OpenRouter account was rate-limited during the current recheck, so its no-write and smoke requests are truthfully recorded as unavailable rather than treated as model-quality failures. No evaluation used fallback or retry.
 
 ## Guarded live local proposal evidence
 
-These three observed Terra runs each reset and seeded the disposable local synthetic database, then made one bounded provider request. The command intentionally stops before any business tool effect. Every new run resets the same target, so only the final case's durable local records remain queryable afterward.
+After the UUID-serialization and Claude-identity fixes, the following observed local runs reset and seeded the disposable synthetic database, then made one bounded provider request. Every response passed schema validation and the deterministic gate to a pending approval. The command intentionally stops before any business tool effect. Every new run resets the same target, so only the final case's durable local records remain queryable afterward.
 
-| Case and stable Run ID | Observed provider result | Schema and gate | Metering |
+| Provider | Case and stable Run ID | Observed provider result | Metering |
 |---|---|---|---|
-| Scenario A `live-demo:scenario-a-reroute` | `MANUAL_REVIEW`; no plan, approval, or workflow created | Schema passed; gate not invoked because manual review was proposed | 2,082 input, 213 output, 2,295 total; `$0.006720` estimated |
-| Scenario B `live-demo:scenario-b-quality-hold` | `REALLOCATE_AND_NOTIFY`; pending approval staged | Schema passed; gate passed to pending approval | 1,460 input, 252 output, 1,712 total; `$0.005944` estimated |
-| Scenario C `live-demo:scenario-c-supplier-risk` | `HOLD_AND_NOTIFY`; pending approval staged | Schema passed; gate passed to pending approval | 1,006 input, 202 output, 1,208 total; `$0.004436` estimated |
+| OpenAI `gpt-5.6-terra` | Scenario A `live-demo:scenario-a-reroute` | `ENTER_WORKFLOW`; pending approval staged | 2,082 input, 462 output, 2,544 total; `$0.009708` estimated |
+| OpenAI `gpt-5.6-terra` | Scenario B `live-demo:scenario-b-quality-hold` | `REALLOCATE_AND_NOTIFY`; pending approval staged | 1,460 input, 236 output, 1,696 total; `$0.0031294` estimated |
+| OpenAI `gpt-5.6-terra` | Scenario C `live-demo:scenario-c-supplier-risk` | `HOLD_AND_NOTIFY`; pending approval staged | 1,006 input, 187 output, 1,193 total; `$0.004256` estimated |
+| Claude `claude-sonnet-5` | Scenario A `live-demo:scenario-a-reroute` | `ENTER_WORKFLOW`; pending approval staged | 3,570 input, 1,893 output, 5,463 total; `$0.026070` estimated |
+| Claude `claude-sonnet-5` | Scenario B `live-demo:scenario-b-quality-hold` | `REALLOCATE_AND_NOTIFY`; pending approval staged | 3,259 input, 677 output, 3,936 total; `$0.013288` estimated |
+| Claude `claude-sonnet-5` | Scenario C `live-demo:scenario-c-supplier-risk` | `HOLD_AND_NOTIFY`; pending approval staged | 2,216 input, 1,410 output, 3,626 total; `$0.018532` estimated |
 
-The Scenario A manual-review result is retained as observed rather than replaced with a preferred outcome. It demonstrates the fail-safe boundary: schema-valid model output that does not enter a registered workflow produces no plan and no gate invocation. Scenario B and C show that a live provider can produce a bounded recommendation which is still subject to the deterministic gate and a human approval.
+The current live receipts demonstrate provider proposals entering the same deterministic approval boundary. They do not authorize a provider to select tool steps or bypass scope, source freshness, approval, or workflow controls.
 
 No live approval, tool execution, crash recovery, or Tuesday follow-up was run in this lane. That omission is deliberate: `live-demo` is a proposal-staging command, and the deterministic lane above is the executable evidence for those downstream safeguards.
 
