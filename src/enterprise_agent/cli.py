@@ -3,7 +3,7 @@
 import sys
 from datetime import timedelta
 from os import environ
-from typing import NoReturn, cast
+from typing import Annotated, NoReturn, cast
 
 import typer
 from rich.console import Console
@@ -15,6 +15,14 @@ from enterprise_agent.adapters import (
     PostgresDemoClock,
 )
 from enterprise_agent.application import AuditExplainer, AuditExplanationError
+from enterprise_agent.application.guided_demo import (
+    DemoCaseSelectionError,
+    DemoExecutionMode,
+    GuidedDemoRun,
+    guided_demo_cases,
+    run_guided_demo,
+    select_guided_demo_cases,
+)
 from enterprise_agent.application.scenario_c_demo import (
     ScenarioCDeterministicRunError,
     stage_scenario_c_pending,
@@ -38,7 +46,17 @@ from enterprise_agent.llm_setup import (
     verify_credential,
 )
 from enterprise_agent.llm_usage import render_llm_usage, summarize_llm_usage
-from enterprise_agent.presentation import ConfirmationSummary, TerminalPresenter, TerminalTheme
+from enterprise_agent.presentation import (
+    ApprovalSummary,
+    ConfirmationSummary,
+    EvidenceDisposition,
+    EvidenceSummary,
+    StatusSummary,
+    TerminalPresenter,
+    TerminalState,
+    TerminalTheme,
+    WorkflowSummary,
+)
 from enterprise_agent.seed import (
     SeedSafetyError,
     _require_local_demo_database,
@@ -236,6 +254,168 @@ def scenario_c() -> None:
     )
 
 
+@app.command()
+def demo(
+    case: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--case",
+            "-c",
+            help="Guided case ID; repeat for several cases. Defaults to safety-tour.",
+        ),
+    ] = None,
+    all_cases: Annotated[
+        bool,
+        typer.Option("--all", help="Run every guided deterministic case."),
+    ] = False,
+    list_cases: Annotated[
+        bool,
+        typer.Option("--list", help="List cases without a database read or write."),
+    ] = False,
+    unattended: Annotated[
+        bool,
+        typer.Option(
+            "--unattended",
+            help="Explicitly skip the local-demo confirmation for scripts and CI.",
+        ),
+    ] = False,
+) -> None:
+    """Reset, seed, and present selected local-only safety stories without a live LLM call."""
+    if list_cases:
+        if case or all_cases or unattended:
+            typer.echo("demo: --list cannot be combined with selection or --unattended", err=True)
+            raise typer.Exit(code=2)
+        _render_guided_demo_catalog()
+        return
+    try:
+        selected = select_guided_demo_cases(tuple(case or ()), include_all=all_cases)
+    except DemoCaseSelectionError as error:
+        typer.echo(f"demo: refused ({error})", err=True)
+        raise typer.Exit(code=2) from error
+
+    database_url = _database_url(action="guided demo")
+    if not unattended:
+        try:
+            _confirm_local_write(
+                ConfirmationSummary(
+                    action="Run guided deterministic demo",
+                    target="the local synthetic demo database",
+                    effect=(
+                        "Resets and seeds the fixed data, then stages only the selected local "
+                        "pending plans."
+                    ),
+                    freshness=(
+                        "The reset establishes the known evidence baseline; all staged plans remain "
+                        "freshness-gated before effects."
+                    ),
+                    write_consequence=(
+                        "Writes only local synthetic data. No live provider, credential, or business "
+                        "system is called."
+                    ),
+                    confirmation_word="demo",
+                )
+            )
+        except InteractiveFlowCancelled:
+            _exit_cancelled("demo: cancelled; no data was written")
+
+    try:
+        result = run_guided_demo(database_url, case_ids=tuple(item.case_id for item in selected))
+    except (SeedSafetyError, ValueError) as error:
+        typer.echo(f"demo: refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+    _render_guided_demo(result)
+
+
+def _render_guided_demo_catalog() -> None:
+    """Print the safe catalogue before an operator chooses whether to reset local data."""
+    typer.echo("Guided deterministic demo cases (local only)")
+    typer.echo("No live provider is called; staged plans remain pending until separately approved.")
+    typer.echo(f"  {_SAFETY_TOUR_LABEL}: run the complete short safety tour")
+    for item in guided_demo_cases():
+        mode = (
+            "stages a pending plan"
+            if item.execution_mode is DemoExecutionMode.STAGE_PENDING
+            else "fixture"
+        )
+        typer.echo(f"  {item.case_id}: {item.title} [{mode}]")
+        typer.echo(f"    {item.outcome}")
+
+
+def _render_guided_demo(result: GuidedDemoRun) -> None:
+    """Render only command-owned, safe summaries from the deterministic local runner."""
+    presenter = _terminal_presenter()
+    presenter.render_header(
+        title="Guided deterministic demo",
+        subtitle=(
+            "Local synthetic data only · deterministic fake planner · no live provider or external business write"
+        ),
+    )
+    for item in result.results:
+        state = (
+            TerminalState.PENDING_APPROVAL
+            if item.case.execution_mode is DemoExecutionMode.STAGE_PENDING
+            else TerminalState.SUCCEEDED
+        )
+        presenter.render_status(
+            StatusSummary(
+                state=state,
+                summary=f"{item.case.title}: {item.case.outcome}",
+                next_action=item.case.next_safe_action,
+            )
+        )
+        typer.echo(f"Phase: {item.case.phase}")
+        typer.echo(f"Planner: {item.case.planner_label}")
+        if item.case.execution_mode is DemoExecutionMode.FIXTURE:
+            typer.echo("Mode: fixed acceptance-case walkthrough; no workflow effect is staged.")
+        else:
+            typer.echo("Mode: real local pending-plan stage; no workflow effect is executed.")
+        presenter.render_evidence(
+            tuple(
+                EvidenceSummary(
+                    evidence_id=identifier.value,
+                    source="guided demo",
+                    summary=identifier.label,
+                    disposition=(
+                        EvidenceDisposition.INCLUDED
+                        if identifier.included
+                        else EvidenceDisposition.EXCLUDED
+                    ),
+                )
+                for identifier in item.identifiers
+            )
+        )
+        if item.scenario_a_pending is not None:
+            scenario_a_pending = item.scenario_a_pending
+            presenter.render_approvals(
+                (
+                    ApprovalSummary(
+                        approval_id=str(scenario_a_pending.approval_id),
+                        plan_id=str(scenario_a_pending.plan_id),
+                        requester="Dana Buyer",
+                        approver="Dana Buyer",
+                        decision_state="pending",
+                        expires_at=scenario_a_pending.approval_expires_at,
+                    ),
+                )
+            )
+        if item.scenario_c_pending is not None:
+            scenario_c_pending = item.scenario_c_pending
+            presenter.render_workflows(
+                (
+                    WorkflowSummary(
+                        workflow_id=str(scenario_c_pending.workflow_id),
+                        status="pending_approval",
+                        current_step="awaiting approval",
+                        idempotency_key_prefix="not started",
+                        recovery_state="freshness rechecked before effects",
+                    ),
+                )
+            )
+
+
+_SAFETY_TOUR_LABEL = "safety-tour"
+
+
 @clock_app.command("advance")
 def clock_advance(
     hours: int = typer.Option(..., min=1, help="Positive whole number of demo hours to advance."),
@@ -393,7 +573,9 @@ def _confirm_local_write(summary: ConfirmationSummary) -> None:
         response = _prompt_with_cancellation("Confirmation").strip().lower()
         if response == expected:
             return
-        typer.echo(f"Enter {summary.confirmation_word} to continue or {_CANCELLATION_WORD} to stop.")
+        typer.echo(
+            f"Enter {summary.confirmation_word} to continue or {_CANCELLATION_WORD} to stop."
+        )
 
 
 def _prompt_with_cancellation(

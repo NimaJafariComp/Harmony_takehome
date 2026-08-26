@@ -46,6 +46,14 @@ def test_llm_smoke_target_passes_an_explicit_provider_selection_to_the_cli() -> 
     assert 'LLM_PROFILE="openai" uv run enterprise-agent llm-smoke' in result.stdout
 
 
+def test_demo_target_runs_the_local_guided_demo_unattended() -> None:
+    """CI can exercise the deterministic demo without an LLM profile or an interactive prompt."""
+    result = run_make("-n", "demo")
+
+    assert result.returncode == 0, result.stderr
+    assert "enterprise-agent demo --unattended" in result.stdout
+
+
 def test_critical_test_target_executes_the_critical_suite() -> None:
     """The focused safety suite can run independently of the full suite."""
     result = run_make("test-critical")

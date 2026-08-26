@@ -162,7 +162,9 @@ class TerminalPresenter:
     def render_status(self, summary: StatusSummary) -> None:
         """Render a semantic outcome with an optional next safe action."""
         details = self._detail_grid()
-        details.add_row("Status", Text(summary.state.label, style=self.theme.status_style(summary.state)))
+        details.add_row(
+            "Status", Text(summary.state.label, style=self.theme.status_style(summary.state))
+        )
         details.add_row("Summary", summary.summary)
         if summary.next_action is not None:
             details.add_row("Next", summary.next_action)
@@ -180,7 +182,9 @@ class TerminalPresenter:
             "Confirm",
             f"Type {summary.confirmation_word} to continue or cancel to stop.",
         )
-        self.console.print(Panel(details, title="Confirm action", border_style=self.theme.attention_style))
+        self.console.print(
+            Panel(details, title="Confirm action", border_style=self.theme.attention_style)
+        )
 
     def render_approvals(self, approvals: tuple[ApprovalSummary, ...]) -> None:
         """Render approval facts, preserving every durable identifier in full."""
@@ -352,5 +356,7 @@ class TerminalPresenter:
         table = Table(title=title, box=box.SIMPLE_HEAVY, header_style=self.theme.table_header_style)
         for index, column in enumerate(columns):
             is_copyable = index in copyable_columns
-            table.add_column(column, no_wrap=is_copyable, overflow="ignore" if is_copyable else "fold")
+            table.add_column(
+                column, no_wrap=is_copyable, overflow="ignore" if is_copyable else "fold"
+            )
         return table

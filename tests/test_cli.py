@@ -257,14 +257,12 @@ def test_demo_unattended_starts_only_the_selected_local_case_without_prompting(
     monkeypatch.setattr(
         "typer.prompt", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no prompt"))
     )
-    monkeypatch.setattr(
-        cli,
-        "run_guided_demo",
-        lambda database_url, *, case_ids: (
-            called.append((database_url, case_ids)) or object()
-        ),
-        raising=False,
-    )
+
+    def run(database_url: str, *, case_ids: tuple[str, ...]) -> object:
+        called.append((database_url, case_ids))
+        return object()
+
+    monkeypatch.setattr(cli, "run_guided_demo", run, raising=False)
     monkeypatch.setattr(cli, "_render_guided_demo", rendered.append, raising=False)
 
     result = CliRunner().invoke(

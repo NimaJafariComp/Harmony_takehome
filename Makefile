@@ -31,8 +31,8 @@ seed: migrate
 	docker compose --profile tools run --build --rm app enterprise-agent reset
 	docker compose --profile tools run --build --rm app enterprise-agent seed
 
-demo:
-	@echo "Demo command is not available until M8."
+demo: migrate
+	docker compose --profile tools run --build --rm app enterprise-agent demo --unattended
 
 llm-smoke:
 	LLM_PROFILE="$(LLM_PROFILE)" uv run enterprise-agent llm-smoke
