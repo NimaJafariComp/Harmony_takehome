@@ -15,7 +15,7 @@ from enterprise_agent.domain import (
     RunId,
     ScenarioAStockoutTrigger,
 )
-from enterprise_agent.ports import AttentionPort, ErpPort, EvidenceQuery
+from enterprise_agent.ports import AttentionPort, ClockPort, ErpPort, EvidenceQuery
 
 COMMITTED_PRODUCTION_STATUSES = frozenset({"in_progress", "scheduled"})
 
@@ -67,15 +67,15 @@ class _ProductionDemand:
 class StockoutDetector:
     """Read scoped ERP evidence, calculate material risk, and register only positive shortfalls."""
 
-    def __init__(self, erp: ErpPort, attention: AttentionPort) -> None:
+    def __init__(self, erp: ErpPort, attention: AttentionPort, clock: ClockPort) -> None:
         """Compose provider and durable-attention boundaries without depending on their adapters."""
         self._erp = erp
         self._attention = attention
+        self._clock = clock
 
-    def detect(
-        self, actor: ActorContext, run_id: RunId, detected_at: datetime
-    ) -> tuple[StockoutDetection, ...]:
+    def detect(self, actor: ActorContext, run_id: RunId) -> tuple[StockoutDetection, ...]:
         """Persist one attention item per current at-risk production order visible to the actor."""
+        detected_at = self._clock.now()
         evidence = self._erp.query(
             actor,
             EvidenceQuery(record_types=frozenset({"inventory", "production_order"})),

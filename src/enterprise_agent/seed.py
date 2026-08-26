@@ -28,6 +28,7 @@ class SeedRow:
 
 DEMO_DATABASE_NAME = "enterprise_agent"
 DEMO_DATABASE_HOST = "db"
+DEMO_CLOCK_ID = 1
 DEMO_CLOCK_START = datetime(2026, 8, 24, 9, tzinfo=UTC)
 DEMO_TUESDAY = datetime(2026, 8, 25, 9, tzinfo=UTC)
 DEMO_CREATED_AT = datetime(2026, 8, 20, 9, tzinfo=UTC)
@@ -66,6 +67,7 @@ TRUNCATE_SQL = """
 TRUNCATE TABLE
     audit_events,
     scheduled_tasks,
+    demo_clock,
     tool_invocations,
     workflow_steps,
     workflow_instances,
@@ -102,6 +104,14 @@ def _scope_row(user_id: UUID, scope: str) -> SeedRow:
 
 
 SEED_ROWS = (
+    SeedRow(
+        table="demo_clock",
+        values={
+            "id": DEMO_CLOCK_ID,
+            "current_at": DEMO_CLOCK_START,
+            "updated_at": DEMO_CLOCK_START,
+        },
+    ),
     SeedRow(
         table="users",
         values={

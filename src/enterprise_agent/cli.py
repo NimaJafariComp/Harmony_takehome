@@ -1,17 +1,26 @@
 """Command-line interface for the enterprise agent harness."""
 
+from datetime import timedelta
 from os import environ
 
 import typer
 
 from enterprise_agent import __version__
+from enterprise_agent.adapters import DemoClockNotInitializedError, PostgresDemoClock
 from enterprise_agent.config import ConfigurationError, load_settings
-from enterprise_agent.seed import SeedSafetyError, reset_database, seed_database
+from enterprise_agent.seed import (
+    SeedSafetyError,
+    _require_local_demo_database,
+    reset_database,
+    seed_database,
+)
 
 app = typer.Typer(
     help="Operate the enterprise agent harness.",
     no_args_is_help=True,
 )
+clock_app = typer.Typer(help="Inspect and advance deterministic local-demo time.")
+app.add_typer(clock_app, name="clock")
 
 
 @app.callback()
@@ -61,6 +70,22 @@ def seed() -> None:
         raise typer.Exit(code=1) from error
 
     typer.echo("database: seeded")
+
+
+@clock_app.command("advance")
+def clock_advance(
+    hours: int = typer.Option(..., min=1, help="Positive whole number of demo hours to advance."),
+) -> None:
+    """Advance the persisted local-demo clock without reading or writing wall-clock time."""
+    database_url = _database_url()
+    try:
+        _require_local_demo_database(database_url, allow_test_database=False)
+        advanced_to = PostgresDemoClock(database_url).advance(timedelta(hours=hours))
+    except (DemoClockNotInitializedError, SeedSafetyError, ValueError) as error:
+        typer.echo(f"clock: advance refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"clock: advanced to {advanced_to.isoformat()}")
 
 
 def _database_url() -> str:

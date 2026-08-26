@@ -3,6 +3,7 @@
 from enterprise_agent.domain import InvalidAttentionTransitionError
 
 from .attention import PostgresAttentionAdapter
+from .clock import DemoClockNotInitializedError, PostgresDemoClock
 from .identity import IdentityNotFoundError, PostgresIdentityAdapter
 from .plan_approvals import PostgresPlanApprovalAdapter
 from .providers import (
@@ -15,10 +16,12 @@ from .tools import PostgresScenarioAToolAdapter, ToolExecutionError
 from .workflow_state import PostgresWorkflowStateAdapter
 
 __all__ = [
+    "DemoClockNotInitializedError",
     "IdentityNotFoundError",
     "InvalidAttentionTransitionError",
     "PostgresAttentionAdapter",
     "PostgresCalendarAdapter",
+    "PostgresDemoClock",
     "PostgresErpAdapter",
     "PostgresIdentityAdapter",
     "PostgresMailAdapter",
