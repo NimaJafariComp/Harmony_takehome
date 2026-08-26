@@ -12,6 +12,11 @@ from .providers import (
     PostgresMailAdapter,
     UnsupportedEvidenceTypeError,
 )
+from .scheduler import (
+    PostgresSchedulerAdapter,
+    ScheduledTaskClaimLostError,
+    ScheduledTaskIdempotencyError,
+)
 from .tools import PostgresScenarioAToolAdapter, ToolExecutionError
 from .workflow_state import PostgresWorkflowStateAdapter
 
@@ -27,7 +32,10 @@ __all__ = [
     "PostgresMailAdapter",
     "PostgresPlanApprovalAdapter",
     "PostgresScenarioAToolAdapter",
+    "PostgresSchedulerAdapter",
     "PostgresWorkflowStateAdapter",
+    "ScheduledTaskClaimLostError",
+    "ScheduledTaskIdempotencyError",
     "ToolExecutionError",
     "UnsupportedEvidenceTypeError",
 ]
