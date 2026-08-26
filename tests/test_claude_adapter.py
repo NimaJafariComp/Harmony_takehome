@@ -184,7 +184,7 @@ def test_claude_adapter_sends_authorized_evidence_requests_json_schema_and_audit
     assert schema["required"] == ["recommendation"]
     assert schema["properties"]["recommendation"]["anyOf"]
     assert "oneOf" not in json.dumps(schema)
-    assert "pattern" not in json.dumps(schema)
+    assert '"pattern":' not in json.dumps(schema)
     assert schema["$defs"]["ManualReviewRecommendation"]["additionalProperties"] is False
     assert "minLength" not in schema["$defs"]["ManualReviewRecommendation"]["properties"]["reason"]
     assert (

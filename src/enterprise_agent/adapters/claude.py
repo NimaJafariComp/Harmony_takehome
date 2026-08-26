@@ -36,6 +36,7 @@ _STRUCTURED_OUTPUT_INSTRUCTIONS = (
 _UNSUPPORTED_SCHEMA_CONSTRAINTS = {
     "exclusiveMinimum": "Must be greater than {value}.",
     "minLength": "Must contain at least {value} character(s).",
+    "pattern": "Must match the required pattern.",
 }
 
 
@@ -140,7 +141,9 @@ class ClaudeMessagesAdapter:
             return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
 
         try:
-            recommendation = validate_recommendation(prompt.response_schema, output)
+            recommendation = validate_recommendation(
+                prompt.response_schema, _unwrap_recommendation_output(output)
+            )
         except (UnsupportedRecommendationSchemaError, ValueError):
             return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
         return LLMGenerationResult.succeeded(
@@ -197,7 +200,7 @@ def _request_for(prompt: PromptEnvelope, *, model: str) -> dict[str, object]:
         "output_config": {
             "format": {
                 "type": "json_schema",
-                "schema": _claude_output_schema(
+                "schema": _claude_response_schema(
                     json_schema_for_recommendation(prompt.response_schema)
                 ),
             }
@@ -245,6 +248,12 @@ def _output_text(
     return (LLMGenerationStatus.SUCCEEDED, output_texts[0])
 
 
+def _unwrap_recommendation_output(output: Mapping[str, object]) -> Mapping[str, object]:
+    """Return the canonical proposal nested inside Claude's object-root schema wrapper."""
+    recommendation = output.get("recommendation")
+    return recommendation if isinstance(recommendation, Mapping) else output
+
+
 def _failed(*, model: str, status: LLMGenerationStatus) -> LLMGenerationResult:
     """Create one failure result through the shared invariant-preserving result constructor."""
     return LLMGenerationResult.failed(provider=_PROVIDER_NAME, model=model, status=status)
@@ -268,7 +277,7 @@ def _claude_output_schema(value: object) -> object:
             (key, child) for key, child in value.items() if key in _UNSUPPORTED_SCHEMA_CONSTRAINTS
         )
         normalized = {
-            key: _claude_output_schema(child)
+            "anyOf" if key == "oneOf" else key: _claude_output_schema(child)
             for key, child in value.items()
             if key not in _UNSUPPORTED_SCHEMA_CONSTRAINTS and key != "default"
         }
@@ -287,3 +296,21 @@ def _claude_output_schema(value: object) -> object:
     if isinstance(value, list):
         return [_claude_output_schema(item) for item in value]
     return value
+
+
+def _claude_response_schema(value: object) -> dict[str, object]:
+    """Wrap the application's discriminated union so Claude receives an object-root schema."""
+    schema = _claude_output_schema(value)
+    if not isinstance(schema, dict):
+        raise TypeError("Claude response schema must be a JSON object")
+
+    alternatives = schema.pop("anyOf", None)
+    if not isinstance(alternatives, list):
+        return schema
+
+    schema.pop("discriminator", None)
+    schema["type"] = "object"
+    schema["properties"] = {"recommendation": {"anyOf": alternatives}}
+    schema["additionalProperties"] = False
+    schema["required"] = ["recommendation"]
+    return schema
