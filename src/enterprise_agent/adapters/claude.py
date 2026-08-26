@@ -56,7 +56,7 @@ class ClaudeMessagesTransport(Protocol):
 class UrllibClaudeMessagesTransport:
     """Small synchronous HTTPS transport used only after profile configuration chooses Claude."""
 
-    def __init__(self, *, api_key: str, timeout_seconds: float = 20.0) -> None:
+    def __init__(self, *, api_key: str, timeout_seconds: float = 60.0) -> None:
         """Require a non-blank credential and bounded timeout before any provider request."""
         self._api_key = api_key.strip()
         if not self._api_key:
