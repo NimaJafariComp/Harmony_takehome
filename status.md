@@ -43,12 +43,12 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M10 - Optional simple local verification UI |
-| Current task | M10.3 - Implement operational evidence-ledger pages |
+| Current task | M10.4 - Submit decisions through approval service |
 | Required task progress | 55 / 62 complete |
-| Optional task progress | 15 / 19 complete |
+| Optional task progress | 16 / 19 complete |
 | Acceptance criteria progress | 11 / 14 satisfied; 3 in progress |
-| Last validated commit | `effdb20` |
-| Last completed-task push | M10.2 actor-scoped local review reads pushed to `origin/main` |
+| Last validated commit | `1ad8aac` |
+| Last completed-task push | M10.3 evidence-ledger pages pending push to `origin/main` |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -172,7 +172,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|---|---|
 | M10.1 Establish thin local UI boundary | `complete` | Optional UI | Test: `tests/test_web.py` - PASS (4 focused contracts).<br>Validation: `make verify` - PASS (530 tests, 88.37% coverage, clean migration, rebuilt container, and unattended `make demo`).<br>Evidence: `enterprise-agent-ui` serves a loopback-only (`127.0.0.1:8080`) FastAPI/Jinja page with only local CSS and an explicit no-provider/no-credential/no-business-write boundary. The process health endpoint reports presentation readiness only; the UI module imports no adapter, configuration, provider, or database service and has no client state, React, tool, approval, or workflow route. Keyboard-visible focus and reduced-motion safeguards are included in the small local stylesheet.<br>Commits: `9de69b4` RED, `70da106` GREEN, and this status record pushed to `origin/main`. |
 | M10.2 Add authorized read models and route contracts | `complete` | Optional UI | Test: `tests/test_local_review.py`, `tests/test_operator_status.py`, and `tests/test_web.py` - PASS (18 focused contracts, including the real PostgreSQL/Compose path).<br>Validation: `make verify` - PASS (538 tests, 88.31% coverage, clean migration, rebuilt container, and unattended `make demo`).<br>Evidence: the loopback UI has six injected GET-only read routes for actor-scoped status, attention/evidence references, immutable approval summaries, safe workflow/recovery state, whole-run audit explanations, and demo time. The selected local actor defaults to Dana and can be overridden only by a UUID local setting; the UI loads no provider configuration or credential. Status uses the same safe scalar projection as CLI JSON. Attention output contains only versioned references; approval output excludes parameters and plan hashes; workflow output excludes inputs, results, errors, leases, and full idempotency keys; audit output uses the existing restricted ledger renderer. Unknown/malformed resources return `404`, cross-actor or mixed-run access returns `403`, and an unconfigured local reader returns `503`; no UI route can mutate state.<br>Commits: `30e5491` RED, `97b6ba8` GREEN, and `effdb20` formatting pushed to `origin/main`; status completion recorded in this commit. |
-| M10.3 Implement operational evidence-ledger pages | `not_started` | Optional UI | - |
+| M10.3 Implement operational evidence-ledger pages | `complete` | Optional UI | Test: `tests/test_local_review.py`, `tests/test_operator_status.py`, and `tests/test_web.py` - PASS (20 focused contracts).<br>Validation: `make verify` - PASS (540 tests, 88.34% coverage, clean migration, rebuilt container, and unattended `make demo`).<br>Evidence: server-rendered status, attention, approval, workflow, audit, and safe HTML error pages consume only the injected actor-scoped read service. They show durable IDs, evidence versions, declared recovery progress, and restricted audit explanations through semantic landmarks and responsive, keyboard-focusable tables; state labels always retain visible text and pages contain no client script, credential, provider call, or write control. API error envelopes remain unchanged while browser pages omit internal error detail.<br>Commits: `f1c0c31` RED, `adece03` GREEN, and `1ad8aac` formatting; status completion recorded in this commit. |
 | M10.4 Submit decisions through approval service | `not_started` | Optional UI | - |
 | M10.5 Add local demo-control and recovery views | `not_started` | Optional UI | - |
 | M10.6 Verify UI parity and safety | `not_started` | Optional UI | - |
