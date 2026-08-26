@@ -1,5 +1,12 @@
 """Application services that compose domain policy with typed ports."""
 
+from .approval_routing import (
+    APPROVAL_ESCALATION_TASK_TYPE,
+    ApprovalRoutingError,
+    ApprovalRoutingOutcome,
+    ApprovalRoutingResult,
+    ApprovalRoutingService,
+)
 from .approvals import (
     PendingPlanApproval,
     PlanNotApprovableError,
@@ -66,9 +73,14 @@ from .workflows import (
 )
 
 __all__ = [
+    "APPROVAL_ESCALATION_TASK_TYPE",
     "DECLARED_WORKFLOWS",
     "PO_REROUTE_V1",
     "TOOL_CATALOG",
+    "ApprovalRoutingError",
+    "ApprovalRoutingOutcome",
+    "ApprovalRoutingResult",
+    "ApprovalRoutingService",
     "AuthorizedContextBundle",
     "CompensationAction",
     "CreateReplacementPOInput",

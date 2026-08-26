@@ -143,6 +143,8 @@ class MemoryPlanApprovalStore:
     records: dict[ApprovalId, tuple[Plan, Approval]] = field(default_factory=dict)
     create_calls: int = 0
     approve_calls: int = 0
+    reject_calls: int = 0
+    reroute_calls: int = 0
 
     def create_pending(self, plan: Plan, approval: Approval) -> None:
         self.create_calls += 1
@@ -161,6 +163,7 @@ class MemoryPlanApprovalStore:
         self,
         approval_id: ApprovalId,
         expected_plan_hash: str,
+        decider_id: UserId,
         decided_at: datetime,
     ) -> Approval | None:
         self.approve_calls += 1
@@ -169,8 +172,9 @@ class MemoryPlanApprovalStore:
             return None
         plan, approval = record
         if (
-            approval.status is not ApprovalStatus.PENDING
+            approval.status not in {ApprovalStatus.PENDING, ApprovalStatus.REROUTED}
             or approval.plan_hash != expected_plan_hash
+            or approval.approver_id != decider_id
         ):
             return None
         approved = replace(
@@ -181,6 +185,57 @@ class MemoryPlanApprovalStore:
         self.records[approval_id] = (plan, approved)
         return approved
 
+    def reject(
+        self,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decider_id: UserId,
+        decided_at: datetime,
+    ) -> Approval | None:
+        self.reject_calls += 1
+        record = self.records.get(approval_id)
+        if record is None:
+            return None
+        stored_plan, approval = record
+        if (
+            approval.status not in {ApprovalStatus.PENDING, ApprovalStatus.REROUTED}
+            or approval.plan_hash != expected_plan_hash
+            or approval.approver_id != decider_id
+        ):
+            return None
+        rejected = replace(approval, status=ApprovalStatus.REJECTED, decided_at=decided_at)
+        self.records[approval_id] = (stored_plan, rejected)
+        return rejected
+
+    def reroute(
+        self,
+        approval_id: ApprovalId,
+        *,
+        expected_plan_hash: str,
+        original_approver_id: UserId,
+        backup_approver_id: UserId,
+        routed_at: datetime,
+    ) -> Approval | None:
+        self.reroute_calls += 1
+        record = self.records.get(approval_id)
+        if record is None:
+            return None
+        stored_plan, approval = record
+        if (
+            approval.status is not ApprovalStatus.PENDING
+            or approval.plan_hash != expected_plan_hash
+            or approval.approver_id != original_approver_id
+            or approval.expires_at <= routed_at
+        ):
+            return None
+        rerouted = replace(
+            approval,
+            approver_id=backup_approver_id,
+            status=ApprovalStatus.REROUTED,
+        )
+        self.records[approval_id] = (stored_plan, rerouted)
+        return rerouted
+
 
 class CasLostPlanApprovalStore(MemoryPlanApprovalStore):
     """Simulate another worker winning the persistent approval compare-and-swap race."""
@@ -189,10 +244,36 @@ class CasLostPlanApprovalStore(MemoryPlanApprovalStore):
         self,
         approval_id: ApprovalId,
         expected_plan_hash: str,
+        decider_id: UserId,
         decided_at: datetime,
     ) -> Approval | None:
         self.approve_calls += 1
         return None
+
+
+class CasLostRejectPlanApprovalStore(MemoryPlanApprovalStore):
+    """Simulate another worker winning the terminal rejection compare-and-swap race."""
+
+    def reject(
+        self,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decider_id: UserId,
+        decided_at: datetime,
+    ) -> Approval | None:
+        self.reject_calls += 1
+        return None
+
+
+@dataclass
+class RecordingEscalationScheduler:
+    """Record escalation scheduling only after the pending approval is stored."""
+
+    approvals: list[Approval] = field(default_factory=list)
+
+    def schedule_escalation(self, approval: Approval) -> None:
+        """Retain the exact newly persisted approval passed to the routing service."""
+        self.approvals.append(approval)
 
 
 def _pending_decision() -> GateDecision:
@@ -239,7 +320,11 @@ def _stored_approval(plan: Plan, *, status: ApprovalStatus = ApprovalStatus.PEND
         status=status,
         requested_at=NOW,
         expires_at=EXPIRES_AT,
-        decided_at=None if status is ApprovalStatus.PENDING else NOW + timedelta(minutes=1),
+        decided_at=(
+            None
+            if status in {ApprovalStatus.PENDING, ApprovalStatus.REROUTED}
+            else NOW + timedelta(minutes=1)
+        ),
     )
 
 
@@ -373,9 +458,86 @@ def test_postgres_adapter_approval_compare_and_swap_maps_only_a_returned_row(
     monkeypatch.setattr(plan_approvals, "create_engine", lambda _: engine)
     adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
 
-    outcome = adapter.approve(approved.approval_id, plan.plan_hash, NOW + timedelta(minutes=1))
+    outcome = adapter.approve(
+        approved.approval_id,
+        plan.plan_hash,
+        approved.approver_id,
+        NOW + timedelta(minutes=1),
+    )
 
     assert outcome == (None if returned_row is None else approved)
+
+
+def test_postgres_adapter_rejection_uses_the_same_current_approver_compare_and_swap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejection is bound to the active approver and hash rather than trusting application state."""
+    from enterprise_agent.adapters import plan_approvals
+
+    plan = _stored_plan()
+    rejected = _stored_approval(plan, status=ApprovalStatus.REJECTED)
+    engine = MagicMock()
+    result = MagicMock()
+    result.mappings.return_value.one_or_none.return_value = _approval_row(rejected)
+    connection = engine.begin.return_value.__enter__.return_value
+    connection.execute.return_value = result
+    monkeypatch.setattr(plan_approvals, "create_engine", lambda _: engine)
+    adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
+
+    outcome = adapter.reject(
+        rejected.approval_id,
+        plan.plan_hash,
+        rejected.approver_id,
+        NOW + timedelta(minutes=1),
+    )
+
+    assert outcome == rejected
+    assert connection.execute.call_args.args[1]["decider_id"] == str(rejected.approver_id)
+    assert connection.execute.call_args.args[1]["decision_status"] == ApprovalStatus.REJECTED.value
+
+
+@pytest.mark.parametrize("returned_row", [None, "rerouted"])
+def test_postgres_adapter_reroutes_only_the_current_pending_approval(
+    monkeypatch: pytest.MonkeyPatch, returned_row: str | None
+) -> None:
+    """The reroute SQL locks plan hash and original approver while changing only active ownership."""
+    from enterprise_agent.adapters import plan_approvals
+
+    plan = _stored_plan()
+    pending = _stored_approval(plan)
+    rerouted = replace(
+        pending,
+        approver_id=UserId("00000000-0000-0000-0000-000000000002"),
+        status=ApprovalStatus.REROUTED,
+    )
+    engine = MagicMock()
+    result = MagicMock()
+    result.mappings.return_value.one_or_none.return_value = (
+        None if returned_row is None else _approval_row(rerouted)
+    )
+    connection = engine.begin.return_value.__enter__.return_value
+    connection.execute.return_value = result
+    monkeypatch.setattr(plan_approvals, "create_engine", lambda _: engine)
+    adapter = plan_approvals.PostgresPlanApprovalAdapter("postgresql+psycopg://ignored")
+
+    outcome = adapter.reroute(
+        pending.approval_id,
+        expected_plan_hash=plan.plan_hash,
+        original_approver_id=pending.approver_id,
+        backup_approver_id=rerouted.approver_id,
+        routed_at=NOW + timedelta(hours=1),
+    )
+
+    assert outcome == (None if returned_row is None else rerouted)
+    assert connection.execute.call_args.args[1] == {
+        "approval_id": str(pending.approval_id),
+        "expected_plan_hash": plan.plan_hash,
+        "pending_status": ApprovalStatus.PENDING.value,
+        "rerouted_status": ApprovalStatus.REROUTED.value,
+        "original_approver_id": str(pending.approver_id),
+        "backup_approver_id": str(rerouted.approver_id),
+        "routed_at": NOW + timedelta(hours=1),
+    }
 
 
 def _service() -> tuple[ScenarioAApprovalService, MemoryPlanApprovalStore, RecordingGate]:
@@ -417,6 +579,30 @@ def test_service_persists_a_pending_plan_and_approval_bound_to_the_full_intent_h
     assert recompute_plan_hash(replace(result.plan, policy_version="scenario_a_policy:v2")) != (
         result.plan.plan_hash
     )
+
+
+def test_service_schedules_the_escalation_only_after_persisting_a_pending_approval() -> None:
+    """Approval creation hands the exact durable pending request to the EOD routing policy."""
+    store = MemoryPlanApprovalStore()
+    scheduler = RecordingEscalationScheduler()
+    service = ScenarioAApprovalService(
+        store,
+        gate=RecordingGate(_pending_decision()),
+        escalation_scheduler=scheduler,
+    )
+    context = _context()
+
+    result = service.request_pending(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+        policy_version="scenario_a_policy:v1",
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+
+    assert store.records[result.approval.approval_id] == (result.plan, result.approval)
+    assert scheduler.approvals == [result.approval]
 
 
 def test_service_refuses_to_persist_a_plan_when_the_gate_did_not_hold_it_for_approval() -> None:
@@ -490,6 +676,7 @@ def test_service_approves_only_an_unexpired_hash_and_source_version_match() -> N
     approval = service.approve(
         approval_id=result.approval.approval_id,
         expected_plan_hash=result.plan.plan_hash,
+        decider_id=result.approval.approver_id,
         current_source_versions=context.source_versions,
         decided_at=NOW + timedelta(minutes=1),
     )
@@ -497,6 +684,189 @@ def test_service_approves_only_an_unexpired_hash_and_source_version_match() -> N
     assert store.approve_calls == 1
     assert approval.status is ApprovalStatus.APPROVED
     assert approval.decided_at == NOW + timedelta(minutes=1)
+
+
+def test_only_the_rerouted_backup_may_make_the_terminal_approval_decision() -> None:
+    """After routing, the original approver loses authority while the designated backup can decide."""
+    from enterprise_agent.application.approvals import PlanNotApprovableError
+
+    service, store, _ = _service()
+    context = _context()
+    backup_approver_id = context.actor.backup_approver_id
+    assert backup_approver_id is not None
+    result = service.request_pending(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+        policy_version="scenario_a_policy:v1",
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+    stored_plan, stored_approval = store.records[result.approval.approval_id]
+    store.records[result.approval.approval_id] = (
+        stored_plan,
+        replace(
+            stored_approval,
+            approver_id=backup_approver_id,
+            status=ApprovalStatus.REROUTED,
+        ),
+    )
+
+    with pytest.raises(PlanNotApprovableError, match="current approver"):
+        service.approve(
+            approval_id=result.approval.approval_id,
+            expected_plan_hash=result.plan.plan_hash,
+            decider_id=context.actor.user_id,
+            current_source_versions=context.source_versions,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+
+    approved = service.approve(
+        approval_id=result.approval.approval_id,
+        expected_plan_hash=result.plan.plan_hash,
+        decider_id=backup_approver_id,
+        current_source_versions=context.source_versions,
+        decided_at=NOW + timedelta(minutes=1),
+    )
+    assert approved.status is ApprovalStatus.APPROVED
+
+    rejected_result = service.request_pending(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+        policy_version="scenario_a_policy:v1",
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+    rejected_plan, rejected_approval = store.records[rejected_result.approval.approval_id]
+    store.records[rejected_result.approval.approval_id] = (
+        rejected_plan,
+        replace(
+            rejected_approval,
+            approver_id=backup_approver_id,
+            status=ApprovalStatus.REROUTED,
+        ),
+    )
+
+    rejected = service.reject(
+        approval_id=rejected_result.approval.approval_id,
+        expected_plan_hash=rejected_result.plan.plan_hash,
+        decider_id=backup_approver_id,
+        decided_at=NOW + timedelta(minutes=1),
+    )
+    assert rejected.status is ApprovalStatus.REJECTED
+    assert store.reject_calls == 1
+
+
+def test_service_rejection_fails_closed_for_invalid_or_raced_rerouted_approvals() -> None:
+    """The new reject path preserves the same ownership, expiry, hash, and CAS controls as approval."""
+    from enterprise_agent.application.approvals import PlanNotApprovableError
+
+    service, store, _ = _service()
+    context = _context()
+    backup_approver_id = context.actor.backup_approver_id
+    assert backup_approver_id is not None
+    result = service.request_pending(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+        policy_version="scenario_a_policy:v1",
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+
+    with pytest.raises(PlanNotApprovableError, match="does not exist"):
+        service.reject(
+            approval_id=ApprovalId("00000000-0000-0000-0000-000000000899"),
+            expected_plan_hash=result.plan.plan_hash,
+            decider_id=backup_approver_id,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+
+    stored_plan, stored_approval = store.records[result.approval.approval_id]
+    rerouted = replace(
+        stored_approval,
+        approver_id=backup_approver_id,
+        status=ApprovalStatus.REROUTED,
+    )
+    store.records[result.approval.approval_id] = (stored_plan, rerouted)
+    with pytest.raises(PlanNotApprovableError, match="current approver"):
+        service.reject(
+            approval_id=result.approval.approval_id,
+            expected_plan_hash=result.plan.plan_hash,
+            decider_id=context.actor.user_id,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+    store.records[result.approval.approval_id] = (
+        stored_plan,
+        replace(rerouted, status=ApprovalStatus.REJECTED),
+    )
+    with pytest.raises(PlanNotApprovableError, match="no longer pending"):
+        service.reject(
+            approval_id=result.approval.approval_id,
+            expected_plan_hash=result.plan.plan_hash,
+            decider_id=backup_approver_id,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+    store.records[result.approval.approval_id] = (
+        stored_plan,
+        replace(rerouted, expires_at=NOW),
+    )
+    with pytest.raises(PlanNotApprovableError, match="expired"):
+        service.reject(
+            approval_id=result.approval.approval_id,
+            expected_plan_hash=result.plan.plan_hash,
+            decider_id=backup_approver_id,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+    store.records[result.approval.approval_id] = (stored_plan, rerouted)
+    with pytest.raises(PlanNotApprovableError, match="expected plan hash"):
+        service.reject(
+            approval_id=result.approval.approval_id,
+            expected_plan_hash="sha256:wrong",
+            decider_id=backup_approver_id,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+    store.records[result.approval.approval_id] = (
+        replace(stored_plan, parameters={"tampered": "input"}),
+        rerouted,
+    )
+    with pytest.raises(PlanNotApprovableError, match="hash"):
+        service.reject(
+            approval_id=result.approval.approval_id,
+            expected_plan_hash=result.plan.plan_hash,
+            decider_id=backup_approver_id,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+
+    race_store = CasLostRejectPlanApprovalStore()
+    race_service = ScenarioAApprovalService(race_store, gate=RecordingGate(_pending_decision()))
+    race_result = race_service.request_pending(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+        policy_version="scenario_a_policy:v1",
+        requested_at=NOW,
+        expires_at=EXPIRES_AT,
+    )
+    race_plan, race_approval = race_store.records[race_result.approval.approval_id]
+    race_store.records[race_result.approval.approval_id] = (
+        race_plan,
+        replace(
+            race_approval,
+            approver_id=backup_approver_id,
+            status=ApprovalStatus.REROUTED,
+        ),
+    )
+    with pytest.raises(PlanNotApprovableError, match="atomically"):
+        race_service.reject(
+            approval_id=race_result.approval.approval_id,
+            expected_plan_hash=race_result.plan.plan_hash,
+            decider_id=backup_approver_id,
+            decided_at=NOW + timedelta(minutes=1),
+        )
+
+    assert race_store.reject_calls == 1
 
 
 @pytest.mark.parametrize(
@@ -532,6 +902,7 @@ def test_service_rejects_hash_mismatch_stale_evidence_or_expiry_before_approval(
             expected_plan_hash=(
                 result.plan.plan_hash if expected_plan_hash == "from_plan" else expected_plan_hash
             ),
+            decider_id=result.approval.approver_id,
             current_source_versions=current_source_versions,
             decided_at=decided_at,
         )
@@ -563,6 +934,7 @@ def test_service_rejects_a_loaded_plan_whose_immutable_content_no_longer_matches
         service.approve(
             approval_id=result.approval.approval_id,
             expected_plan_hash=result.plan.plan_hash,
+            decider_id=result.approval.approver_id,
             current_source_versions=context.source_versions,
             decided_at=NOW + timedelta(minutes=1),
         )
@@ -592,6 +964,7 @@ def test_service_rejects_unknown_non_pending_and_lost_compare_and_swap_approvals
         service.approve(
             approval_id=ApprovalId("00000000-0000-0000-0000-000000000899"),
             expected_plan_hash=result.plan.plan_hash,
+            decider_id=result.approval.approver_id,
             current_source_versions=context.source_versions,
             decided_at=NOW + timedelta(minutes=1),
         )
@@ -605,6 +978,7 @@ def test_service_rejects_unknown_non_pending_and_lost_compare_and_swap_approvals
         service.approve(
             approval_id=result.approval.approval_id,
             expected_plan_hash=result.plan.plan_hash,
+            decider_id=result.approval.approver_id,
             current_source_versions=context.source_versions,
             decided_at=NOW + timedelta(minutes=1),
         )
@@ -623,6 +997,7 @@ def test_service_rejects_unknown_non_pending_and_lost_compare_and_swap_approvals
         race_service.approve(
             approval_id=race_result.approval.approval_id,
             expected_plan_hash=race_result.plan.plan_hash,
+            decider_id=race_result.approval.approver_id,
             current_source_versions=context.source_versions,
             decided_at=NOW + timedelta(minutes=1),
         )
@@ -705,7 +1080,7 @@ def test_postgres_records_are_hash_bound_immutable_and_approval_cas_is_durable(
         "service = ScenarioAApprovalService(PostgresPlanApprovalAdapter(database_url))\n"
         "result = service.request_pending(context, recommendation, current_source_versions=context.source_versions, policy_version='scenario_a_policy:v1', requested_at=now, expires_at=now + timedelta(hours=4))\n"
         "assert result.approval.plan_hash == result.plan.plan_hash\n"
-        "approved = service.approve(approval_id=result.approval.approval_id, expected_plan_hash=result.plan.plan_hash, current_source_versions=context.source_versions, decided_at=now + timedelta(minutes=1))\n"
+        "approved = service.approve(approval_id=result.approval.approval_id, expected_plan_hash=result.plan.plan_hash, decider_id=actor.user_id, current_source_versions=context.source_versions, decided_at=now + timedelta(minutes=1))\n"
         "assert approved.status is ApprovalStatus.APPROVED\n"
         "try:\n"
         "    with create_engine(database_url).begin() as connection:\n"

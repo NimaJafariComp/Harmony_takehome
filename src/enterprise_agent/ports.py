@@ -149,9 +149,32 @@ class PlanApprovalPort(Protocol):
         self,
         approval_id: ApprovalId,
         expected_plan_hash: str,
+        decider_id: UserId,
         decided_at: datetime,
     ) -> Approval | None:
-        """Atomically approve one still-pending, still-unexpired plan-hash binding."""
+        """Atomically approve one active unexpired request assigned to its deciding approver."""
+        ...
+
+    def reject(
+        self,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decider_id: UserId,
+        decided_at: datetime,
+    ) -> Approval | None:
+        """Atomically reject one active unexpired request assigned to its deciding approver."""
+        ...
+
+    def reroute(
+        self,
+        approval_id: ApprovalId,
+        *,
+        expected_plan_hash: str,
+        original_approver_id: UserId,
+        backup_approver_id: UserId,
+        routed_at: datetime,
+    ) -> Approval | None:
+        """Atomically transfer only an unanswered request to its designated backup approver."""
         ...
 
 

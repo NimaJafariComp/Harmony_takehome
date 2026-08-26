@@ -95,13 +95,26 @@ SELECT_PLAN_AND_APPROVAL_FOR_PLAN = text("""
     JOIN plans ON plans.id = approvals.plan_id
     WHERE approvals.plan_id = CAST(:plan_id AS UUID)
 """)
-APPROVE_PENDING = text("""
+DECIDE_ACTIVE_APPROVAL = text("""
     UPDATE approvals
-    SET status = :approved_status, decided_at = :decided_at
+    SET status = :decision_status, decided_at = :decided_at
+    WHERE id = CAST(:approval_id AS UUID)
+      AND status IN (:pending_status, :rerouted_status)
+      AND plan_hash = :expected_plan_hash
+      AND approver_id = CAST(:decider_id AS UUID)
+      AND expires_at > :decided_at
+    RETURNING id, plan_id, plan_hash, requester_id, approver_id, status, requested_at, expires_at,
+              decided_at
+""")
+REROUTE_PENDING_APPROVAL = text("""
+    UPDATE approvals
+    SET approver_id = CAST(:backup_approver_id AS UUID),
+        status = :rerouted_status
     WHERE id = CAST(:approval_id AS UUID)
       AND status = :pending_status
       AND plan_hash = :expected_plan_hash
-      AND expires_at > :decided_at
+      AND approver_id = CAST(:original_approver_id AS UUID)
+      AND expires_at > :routed_at
     RETURNING id, plan_id, plan_hash, requester_id, approver_id, status, requested_at, expires_at,
               decided_at
 """)
@@ -151,18 +164,83 @@ class PostgresPlanApprovalAdapter:
         self,
         approval_id: ApprovalId,
         expected_plan_hash: str,
+        decider_id: UserId,
         decided_at: datetime,
     ) -> Approval | None:
-        """Atomically advance only an unexpired pending approval with the requested plan hash."""
+        """Atomically approve only a current approver's active unexpired plan-hash binding."""
+        return self._decide(
+            approval_id,
+            expected_plan_hash,
+            decider_id,
+            ApprovalStatus.APPROVED,
+            decided_at,
+        )
+
+    def reject(
+        self,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decider_id: UserId,
+        decided_at: datetime,
+    ) -> Approval | None:
+        """Atomically reject only a current approver's active unexpired plan-hash binding."""
+        return self._decide(
+            approval_id,
+            expected_plan_hash,
+            decider_id,
+            ApprovalStatus.REJECTED,
+            decided_at,
+        )
+
+    def reroute(
+        self,
+        approval_id: ApprovalId,
+        *,
+        expected_plan_hash: str,
+        original_approver_id: UserId,
+        backup_approver_id: UserId,
+        routed_at: datetime,
+    ) -> Approval | None:
+        """Transfer exactly one still-pending request while retaining its immutable plan binding."""
         with self._engine.begin() as connection:
             row = (
                 connection.execute(
-                    APPROVE_PENDING,
+                    REROUTE_PENDING_APPROVAL,
                     {
                         "approval_id": str(approval_id),
                         "expected_plan_hash": expected_plan_hash,
-                        "approved_status": ApprovalStatus.APPROVED.value,
                         "pending_status": ApprovalStatus.PENDING.value,
+                        "rerouted_status": ApprovalStatus.REROUTED.value,
+                        "original_approver_id": str(original_approver_id),
+                        "backup_approver_id": str(backup_approver_id),
+                        "routed_at": routed_at,
+                    },
+                )
+                .mappings()
+                .one_or_none()
+            )
+        return None if row is None else _approval_from_row(row)
+
+    def _decide(
+        self,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decider_id: UserId,
+        decision: ApprovalStatus,
+        decided_at: datetime,
+    ) -> Approval | None:
+        """Share the exact compare-and-swap boundary for approval and rejection terminal decisions."""
+        with self._engine.begin() as connection:
+            row = (
+                connection.execute(
+                    DECIDE_ACTIVE_APPROVAL,
+                    {
+                        "approval_id": str(approval_id),
+                        "expected_plan_hash": expected_plan_hash,
+                        "decider_id": str(decider_id),
+                        "decision_status": decision.value,
+                        "pending_status": ApprovalStatus.PENDING.value,
+                        "rerouted_status": ApprovalStatus.REROUTED.value,
                         "decided_at": decided_at,
                     },
                 )

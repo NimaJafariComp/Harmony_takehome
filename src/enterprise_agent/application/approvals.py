@@ -16,7 +16,7 @@ from enterprise_agent.application.planning import (
     EnterWorkflowRecommendation,
     ScenarioARecommendation,
 )
-from enterprise_agent.domain import Approval, ApprovalId, ApprovalStatus, Plan, PlanId
+from enterprise_agent.domain import Approval, ApprovalId, ApprovalStatus, Plan, PlanId, UserId
 from enterprise_agent.ports import PlanApprovalPort
 
 
@@ -47,13 +47,28 @@ class _ScenarioAGate(Protocol):
         ...
 
 
+class _ApprovalEscalationScheduler(Protocol):
+    """Schedule one deterministic end-of-day check after a pending approval is persisted."""
+
+    def schedule_escalation(self, approval: Approval) -> object:
+        """Persist the replay-safe escalation task for this exact approval request."""
+        ...
+
+
 class ScenarioAApprovalService:
     """Persist a write intent only after a fresh gate result requires human approval."""
 
-    def __init__(self, store: PlanApprovalPort, *, gate: _ScenarioAGate | None = None) -> None:
+    def __init__(
+        self,
+        store: PlanApprovalPort,
+        *,
+        gate: _ScenarioAGate | None = None,
+        escalation_scheduler: _ApprovalEscalationScheduler | None = None,
+    ) -> None:
         """Depend on a transactional persistence port and the deterministic Scenario A gate."""
         self._store = store
         self._gate = gate or ScenarioAGate()
+        self._escalation_scheduler = escalation_scheduler
 
     def request_pending(
         self,
@@ -118,6 +133,8 @@ class ScenarioAApprovalService:
             expires_at=expires_at,
         )
         self._store.create_pending(plan, approval)
+        if self._escalation_scheduler is not None:
+            self._escalation_scheduler.schedule_escalation(approval)
         return PendingPlanApproval(plan=plan, approval=approval, gate_decision=decision)
 
     def approve(
@@ -125,6 +142,7 @@ class ScenarioAApprovalService:
         *,
         approval_id: ApprovalId,
         expected_plan_hash: str,
+        decider_id: UserId,
         current_source_versions: Mapping[str, int],
         decided_at: datetime,
     ) -> Approval:
@@ -133,8 +151,10 @@ class ScenarioAApprovalService:
         if record is None:
             raise PlanNotApprovableError("approval does not exist")
         plan, approval = record
-        if approval.status is not ApprovalStatus.PENDING:
-            raise PlanNotApprovableError("approval is no longer pending")
+        if approval.status not in {ApprovalStatus.PENDING, ApprovalStatus.REROUTED}:
+            raise PlanNotApprovableError("approval is no longer pending or rerouted")
+        if decider_id != approval.approver_id:
+            raise PlanNotApprovableError("approval decision actor is not the current approver")
         if decided_at >= plan.expires_at or decided_at >= approval.expires_at:
             raise PlanNotApprovableError("plan approval has expired")
         if expected_plan_hash != plan.plan_hash or approval.plan_hash != plan.plan_hash:
@@ -146,10 +166,40 @@ class ScenarioAApprovalService:
         if dict(current_source_versions) != dict(plan.source_versions):
             raise PlanNotApprovableError("plan source evidence is stale")
 
-        approved = self._store.approve(approval_id, expected_plan_hash, decided_at)
+        approved = self._store.approve(approval_id, expected_plan_hash, decider_id, decided_at)
         if approved is None:
             raise PlanNotApprovableError("approval could not be atomically advanced")
         return approved
+
+    def reject(
+        self,
+        *,
+        approval_id: ApprovalId,
+        expected_plan_hash: str,
+        decider_id: UserId,
+        decided_at: datetime,
+    ) -> Approval:
+        """Let only the current approver reject the same still-valid immutable plan binding."""
+        record = self._store.load(approval_id)
+        if record is None:
+            raise PlanNotApprovableError("approval does not exist")
+        plan, approval = record
+        if approval.status not in {ApprovalStatus.PENDING, ApprovalStatus.REROUTED}:
+            raise PlanNotApprovableError("approval is no longer pending or rerouted")
+        if decider_id != approval.approver_id:
+            raise PlanNotApprovableError("approval decision actor is not the current approver")
+        if decided_at >= plan.expires_at or decided_at >= approval.expires_at:
+            raise PlanNotApprovableError("plan approval has expired")
+        if expected_plan_hash != plan.plan_hash or approval.plan_hash != plan.plan_hash:
+            raise PlanNotApprovableError("approval does not match the expected plan hash")
+        if recompute_plan_hash(plan) != plan.plan_hash:
+            raise PlanNotApprovableError(
+                "persisted plan hash does not match immutable plan content"
+            )
+        rejected = self._store.reject(approval_id, expected_plan_hash, decider_id, decided_at)
+        if rejected is None:
+            raise PlanNotApprovableError("approval could not be atomically advanced")
+        return rejected
 
 
 def recompute_plan_hash(plan: Plan) -> str:

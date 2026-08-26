@@ -101,7 +101,7 @@ def test_seeded_scenario_a_creates_only_one_pending_approval_and_no_erp_writes(
         "    assert connection.execute(text(\"SELECT status FROM approvals WHERE id = CAST(:approval_id AS UUID)\"), {'approval_id': str(pending.approval.approval_id)}).scalar_one() == 'pending'\n"
         '    assert connection.execute(text("SELECT id::text, supplier_id::text, ordered_quantity::text, received_quantity::text, status, source_version FROM purchase_orders ORDER BY id")).all() == before_purchase_orders\n'
         "    assert connection.execute(text('SELECT COUNT(*) FROM workflow_instances')).scalar_one() == 0\n"
-        "approved = service.approve(approval_id=pending.approval.approval_id, expected_plan_hash=pending.plan.plan_hash, current_source_versions=context.source_versions, decided_at=now + timedelta(minutes=1))\n"
+        "approved = service.approve(approval_id=pending.approval.approval_id, expected_plan_hash=pending.plan.plan_hash, decider_id=actor.user_id, current_source_versions=context.source_versions, decided_at=now + timedelta(minutes=1))\n"
         "assert approved.status is ApprovalStatus.APPROVED\n"
         "with engine.connect() as connection:\n"
         "    assert connection.execute(text(\"SELECT status FROM approvals WHERE id = CAST(:approval_id AS UUID)\"), {'approval_id': str(pending.approval.approval_id)}).scalar_one() == 'approved'\n"
