@@ -26,6 +26,7 @@ from enterprise_agent.ports import (
     ErpPort,
     EvidenceQuery,
     IdentityPort,
+    KnowledgePort,
     LLMMessage,
     LLMPort,
     MailPort,
@@ -64,6 +65,19 @@ def evidence() -> Evidence:
     )
 
 
+def knowledge_evidence() -> Evidence:
+    """Return one provider-owned bulletin fact without conflating it with ERP evidence."""
+    return Evidence(
+        evidence_id=EvidenceId("knowledge:bulletin-1"),
+        source="knowledge",
+        record_type="supplier_risk_bulletin",
+        record_id="bulletin-1",
+        source_version=2,
+        observed_at=NOW,
+        payload={"status": "active"},
+    )
+
+
 class FakeEvidenceProvider:
     """In-memory implementation shared by the three read-only providers."""
 
@@ -71,6 +85,15 @@ class FakeEvidenceProvider:
         assert actor_context.user_id == UserId("dana")
         assert query.record_types == frozenset({"purchase_order"})
         return (evidence(),)
+
+
+class FakeKnowledgeProvider:
+    """In-memory scoped knowledge provider for the future Scenario C boundary."""
+
+    def query(self, actor_context: ActorContext, query: EvidenceQuery) -> tuple[Evidence, ...]:
+        assert actor_context.user_id == UserId("dana")
+        assert query.record_types == frozenset({"supplier_risk_bulletin"})
+        return (knowledge_evidence(),)
 
 
 class FakeIdentity:
@@ -133,12 +156,14 @@ class FakeLLM:
 def test_application_depends_on_explicit_provider_and_control_plane_ports() -> None:
     """Every planned adapter boundary is structural, typed, and independently fakeable."""
     evidence_provider = FakeEvidenceProvider()
+    knowledge_provider = FakeKnowledgeProvider()
     identity = FakeIdentity()
     clock = FakeClock()
     audit = FakeAudit()
     scheduler = FakeScheduler()
     llm = FakeLLM()
     query = EvidenceQuery(record_types=frozenset({"purchase_order"}))
+    knowledge_query = EvidenceQuery(record_types=frozenset({"supplier_risk_bulletin"}))
     planned_attention = AttentionItem(
         attention_id=AttentionId("attention-1"),
         scenario="scenario_a",
@@ -188,12 +213,14 @@ def test_application_depends_on_explicit_provider_and_control_plane_ports() -> N
     assert isinstance(evidence_provider, ErpPort)
     assert isinstance(evidence_provider, MailPort)
     assert isinstance(evidence_provider, CalendarPort)
+    assert isinstance(knowledge_provider, KnowledgePort)
     assert isinstance(identity, IdentityPort)
     assert isinstance(clock, ClockPort)
     assert isinstance(audit, AuditPort)
     assert isinstance(scheduler, SchedulerPort)
     assert isinstance(llm, LLMPort)
     assert evidence_provider.query(actor(), query) == (evidence(),)
+    assert knowledge_provider.query(actor(), knowledge_query) == (knowledge_evidence(),)
     assert identity.actor_for(UserId("dana")) == actor()
     assert clock.now() == NOW
 

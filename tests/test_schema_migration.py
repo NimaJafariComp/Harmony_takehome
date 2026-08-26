@@ -80,6 +80,7 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "user_scopes",
         "parts",
         "suppliers",
+        "supplier_risk_bulletins",
         "purchase_orders",
         "production_orders",
         "quality_lots",
@@ -97,6 +98,15 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert expected_tables.issubset(schema["tables"])
     assert {"email", "role", "approval_limit_amount"}.issubset(schema["columns"]["users"])
     assert {"part_id", "supplier_id", "status"}.issubset(schema["columns"]["purchase_orders"])
+    assert {
+        "bulletin_key",
+        "supplier_id",
+        "purchase_order_id",
+        "production_order_id",
+        "status",
+        "source_version",
+        "superseded_by_id",
+    }.issubset(schema["columns"]["supplier_risk_bulletins"])
     assert "supervisor_id" in schema["columns"]["production_orders"]
     assert {"approver_id", "plan_hash", "policy_version", "source_versions"}.issubset(
         schema["columns"]["plans"]
@@ -137,6 +147,12 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert {"part_id->parts", "supplier_id->suppliers"}.issubset(
         schema["foreign_keys"]["purchase_orders"]
     )
+    assert {
+        "supplier_id->suppliers",
+        "purchase_order_id->purchase_orders",
+        "production_order_id->production_orders",
+        "superseded_by_id->supplier_risk_bulletins",
+    }.issubset(schema["foreign_keys"]["supplier_risk_bulletins"])
     assert "supervisor_id->users" in schema["foreign_keys"]["production_orders"]
     assert "attention_id->attention_items" in schema["foreign_keys"]["plans"]
     assert "approver_id->users" in schema["foreign_keys"]["plans"]
@@ -144,6 +160,10 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert "workflow_instance_id->workflow_instances" in schema["foreign_keys"]["workflow_steps"]
     assert "workflow_instance_id->workflow_instances" in schema["foreign_keys"]["tool_invocations"]
     assert "ix_purchase_orders_part_id_status" in schema["indexes"]["purchase_orders"]
+    assert (
+        "ix_supplier_risk_bulletins_supplier_id_status"
+        in schema["indexes"]["supplier_risk_bulletins"]
+    )
     assert "ix_production_orders_supervisor_id" in schema["indexes"]["production_orders"]
     assert "ix_messages_purchase_order_id_received_at" in schema["indexes"]["messages"]
     assert "ix_attention_items_status_created_at" in schema["indexes"]["attention_items"]
@@ -155,6 +175,14 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
         "ix_tool_invocations_workflow_instance_id_status" in schema["indexes"]["tool_invocations"]
     )
     assert "ix_audit_events_run_id_occurred_at" in schema["indexes"]["audit_events"]
+    assert (
+        "uq_supplier_risk_bulletins_supplier_key_version"
+        in schema["unique_constraints"]["supplier_risk_bulletins"]
+    )
+    assert (
+        "ck_supplier_risk_bulletins_source_version_positive"
+        in schema["check_constraints"]["supplier_risk_bulletins"]
+    )
 
 
 def test_integrity_migration_enforces_dedupe_idempotency_and_source_versions(

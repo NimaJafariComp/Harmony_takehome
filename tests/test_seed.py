@@ -421,6 +421,37 @@ def test_scenario_a_seed_contains_a_cheaper_faster_but_unapproved_supplier_bait(
     }
 
 
+def test_scenario_c_seed_binds_one_current_bulletin_to_one_open_po_and_production_impact() -> None:
+    """Scenario C starts with current, superseded, inactive, and unauthorized knowledge facts."""
+    from enterprise_agent.seed import (
+        ID_DANA,
+        ID_PO_C9001_W,
+        ID_PRODUCTION_C9001,
+        ID_SUPPLIER_W,
+        SEED_ROWS,
+    )
+
+    bulletins = [row.values for row in SEED_ROWS if row.table == "supplier_risk_bulletins"]
+    active = next(row for row in bulletins if row["status"] == "active")
+    superseded = next(row for row in bulletins if row["status"] == "superseded")
+    inactive = next(row for row in bulletins if row["status"] == "inactive")
+    dana_scopes = {
+        row.values["scope"]
+        for row in SEED_ROWS
+        if row.table == "user_scopes" and row.values["user_id"] == ID_DANA
+    }
+
+    assert active["supplier_id"] == ID_SUPPLIER_W
+    assert active["purchase_order_id"] == ID_PO_C9001_W
+    assert active["production_order_id"] == ID_PRODUCTION_C9001
+    assert active["source_version"] == 2
+    assert superseded["superseded_by_id"] == active["id"]
+    assert superseded["source_version"] == 1
+    assert inactive["supplier_id"] != active["supplier_id"]
+    assert inactive["status"] == "inactive"
+    assert "knowledge:bulletin:read" in dana_scopes
+
+
 def test_reset_and_seed_execute_one_safe_transaction_each(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
