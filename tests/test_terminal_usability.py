@@ -136,6 +136,50 @@ def test_guide_json_is_one_stable_envelope_without_human_decoration() -> None:
     }
 
 
+def test_default_noninteractive_entry_is_a_compact_guide_without_a_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pipes retain safe command discovery rather than attempting to start an interactive shell."""
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: False)
+    monkeypatch.setattr(
+        "typer.prompt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("non-TTY must not prompt")),
+    )
+
+    result = CliRunner().invoke(cli.app, [])
+
+    assert result.exit_code == 0
+    assert "Reviewer guide" in result.stdout
+    assert "enterprise-agent demo --list" in result.stdout
+    assert "enterprise-agent status" in result.stdout
+
+
+def test_default_json_entry_remains_one_command_directory_envelope() -> None:
+    """A script that omits a subcommand still receives stable JSON and no menu decoration."""
+    result = CliRunner().invoke(cli.app, ["--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "succeeded"
+    assert payload["summary"] == "Reviewer command guide."
+    assert payload["data"]["commands"][0]["command"] == "enterprise-agent demo --list"
+
+
+def test_application_shell_routes_keyboard_choices_to_demo_and_operator_modes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TTY navigation is an app shell that delegates to existing safe command flows."""
+    choices = iter(("1", "2", "q"))
+    routed: list[str] = []
+    monkeypatch.setattr(cli, "_prompt_with_cancellation", lambda *_args, **_kwargs: next(choices))
+    monkeypatch.setattr(cli, "_run_demo_shell", lambda: routed.append("demo"))
+    monkeypatch.setattr(cli, "_run_operator_shell", lambda: routed.append("operator"))
+
+    cli._run_application_shell()
+
+    assert routed == ["demo", "operator"]
+
+
 def test_status_json_and_no_color_preserve_semantics_and_copyable_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -12,8 +12,10 @@ from enterprise_agent.presentation.terminal import (
     BoundedProgress,
     CommandGuideEntry,
     ConfirmationSummary,
+    DemoCatalogueEntry,
     EvidenceDisposition,
     EvidenceSummary,
+    MenuEntry,
     StatusSummary,
     TerminalPresenter,
     TerminalState,
@@ -221,3 +223,55 @@ def test_presenter_renders_a_compact_command_guide_with_examples() -> None:
     assert "enterprise-agent demo --list" in rendered
     assert "enterprise-agent status" in rendered
     assert "enterprise-agent --install-completion" in rendered
+
+
+def test_presenter_renders_a_bounded_home_and_demo_catalogue() -> None:
+    """The interactive shell exposes short, scanable paths instead of a prose stream."""
+    presenter, output = _presenter(width=88)
+
+    presenter.render_app_shell(
+        title="Enterprise agent",
+        subtitle="Local purchasing and quality control plane",
+        entries=(
+            MenuEntry(
+                key="1",
+                title="Guided company demo",
+                description="Run one deterministic business story.",
+                boundary="Local synthetic data; no live provider.",
+            ),
+            MenuEntry(
+                key="2",
+                title="Normal operator mode",
+                description="Inspect status, audit, usage, and local LLM checks.",
+                boundary="Reads are safe; writes retain confirmation.",
+            ),
+        ),
+        prompt="Choose 1, 2, or q to quit.",
+    )
+    presenter.render_demo_catalogue(
+        entries=(
+            DemoCatalogueEntry(
+                key="1",
+                title="Scenario A safe reroute",
+                summary="Rejects the cheaper, faster unapproved supplier.",
+                mode="Stages pending approval",
+            ),
+            DemoCatalogueEntry(
+                key="2",
+                title="Scenario A recovery",
+                summary="Restarts after a replacement-PO crash without a duplicate.",
+                mode="Fixture walkthrough",
+            ),
+        ),
+        prompt="Choose a case number, b to return, or q to quit.",
+    )
+
+    rendered = output.getvalue()
+    assert "Enterprise agent" in rendered
+    assert "Guided company demo" in rendered
+    assert "Normal operator mode" in rendered
+    assert "Local synthetic data; no live provider." in rendered
+    assert "Scenario A safe reroute" in rendered
+    assert "Rejects the cheaper, faster unapproved supplier." in rendered
+    assert "Stages pending approval" in rendered
+    assert "Choose a case number, b to return, or q to quit." in rendered
