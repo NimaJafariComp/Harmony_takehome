@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from enterprise_agent import cli
+from enterprise_agent.domain import AuditEvent, AuditEventId, RunId
 from enterprise_agent.seed import SeedSafetyError
 
 pytestmark = pytest.mark.unit
@@ -106,3 +107,47 @@ def test_clock_advance_command_uses_the_local_persisted_clock(
     assert created_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
     assert advanced_by == [timedelta(hours=24)]
     assert invalid.exit_code == 2
+
+
+def test_audit_explain_command_renders_a_read_only_run_story(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operators can request reconstruction by run ID without loading any live business provider."""
+    created_urls: list[str] = []
+    run_id = RunId("run-cli-audit")
+    event = AuditEvent(
+        event_id=AuditEventId("event-cli-audit"),
+        occurred_at=datetime(2026, 8, 25, 9, tzinfo=UTC),
+        event_type="attention.detected",
+        run_id=run_id,
+        actor_id=None,
+        attention_id=None,
+        workflow_id=None,
+        plan_id=None,
+        evidence_ids=(),
+        payload={"part_id": "part-101", "production_order_id": "order-301"},
+        policy_version=None,
+        plan_hash=None,
+        idempotency_key=None,
+        failure_category=None,
+    )
+
+    class RecordingAudit:
+        """Return only the audit event that the CLI explainer may read."""
+
+        def __init__(self, database_url: str) -> None:
+            created_urls.append(database_url)
+
+        def events_for_run(self, requested_run_id: RunId) -> tuple[AuditEvent, ...]:
+            assert requested_run_id == run_id
+            return (event,)
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "PostgresAuditAdapter", RecordingAudit, raising=False)
+
+    result = CliRunner().invoke(cli.app, ["audit", "explain", str(run_id)])
+
+    assert result.exit_code == 0
+    assert "Audit explanation for run run-cli-audit (1 events)" in result.stdout
+    assert "Detected stockout risk for part part-101" in result.stdout
+    assert created_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
