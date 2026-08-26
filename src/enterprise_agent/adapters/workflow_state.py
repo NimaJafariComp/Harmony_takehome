@@ -165,6 +165,147 @@ ADVANCE_WORKFLOW_AFTER_TOOL = text("""
       AND current_step = :previous_step_index
     RETURNING id
 """)
+FAIL_TOOL_STEP = text("""
+    UPDATE workflow_steps AS step
+    SET status = :failed_step_status,
+        error = :error,
+        completed_at = :failed_at,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = :failed_at
+    FROM workflow_instances AS workflow
+    WHERE step.workflow_instance_id = workflow.id
+      AND workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :running_workflow_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :failed_at
+      AND workflow.current_step = :previous_step_index
+      AND step.step_index = :expected_step_index
+      AND step.tool_name IS NOT NULL
+      AND step.status = :running_step_status
+      AND step.idempotency_key = :idempotency_key
+    RETURNING step.id
+""")
+FAIL_WORKFLOW_AFTER_TOOL = text("""
+    UPDATE workflow_instances
+    SET status = :failed_workflow_status,
+        last_error = :error,
+        updated_at = :failed_at
+    WHERE id = CAST(:workflow_id AS UUID)
+      AND status = :running_workflow_status
+      AND lease_owner = :worker_id
+      AND lease_expires_at > :failed_at
+      AND current_step = :previous_step_index
+    RETURNING id
+""")
+BEGIN_COMPENSATION = text("""
+    UPDATE workflow_instances AS workflow
+    SET status = CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM workflow_steps AS step
+                WHERE step.workflow_instance_id = workflow.id
+                  AND step.tool_name IS NOT NULL
+                  AND step.status = :succeeded_step_status
+            ) THEN :compensating_workflow_status
+            ELSE :compensated_workflow_status
+        END,
+        completed_at = CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM workflow_steps AS step
+                WHERE step.workflow_instance_id = workflow.id
+                  AND step.tool_name IS NOT NULL
+                  AND step.status = :succeeded_step_status
+            ) THEN completed_at
+            ELSE :started_at
+        END,
+        lease_owner = CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM workflow_steps AS step
+                WHERE step.workflow_instance_id = workflow.id
+                  AND step.tool_name IS NOT NULL
+                  AND step.status = :succeeded_step_status
+            ) THEN lease_owner
+            ELSE NULL
+        END,
+        lease_expires_at = CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM workflow_steps AS step
+                WHERE step.workflow_instance_id = workflow.id
+                  AND step.tool_name IS NOT NULL
+                  AND step.status = :succeeded_step_status
+            ) THEN lease_expires_at
+            ELSE NULL
+        END,
+        updated_at = :started_at
+    WHERE workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :failed_workflow_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :started_at
+    RETURNING workflow.id
+""")
+START_COMPENSATION_STEP = text("""
+    UPDATE workflow_steps AS step
+    SET status = :compensating_step_status,
+        lease_owner = :worker_id,
+        lease_expires_at = workflow.lease_expires_at,
+        updated_at = :started_at
+    FROM workflow_instances AS workflow
+    WHERE step.workflow_instance_id = workflow.id
+      AND workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :compensating_workflow_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :started_at
+      AND step.step_index = :expected_step_index
+      AND step.tool_name IS NOT NULL
+      AND step.status = :succeeded_step_status
+    RETURNING step.id
+""")
+COMPLETE_COMPENSATION_STEP = text("""
+    UPDATE workflow_steps AS step
+    SET status = :compensated_step_status,
+        result = jsonb_build_object(
+            'effect', COALESCE(step.result, '{}'::jsonb),
+            'compensation', CAST(:result AS JSONB)
+        ),
+        completed_at = :completed_at,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = :completed_at
+    FROM workflow_instances AS workflow
+    WHERE step.workflow_instance_id = workflow.id
+      AND workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :compensating_workflow_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :completed_at
+      AND step.step_index = :expected_step_index
+      AND step.tool_name IS NOT NULL
+      AND step.status = :compensating_step_status
+    RETURNING step.id
+""")
+FINISH_COMPENSATION = text("""
+    UPDATE workflow_instances AS workflow
+    SET status = :compensated_workflow_status,
+        completed_at = :completed_at,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = :completed_at
+    WHERE workflow.id = CAST(:workflow_id AS UUID)
+      AND workflow.status = :compensating_workflow_status
+      AND workflow.lease_owner = :worker_id
+      AND workflow.lease_expires_at > :completed_at
+      AND NOT EXISTS (
+          SELECT 1
+          FROM workflow_steps AS step
+          WHERE step.workflow_instance_id = workflow.id
+            AND step.tool_name IS NOT NULL
+            AND step.status = :succeeded_step_status
+      )
+    RETURNING workflow.id
+""")
 
 
 class PostgresWorkflowStateAdapter:
@@ -306,6 +447,127 @@ class PostgresWorkflowStateAdapter:
             ).scalar_one_or_none()
             if advanced is None:
                 raise RuntimeError("workflow cursor was lost while completing a declared tool")
+            return _load_snapshot(connection, workflow_id)
+
+    def fail_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        error: str,
+        failed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Persist one terminal external failure without releasing the lease needed to unwind it."""
+        with self._engine.begin() as connection:
+            parameters = {
+                "workflow_id": str(workflow_id),
+                "worker_id": worker_id,
+                "expected_step_index": expected_step_index,
+                "previous_step_index": expected_step_index - 1,
+                "idempotency_key": idempotency_key,
+                "error": error,
+                "failed_at": failed_at,
+                "running_workflow_status": WorkflowStatus.RUNNING.value,
+                "failed_workflow_status": WorkflowStatus.FAILED.value,
+                "running_step_status": WorkflowStepStatus.RUNNING.value,
+                "failed_step_status": WorkflowStepStatus.FAILED.value,
+            }
+            failed = connection.execute(FAIL_TOOL_STEP, parameters).scalar_one_or_none()
+            if failed is None:
+                return None
+            workflow_failed = connection.execute(
+                FAIL_WORKFLOW_AFTER_TOOL, parameters
+            ).scalar_one_or_none()
+            if workflow_failed is None:
+                raise RuntimeError("workflow transition was lost while recording a tool failure")
+            return _load_snapshot(connection, workflow_id)
+
+    def begin_compensation(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Durably enter compensation, closing immediately when no external effect succeeded."""
+        with self._engine.begin() as connection:
+            started = connection.execute(
+                BEGIN_COMPENSATION,
+                {
+                    "workflow_id": str(workflow_id),
+                    "worker_id": worker_id,
+                    "started_at": started_at,
+                    "failed_workflow_status": WorkflowStatus.FAILED.value,
+                    "compensating_workflow_status": WorkflowStatus.COMPENSATING.value,
+                    "compensated_workflow_status": WorkflowStatus.COMPENSATED.value,
+                    "succeeded_step_status": WorkflowStepStatus.SUCCEEDED.value,
+                },
+            ).scalar_one_or_none()
+            if started is None:
+                return None
+            return _load_snapshot(connection, workflow_id)
+
+    def start_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Commit one reverse action's started lifecycle before calling the provider boundary."""
+        with self._engine.begin() as connection:
+            started = connection.execute(
+                START_COMPENSATION_STEP,
+                {
+                    "workflow_id": str(workflow_id),
+                    "worker_id": worker_id,
+                    "expected_step_index": expected_step_index,
+                    "started_at": started_at,
+                    "compensating_workflow_status": WorkflowStatus.COMPENSATING.value,
+                    "succeeded_step_status": WorkflowStepStatus.SUCCEEDED.value,
+                    "compensating_step_status": WorkflowStepStatus.COMPENSATING.value,
+                },
+            ).scalar_one_or_none()
+            if started is None:
+                return None
+            return _load_snapshot(connection, workflow_id)
+
+    def complete_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        result: Mapping[str, object],
+        finish_workflow: bool,
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Commit one reverse result and close the workflow only when no effect remains to unwind."""
+        with self._engine.begin() as connection:
+            parameters = {
+                "workflow_id": str(workflow_id),
+                "worker_id": worker_id,
+                "expected_step_index": expected_step_index,
+                "result": json.dumps(dict(result), sort_keys=True),
+                "completed_at": completed_at,
+                "compensating_workflow_status": WorkflowStatus.COMPENSATING.value,
+                "compensated_workflow_status": WorkflowStatus.COMPENSATED.value,
+                "compensating_step_status": WorkflowStepStatus.COMPENSATING.value,
+                "compensated_step_status": WorkflowStepStatus.COMPENSATED.value,
+                "succeeded_step_status": WorkflowStepStatus.SUCCEEDED.value,
+            }
+            completed = connection.execute(
+                COMPLETE_COMPENSATION_STEP, parameters
+            ).scalar_one_or_none()
+            if completed is None:
+                return None
+            if finish_workflow:
+                finished = connection.execute(FINISH_COMPENSATION, parameters).scalar_one_or_none()
+                if finished is None:
+                    raise RuntimeError("workflow compensation completion was lost")
             return _load_snapshot(connection, workflow_id)
 
 

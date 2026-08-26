@@ -24,6 +24,7 @@ from enterprise_agent.domain import (
     ScenarioAStockoutTrigger,
     ScheduledTask,
     ScheduledTaskId,
+    ToolCompensation,
     ToolInvocation,
     UserId,
     WorkflowId,
@@ -214,6 +215,53 @@ class WorkflowStatePort(Protocol):
         """Atomically retain a tool result and advance only its still-current workflow cursor."""
         ...
 
+    def fail_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        error: str,
+        failed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Atomically record one terminal tool error while retaining the lease for compensation."""
+        ...
+
+    def begin_compensation(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Atomically move one failed workflow into its bounded compensation lifecycle."""
+        ...
+
+    def start_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Mark one completed external step as compensating before its reverse effect is invoked."""
+        ...
+
+    def complete_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        result: Mapping[str, object],
+        finish_workflow: bool,
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Retain one reverse result and close the workflow only after its final compensation."""
+        ...
+
 
 @runtime_checkable
 class ToolExecutionPort(Protocol):
@@ -221,6 +269,17 @@ class ToolExecutionPort(Protocol):
 
     def execute(self, actor: ActorContext, invocation: ToolInvocation) -> Mapping[str, object]:
         """Execute or return the durable result for this exact stable idempotency key."""
+        ...
+
+
+@runtime_checkable
+class ToolCompensationPort(Protocol):
+    """Invoke one independently idempotent reverse action for an existing external effect."""
+
+    def compensate(
+        self, actor: ActorContext, compensation: ToolCompensation
+    ) -> Mapping[str, object]:
+        """Compensate only the bound original effect or return its durable compensation result."""
         ...
 
 

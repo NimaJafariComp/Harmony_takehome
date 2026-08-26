@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from enterprise_agent.application.tools import (
+    CompensationAction,
     CreateReplacementPOInput,
     NotifyProductionInput,
     ReduceOrCancelPOInput,
@@ -19,6 +20,7 @@ from enterprise_agent.application.tools import (
 from enterprise_agent.domain import (
     ActorContext,
     Scope,
+    ToolCompensation,
     ToolInvocation,
     ToolInvocationId,
     ToolInvocationStatus,
@@ -63,6 +65,24 @@ def invocation(
         attempt_count=1,
         started_at=NOW,
         completed_at=None,
+    )
+
+
+def compensation(
+    action: CompensationAction,
+    effect_result: dict[str, object],
+    *,
+    original_tool: ToolName,
+) -> ToolCompensation:
+    """Build one reverse request bound to a completed Scenario A tool journal entry."""
+    return ToolCompensation(
+        workflow_id=WORKFLOW_ID,
+        tool_name=original_tool.value,
+        action=action.value,
+        original_idempotency_key=f"tool:v1:{original_tool.value}:test",
+        idempotency_key=f"compensation:v1:{action.value}:test",
+        effect_result=effect_result,
+        requested_at=NOW,
     )
 
 
@@ -320,6 +340,239 @@ def test_each_concrete_effect_persists_only_its_bounded_result() -> None:
     )
     assert scheduled["scheduled_task_id"] == "task-1"
     assert scheduled["due_at"] == "2026-08-25T09:00:00+00:00"
+
+
+def test_each_concrete_compensation_reverses_only_the_bound_provider_result() -> None:
+    """Each reverse action uses a provider-returned ID or optimistic prior-state facts, never a caller target."""
+    from enterprise_agent.adapters import tools
+
+    replacement_connection = MagicMock()
+    replacement_connection.execute.return_value = mapping_result(
+        one_or_none={
+            "purchase_order_id": "replacement-1",
+            "status": "cancelled",
+            "source_version": 2,
+        }
+    )
+    replacement = tools._execute_compensation_effect(
+        replacement_connection,
+        compensation(
+            CompensationAction.CANCEL_CREATED_REPLACEMENT_PO,
+            {"replacement_purchase_order_id": "replacement-1"},
+            original_tool=ToolName.CREATE_REPLACEMENT_PO,
+        ),
+    )
+    assert replacement == {
+        "replacement_purchase_order_id": "replacement-1",
+        "status": "cancelled",
+        "source_version": 2,
+    }
+    assert replacement_connection.execute.call_args.args[1]["replacement_purchase_order_id"] == (
+        "replacement-1"
+    )
+
+    original_connection = MagicMock()
+    original_connection.execute.return_value = mapping_result(
+        one_or_none={
+            "purchase_order_id": "original-1",
+            "ordered_quantity": Decimal(100),
+            "received_quantity": Decimal(40),
+            "status": "delayed",
+            "source_version": 4,
+        }
+    )
+    original = tools._execute_compensation_effect(
+        original_connection,
+        compensation(
+            CompensationAction.RESTORE_ORIGINAL_PURCHASE_ORDER,
+            {
+                "original_purchase_order_id": "original-1",
+                "previous_ordered_quantity": "100",
+                "previous_status": "delayed",
+                "ordered_quantity": "40",
+                "received_quantity": "40",
+                "status": "cancelled",
+                "source_version": 3,
+            },
+            original_tool=ToolName.REDUCE_OR_CANCEL_PO,
+        ),
+    )
+    assert original == {
+        "original_purchase_order_id": "original-1",
+        "ordered_quantity": "100",
+        "received_quantity": "40",
+        "status": "delayed",
+        "source_version": 4,
+    }
+    assert original_connection.execute.call_args.args[1]["source_version"] == 3
+
+    notification_connection = MagicMock()
+    notification_connection.execute.side_effect = [
+        mapping_result(
+            one_or_none={
+                "message_id": "message-1",
+                "recipient": "priya@example.com",
+                "subject": "Production update",
+            }
+        ),
+        mapping_result(one={"message_id": "correction-1"}),
+    ]
+    correction = tools._execute_compensation_effect(
+        notification_connection,
+        compensation(
+            CompensationAction.SEND_CORRECTION_NOTIFICATION,
+            {"message_id": "message-1"},
+            original_tool=ToolName.NOTIFY_PRODUCTION,
+        ),
+    )
+    assert correction == {
+        "message_id": "correction-1",
+        "recipient": "priya@example.com",
+        "reverses_message_id": "message-1",
+    }
+    assert notification_connection.execute.call_args_list[1].args[1]["recipient"] == (
+        "priya@example.com"
+    )
+
+    arrival_connection = MagicMock()
+    arrival_connection.execute.return_value = mapping_result(
+        one_or_none={"task_id": "task-1", "status": "cancelled"}
+    )
+    arrival = tools._execute_compensation_effect(
+        arrival_connection,
+        compensation(
+            CompensationAction.CANCEL_ARRIVAL_CHECK,
+            {"scheduled_task_id": "task-1"},
+            original_tool=ToolName.SCHEDULE_ARRIVAL_CHECK,
+        ),
+    )
+    assert arrival == {"scheduled_task_id": "task-1", "status": "cancelled"}
+    assert arrival_connection.execute.call_args.args[1]["original_idempotency_key"] == (
+        "tool:v1:schedule_arrival_check:test"
+    )
+
+
+def test_tool_compensation_rejects_tampered_original_provenance_and_replays_its_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reverse key cannot target another original result, while a completed compensation is replay-safe."""
+    from enterprise_agent.adapters import tools
+    from enterprise_agent.adapters.tools import ToolExecutionError
+
+    request = compensation(
+        CompensationAction.CANCEL_CREATED_REPLACEMENT_PO,
+        {"replacement_purchase_order_id": "replacement-1"},
+        original_tool=ToolName.CREATE_REPLACEMENT_PO,
+    )
+    with pytest.raises(ToolExecutionError, match="not safely compensable"):
+        tools._validate_original_for_compensation(
+            {
+                "workflow_instance_id": str(WORKFLOW_ID),
+                "tool_name": request.tool_name,
+                "idempotency_key": request.original_idempotency_key,
+                "status": ToolInvocationStatus.SUCCEEDED.value,
+                "result": {"replacement_purchase_order_id": "replacement-2"},
+            },
+            request,
+        )
+
+    engine = MagicMock()
+    connection = engine.begin.return_value.__enter__.return_value
+    inserted = MagicMock()
+    inserted.scalar_one_or_none.return_value = None
+    connection.execute.side_effect = [
+        inserted,
+        mapping_result(
+            one={
+                "workflow_instance_id": str(WORKFLOW_ID),
+                "tool_name": request.action,
+                "idempotency_key": request.idempotency_key,
+                "status": ToolInvocationStatus.SUCCEEDED.value,
+                "parameters": {
+                    "original_tool_name": request.tool_name,
+                    "original_idempotency_key": request.original_idempotency_key,
+                    "effect_result": dict(request.effect_result),
+                },
+                "result": {"replacement_purchase_order_id": "replacement-1", "status": "cancelled"},
+            }
+        ),
+    ]
+    monkeypatch.setattr(tools, "create_engine", lambda _: engine)
+
+    replayed = tools.PostgresScenarioAToolAdapter("postgresql+psycopg://ignored").compensate(
+        ACTOR, request
+    )
+
+    assert replayed == {"replacement_purchase_order_id": "replacement-1", "status": "cancelled"}
+    assert connection.execute.call_count == 2
+
+
+def test_tool_compensation_journals_a_new_reverse_effect_and_marks_its_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newly requested reverse effect locks matching original provenance before its provider write."""
+    from enterprise_agent.adapters import tools
+
+    request = compensation(
+        CompensationAction.CANCEL_CREATED_REPLACEMENT_PO,
+        {"replacement_purchase_order_id": "replacement-1"},
+        original_tool=ToolName.CREATE_REPLACEMENT_PO,
+    )
+    engine = MagicMock()
+    connection = engine.begin.return_value.__enter__.return_value
+    inserted = MagicMock()
+    inserted.scalar_one_or_none.return_value = "compensation-invocation-1"
+    connection.execute.side_effect = [
+        inserted,
+        mapping_result(
+            one={
+                "workflow_instance_id": str(WORKFLOW_ID),
+                "tool_name": request.action,
+                "idempotency_key": request.idempotency_key,
+                "status": ToolInvocationStatus.STARTED.value,
+                "parameters": {
+                    "original_tool_name": request.tool_name,
+                    "original_idempotency_key": request.original_idempotency_key,
+                    "effect_result": dict(request.effect_result),
+                },
+                "result": None,
+            }
+        ),
+        mapping_result(
+            one_or_none={
+                "workflow_instance_id": str(WORKFLOW_ID),
+                "tool_name": request.tool_name,
+                "idempotency_key": request.original_idempotency_key,
+                "status": ToolInvocationStatus.SUCCEEDED.value,
+                "parameters": {"unused": "original input remains journaled"},
+                "result": dict(request.effect_result),
+            }
+        ),
+        MagicMock(),
+        MagicMock(),
+    ]
+    monkeypatch.setattr(tools, "create_engine", lambda _: engine)
+    monkeypatch.setattr(
+        tools,
+        "_execute_compensation_effect",
+        lambda _connection, _compensation: {
+            "replacement_purchase_order_id": "replacement-1",
+            "status": "cancelled",
+        },
+    )
+
+    result = tools.PostgresScenarioAToolAdapter("postgresql+psycopg://ignored").compensate(
+        ACTOR, request
+    )
+
+    assert result == {"replacement_purchase_order_id": "replacement-1", "status": "cancelled"}
+    assert connection.execute.call_count == 5
+    assert connection.execute.call_args_list[3].args[1]["result"] == (
+        '{"replacement_purchase_order_id": "replacement-1", "status": "cancelled"}'
+    )
+    assert connection.execute.call_args_list[4].args[1]["original_idempotency_key"] == (
+        request.original_idempotency_key
+    )
 
 
 def test_tool_adapter_returns_the_original_external_result_on_idempotent_replay(

@@ -14,11 +14,14 @@ from enterprise_agent.application.tools import (
     NotifyProductionInput,
     ReduceOrCancelPOInput,
     ScheduleArrivalCheckInput,
+    TerminalToolExecutionError,
     ToolAuthorizationError,
     ToolInput,
     ToolName,
     authorize_tool,
+    build_compensation_idempotency_key,
     build_tool_idempotency_key,
+    tool_definition,
 )
 from enterprise_agent.application.workflows import (
     WorkflowDefinition,
@@ -32,6 +35,7 @@ from enterprise_agent.domain import (
     ApprovalStatus,
     Plan,
     PlanId,
+    ToolCompensation,
     ToolInvocation,
     ToolInvocationId,
     ToolInvocationStatus,
@@ -40,7 +44,12 @@ from enterprise_agent.domain import (
     WorkflowStatus,
     WorkflowStepStatus,
 )
-from enterprise_agent.ports import IdentityPort, ToolExecutionPort, WorkflowStatePort
+from enterprise_agent.ports import (
+    IdentityPort,
+    ToolCompensationPort,
+    ToolExecutionPort,
+    WorkflowStatePort,
+)
 
 
 class WorkflowExecutionRejectedError(PermissionError):
@@ -278,7 +287,27 @@ class ScenarioAWorkflowExecutor:
         ):
             raise WorkflowClaimLostError("workflow tool execution requires the active lease")
 
-        result = self._tool_executor.execute(started.actor, invocation)
+        try:
+            result = self._tool_executor.execute(started.actor, invocation)
+        except TerminalToolExecutionError as error:
+            failed = self._workflow_store.fail_tool_step(
+                workflow.workflow_id,
+                worker_id=worker_id,
+                expected_step_index=next_step.index,
+                idempotency_key=invocation.idempotency_key,
+                error=_safe_terminal_error(error),
+                failed_at=completed_at,
+            )
+            if failed is None:
+                raise WorkflowClaimLostError(
+                    "workflow terminal-failure transition was not acquired"
+                ) from error
+            self.compensate_failed_workflow(
+                workflow.workflow_id,
+                worker_id=worker_id,
+                now=completed_at,
+            )
+            raise
         if not isinstance(result, Mapping):
             raise WorkflowExecutionRejectedError("tool result must be a mapping")
         completed = self._workflow_store.complete_tool_step(
@@ -293,6 +322,111 @@ class ScenarioAWorkflowExecutor:
         if completed is None:
             raise WorkflowClaimLostError("workflow tool completion transition was not acquired")
         return completed
+
+    def compensate_failed_workflow(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        now: datetime,
+    ) -> WorkflowStateSnapshot:
+        """Reverse only this failed workflow's completed effects in declared reverse order."""
+        if self._tool_executor is None or not isinstance(self._tool_executor, ToolCompensationPort):
+            raise WorkflowToolExecutionUnavailableError(
+                "tool compensation executor is not configured"
+            )
+        snapshot = self._workflow_store.load(workflow_id)
+        if snapshot is None:
+            raise WorkflowExecutionRejectedError("workflow does not exist")
+        if snapshot.workflow.status is not WorkflowStatus.FAILED:
+            raise WorkflowExecutionRejectedError("workflow is not ready for compensation")
+        definition = _declared_definition(
+            snapshot,
+            plan=None,
+            allowed_statuses=frozenset({WorkflowStatus.FAILED}),
+        )
+        actor = self._compensation_actor(snapshot)
+        compensating = self._workflow_store.begin_compensation(
+            workflow_id,
+            worker_id=worker_id,
+            started_at=now,
+        )
+        if compensating is None:
+            raise WorkflowClaimLostError("workflow compensation transition was not acquired")
+        if compensating.workflow.status is WorkflowStatus.COMPENSATED:
+            return compensating
+
+        for step in reversed(compensating.steps):
+            if step.tool_name is None or step.status is not WorkflowStepStatus.SUCCEEDED:
+                continue
+            if step.idempotency_key is None or step.result is None:
+                raise WorkflowExecutionRejectedError(
+                    "completed external step lacks compensation provenance"
+                )
+            declared_step = definition.steps[step.step_index - 1]
+            if declared_step.tool_name is None or declared_step.tool_name.value != step.tool_name:
+                raise WorkflowExecutionRejectedError(
+                    "workflow stored steps do not match the declaration"
+                )
+            compensation = tool_definition(declared_step.tool_name).compensation
+            started = self._workflow_store.start_compensation_step(
+                workflow_id,
+                worker_id=worker_id,
+                expected_step_index=step.step_index,
+                started_at=now,
+            )
+            if started is None:
+                raise WorkflowClaimLostError("workflow compensation step was not acquired")
+            result = self._tool_executor.compensate(
+                actor,
+                ToolCompensation(
+                    workflow_id=workflow_id,
+                    tool_name=step.tool_name,
+                    action=compensation.value,
+                    original_idempotency_key=step.idempotency_key,
+                    idempotency_key=build_compensation_idempotency_key(
+                        workflow_id,
+                        step.step_index,
+                        compensation,
+                        step.idempotency_key,
+                    ),
+                    effect_result=step.result,
+                    requested_at=now,
+                ),
+            )
+            if not isinstance(result, Mapping):
+                raise WorkflowExecutionRejectedError("tool compensation result must be a mapping")
+            remaining_effects = sum(
+                candidate.tool_name is not None and candidate.status is WorkflowStepStatus.SUCCEEDED
+                for candidate in started.steps
+            )
+            completed = self._workflow_store.complete_compensation_step(
+                workflow_id,
+                worker_id=worker_id,
+                expected_step_index=step.step_index,
+                result=dict(result),
+                finish_workflow=remaining_effects == 0,
+                completed_at=now,
+            )
+            if completed is None:
+                raise WorkflowClaimLostError("workflow compensation completion was not acquired")
+            compensating = completed
+        if compensating.workflow.status is not WorkflowStatus.COMPENSATED:
+            raise WorkflowExecutionRejectedError(
+                "workflow compensation did not reach a terminal state"
+            )
+        return compensating
+
+    def _compensation_actor(self, snapshot: WorkflowStateSnapshot) -> ActorContext:
+        """Resolve the current initiating identity without relying on expired approval freshness."""
+        binding = self._approvals.load_for_plan(snapshot.workflow.plan_id)
+        if binding is None:
+            raise WorkflowExecutionRejectedError("workflow has no approval binding")
+        plan, _ = binding
+        actor = self._identity.actor_for(plan.actor_id)
+        if actor.user_id != plan.actor_id:
+            raise WorkflowExecutionRejectedError("workflow actor identity does not match the plan")
+        return actor
 
 
 def _revalidate_execution(
@@ -337,11 +471,16 @@ def _revalidate_execution(
 
 
 def _declared_definition(
-    snapshot: WorkflowStateSnapshot, *, plan: Plan | None
+    snapshot: WorkflowStateSnapshot,
+    *,
+    plan: Plan | None,
+    allowed_statuses: frozenset[WorkflowStatus] = frozenset(
+        {WorkflowStatus.PENDING, WorkflowStatus.RUNNING}
+    ),
 ) -> WorkflowDefinition:
     """Validate workflow/plan identity and every stored step against the reviewed declaration."""
     workflow = snapshot.workflow
-    if workflow.status not in {WorkflowStatus.PENDING, WorkflowStatus.RUNNING}:
+    if workflow.status not in allowed_statuses:
         raise WorkflowExecutionRejectedError("workflow is not runnable")
     if (workflow.lease_owner is None) != (workflow.lease_expires_at is None):
         raise WorkflowExecutionRejectedError("workflow lease state is invalid")
@@ -547,3 +686,8 @@ def _next_tuesday_at_nine(now: datetime) -> datetime:
         time(9),
         tzinfo=now.tzinfo,
     )
+
+
+def _safe_terminal_error(error: TerminalToolExecutionError) -> str:
+    """Persist a bounded operational failure category without leaking arbitrary provider detail."""
+    return str(error).strip()[:500] or "terminal tool execution failed"

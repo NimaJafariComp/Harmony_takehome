@@ -14,15 +14,22 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
 from enterprise_agent.application.tools import (
+    CompensationAction,
     CreateReplacementPOInput,
     NotifyProductionInput,
     ReduceOrCancelPOInput,
     ScheduleArrivalCheckInput,
+    TerminalToolExecutionError,
     ToolInput,
     ToolName,
     authorize_tool,
 )
-from enterprise_agent.domain import ActorContext, ToolInvocation, ToolInvocationStatus
+from enterprise_agent.domain import (
+    ActorContext,
+    ToolCompensation,
+    ToolInvocation,
+    ToolInvocationStatus,
+)
 
 INSERT_INVOCATION = text("""
     INSERT INTO tool_invocations (
@@ -54,6 +61,15 @@ COMPLETE_INVOCATION = text("""
         completed_at = :completed_at,
         updated_at = :completed_at
     WHERE idempotency_key = :idempotency_key AND status = :started_status
+""")
+COMPENSATE_ORIGINAL_INVOCATION = text("""
+    UPDATE tool_invocations
+    SET status = :compensated_status,
+        updated_at = :completed_at
+    WHERE workflow_instance_id = CAST(:workflow_id AS UUID)
+      AND tool_name = :tool_name
+      AND idempotency_key = :original_idempotency_key
+      AND status = :succeeded_status
 """)
 SELECT_CREATE_SOURCE = text("""
     SELECT original.part_id::text AS part_id,
@@ -133,9 +149,59 @@ INSERT_ARRIVAL_CHECK = text("""
     )
     RETURNING id::text AS task_id, due_at
 """)
+COMPENSATE_REPLACEMENT_PO = text("""
+    UPDATE purchase_orders
+    SET status = 'cancelled',
+        source_version = source_version + 1,
+        updated_at = :occurred_at
+    WHERE id = CAST(:replacement_purchase_order_id AS UUID)
+      AND status = 'open'
+    RETURNING id::text AS purchase_order_id, status, source_version
+""")
+RESTORE_ORIGINAL_PO = text("""
+    UPDATE purchase_orders
+    SET ordered_quantity = CAST(:previous_ordered_quantity AS NUMERIC),
+        status = :previous_status,
+        source_version = source_version + 1,
+        updated_at = :occurred_at
+    WHERE id = CAST(:original_purchase_order_id AS UUID)
+      AND ordered_quantity = CAST(:ordered_quantity AS NUMERIC)
+      AND received_quantity = CAST(:received_quantity AS NUMERIC)
+      AND status = :status
+      AND source_version = :source_version
+    RETURNING id::text AS purchase_order_id, ordered_quantity, received_quantity, status, source_version
+""")
+SELECT_ORIGINAL_NOTIFICATION = text("""
+    SELECT id::text AS message_id, recipient, subject
+    FROM messages
+    WHERE id = CAST(:message_id AS UUID)
+      AND message_key = :original_idempotency_key
+    FOR UPDATE
+""")
+INSERT_CORRECTION_NOTIFICATION = text("""
+    INSERT INTO messages (
+        id, message_key, purchase_order_id, supplier_id, sender, recipient, subject, body,
+        received_at, payload
+    ) VALUES (
+        CAST(:message_id AS UUID), :message_key, NULL, NULL, :sender, :recipient, :subject,
+        :body, :occurred_at, CAST(:payload AS JSONB)
+    )
+    RETURNING id::text AS message_id
+""")
+CANCEL_ARRIVAL_CHECK = text("""
+    UPDATE scheduled_tasks
+    SET status = 'cancelled',
+        completed_at = :occurred_at,
+        updated_at = :occurred_at
+    WHERE id = CAST(:scheduled_task_id AS UUID)
+      AND workflow_instance_id = CAST(:workflow_id AS UUID)
+      AND idempotency_key = :original_idempotency_key
+      AND status = 'pending'
+    RETURNING id::text AS task_id, status
+""")
 
 
-class ToolExecutionError(RuntimeError):
+class ToolExecutionError(TerminalToolExecutionError):
     """Raised when a typed tool request cannot safely produce its declared side effect."""
 
 
@@ -198,6 +264,83 @@ class PostgresScenarioAToolAdapter:
             )
             return result
 
+    def compensate(
+        self, actor: ActorContext, compensation: ToolCompensation
+    ) -> Mapping[str, object]:
+        """Reverse one journaled effect by a separate stable key after strict provenance checks."""
+        _validate_compensation(actor, compensation)
+        parameters = _compensation_parameters(compensation)
+        with self._engine.begin() as connection:
+            inserted = connection.execute(
+                INSERT_INVOCATION,
+                {
+                    "invocation_id": str(uuid4()),
+                    "workflow_id": str(compensation.workflow_id),
+                    "tool_name": compensation.action,
+                    "idempotency_key": compensation.idempotency_key,
+                    "started_status": ToolInvocationStatus.STARTED.value,
+                    "parameters": _as_json(parameters),
+                    "started_at": compensation.requested_at,
+                },
+            )
+            journal = (
+                connection.execute(
+                    SELECT_INVOCATION_FOR_UPDATE,
+                    {"idempotency_key": compensation.idempotency_key},
+                )
+                .mappings()
+                .one()
+            )
+            persisted = cast(Mapping[str, object], journal)
+            _validate_compensation_binding(persisted, compensation, parameters)
+            if journal["status"] == ToolInvocationStatus.SUCCEEDED.value:
+                return _stored_result(persisted)
+            if journal["status"] != ToolInvocationStatus.STARTED.value:
+                raise ToolExecutionError("tool compensation invocation is not retryable")
+            if inserted.scalar_one_or_none() is None:
+                connection.execute(
+                    RETRY_INVOCATION,
+                    {
+                        "idempotency_key": compensation.idempotency_key,
+                        "started_status": ToolInvocationStatus.STARTED.value,
+                        "updated_at": compensation.requested_at,
+                    },
+                )
+            original = (
+                connection.execute(
+                    SELECT_INVOCATION_FOR_UPDATE,
+                    {"idempotency_key": compensation.original_idempotency_key},
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if original is None:
+                raise ToolExecutionError("original tool invocation is unavailable for compensation")
+            _validate_original_for_compensation(cast(Mapping[str, object], original), compensation)
+            result = _execute_compensation_effect(connection, compensation)
+            connection.execute(
+                COMPLETE_INVOCATION,
+                {
+                    "idempotency_key": compensation.idempotency_key,
+                    "started_status": ToolInvocationStatus.STARTED.value,
+                    "succeeded_status": ToolInvocationStatus.SUCCEEDED.value,
+                    "result": _as_json(result),
+                    "completed_at": compensation.requested_at,
+                },
+            )
+            connection.execute(
+                COMPENSATE_ORIGINAL_INVOCATION,
+                {
+                    "workflow_id": str(compensation.workflow_id),
+                    "tool_name": compensation.tool_name,
+                    "original_idempotency_key": compensation.original_idempotency_key,
+                    "succeeded_status": ToolInvocationStatus.SUCCEEDED.value,
+                    "compensated_status": ToolInvocationStatus.COMPENSATED.value,
+                    "completed_at": compensation.requested_at,
+                },
+            )
+            return result
+
 
 def _validated_input(actor: ActorContext, invocation: ToolInvocation) -> ToolInput:
     """Make each concrete tool enforce its own declared scope and strict input model."""
@@ -225,6 +368,33 @@ def _validated_input(actor: ActorContext, invocation: ToolInvocation) -> ToolInp
     return input_value
 
 
+def _validate_compensation(actor: ActorContext, compensation: ToolCompensation) -> None:
+    """Require a declared original tool, its same scope, matching reverse action, and opaque keys."""
+    if (
+        not compensation.original_idempotency_key.strip()
+        or not compensation.idempotency_key.strip()
+        or not compensation.effect_result
+    ):
+        raise ToolExecutionError("tool compensation has incomplete provenance")
+    try:
+        original_tool = ToolName(compensation.tool_name)
+        action = CompensationAction(compensation.action)
+    except ValueError as error:
+        raise ToolExecutionError("tool compensation is outside the Scenario A boundary") from error
+    definition = authorize_tool(actor, original_tool)
+    if definition.compensation is not action:
+        raise ToolExecutionError("tool compensation action does not match the original effect")
+
+
+def _compensation_parameters(compensation: ToolCompensation) -> dict[str, object]:
+    """Persist enough immutable provenance to reject a replay against a different original effect."""
+    return {
+        "original_tool_name": compensation.tool_name,
+        "original_idempotency_key": compensation.original_idempotency_key,
+        "effect_result": dict(compensation.effect_result),
+    }
+
+
 def _validate_invocation_binding(row: Mapping[str, object], invocation: ToolInvocation) -> None:
     """Reject a stable key that is replayed against another workflow, tool, or payload."""
     if (
@@ -234,6 +404,34 @@ def _validate_invocation_binding(row: Mapping[str, object], invocation: ToolInvo
         or dict(cast(Mapping[str, object], row["parameters"])) != dict(invocation.parameters)
     ):
         raise ToolExecutionError("tool idempotency key does not match its persisted invocation")
+
+
+def _validate_compensation_binding(
+    row: Mapping[str, object], compensation: ToolCompensation, parameters: Mapping[str, object]
+) -> None:
+    """Reject a compensation key replayed for another workflow, action, or original result."""
+    if (
+        str(row["workflow_instance_id"]) != str(compensation.workflow_id)
+        or row["tool_name"] != compensation.action
+        or row["idempotency_key"] != compensation.idempotency_key
+        or dict(cast(Mapping[str, object], row["parameters"])) != dict(parameters)
+    ):
+        raise ToolExecutionError("tool compensation key does not match its persisted invocation")
+
+
+def _validate_original_for_compensation(
+    row: Mapping[str, object], compensation: ToolCompensation
+) -> None:
+    """Allow reversal only of this workflow's exact successfully journaled effect and result."""
+    if (
+        str(row["workflow_instance_id"]) != str(compensation.workflow_id)
+        or row["tool_name"] != compensation.tool_name
+        or row["idempotency_key"] != compensation.original_idempotency_key
+        or row["status"] != ToolInvocationStatus.SUCCEEDED.value
+        or not isinstance(row["result"], Mapping)
+        or dict(cast(Mapping[str, object], row["result"])) != dict(compensation.effect_result)
+    ):
+        raise ToolExecutionError("original tool invocation is not safely compensable")
 
 
 def _stored_result(row: Mapping[str, object]) -> Mapping[str, object]:
@@ -264,6 +462,22 @@ def _execute_effect(
     ):
         return _schedule_arrival_check(connection, invocation, input_value)
     raise ToolExecutionError("tool input does not match its declared Scenario A effect")
+
+
+def _execute_compensation_effect(
+    connection: Connection, compensation: ToolCompensation
+) -> dict[str, object]:
+    """Run only the reverse operation declared for the exact journaled original effect."""
+    action = CompensationAction(compensation.action)
+    if action is CompensationAction.CANCEL_CREATED_REPLACEMENT_PO:
+        return _cancel_created_replacement_purchase_order(connection, compensation)
+    if action is CompensationAction.RESTORE_ORIGINAL_PURCHASE_ORDER:
+        return _restore_original_purchase_order(connection, compensation)
+    if action is CompensationAction.SEND_CORRECTION_NOTIFICATION:
+        return _send_correction_notification(connection, compensation)
+    if action is CompensationAction.CANCEL_ARRIVAL_CHECK:
+        return _cancel_arrival_check(connection, compensation)
+    raise ToolExecutionError("tool compensation action is outside the Scenario A boundary")
 
 
 def _create_replacement_purchase_order(
@@ -438,6 +652,158 @@ def _schedule_arrival_check(
         "purchase_order_id": input_value.purchase_order_id,
         "due_at": scheduled["due_at"].isoformat(),
     }
+
+
+def _cancel_created_replacement_purchase_order(
+    connection: Connection, compensation: ToolCompensation
+) -> dict[str, object]:
+    """Cancel only the open replacement purchase order returned by the original provider action."""
+    cancelled = (
+        connection.execute(
+            COMPENSATE_REPLACEMENT_PO,
+            {
+                "replacement_purchase_order_id": _required_result_text(
+                    compensation.effect_result, "replacement_purchase_order_id"
+                ),
+                "occurred_at": compensation.requested_at,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if cancelled is None:
+        raise ToolExecutionError("replacement purchase order is not safely cancellable")
+    return {
+        "replacement_purchase_order_id": cast(str, cancelled["purchase_order_id"]),
+        "status": cast(str, cancelled["status"]),
+        "source_version": cast(int, cancelled["source_version"]),
+    }
+
+
+def _restore_original_purchase_order(
+    connection: Connection, compensation: ToolCompensation
+) -> dict[str, object]:
+    """Restore only the original order state that still exactly matches this workflow's reduction."""
+    result = compensation.effect_result
+    restored = (
+        connection.execute(
+            RESTORE_ORIGINAL_PO,
+            {
+                "original_purchase_order_id": _required_result_text(
+                    result, "original_purchase_order_id"
+                ),
+                "previous_ordered_quantity": _required_result_text(
+                    result, "previous_ordered_quantity"
+                ),
+                "previous_status": _required_result_text(result, "previous_status"),
+                "ordered_quantity": _required_result_text(result, "ordered_quantity"),
+                "received_quantity": _required_result_text(result, "received_quantity"),
+                "status": _required_result_text(result, "status"),
+                "source_version": _required_result_int(result, "source_version"),
+                "occurred_at": compensation.requested_at,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if restored is None:
+        raise ToolExecutionError("original purchase order is not safely restorable")
+    return {
+        "original_purchase_order_id": cast(str, restored["purchase_order_id"]),
+        "ordered_quantity": str(cast(Decimal, restored["ordered_quantity"])),
+        "received_quantity": str(cast(Decimal, restored["received_quantity"])),
+        "status": cast(str, restored["status"]),
+        "source_version": cast(int, restored["source_version"]),
+    }
+
+
+def _send_correction_notification(
+    connection: Connection, compensation: ToolCompensation
+) -> dict[str, object]:
+    """Send a correction to exactly the recipient of the bound original production notice."""
+    original = (
+        connection.execute(
+            SELECT_ORIGINAL_NOTIFICATION,
+            {
+                "message_id": _required_result_text(compensation.effect_result, "message_id"),
+                "original_idempotency_key": compensation.original_idempotency_key,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if original is None:
+        raise ToolExecutionError("original production notification is not safely correctable")
+    created = (
+        connection.execute(
+            INSERT_CORRECTION_NOTIFICATION,
+            {
+                "message_id": str(uuid4()),
+                "message_key": compensation.idempotency_key,
+                "sender": "enterprise-agent@example.invalid",
+                "recipient": original["recipient"],
+                "subject": f"Correction: {original['subject']}",
+                "body": "A previous purchase-order update was reversed. Verify the current schedule.",
+                "occurred_at": compensation.requested_at,
+                "payload": _as_json(
+                    {
+                        "workflow_id": str(compensation.workflow_id),
+                        "reverses_message_id": original["message_id"],
+                    }
+                ),
+            },
+        )
+        .mappings()
+        .one()
+    )
+    return {
+        "message_id": cast(str, created["message_id"]),
+        "recipient": cast(str, original["recipient"]),
+        "reverses_message_id": cast(str, original["message_id"]),
+    }
+
+
+def _cancel_arrival_check(
+    connection: Connection, compensation: ToolCompensation
+) -> dict[str, object]:
+    """Cancel only the pending arrival task that the original scheduler effect created."""
+    cancelled = (
+        connection.execute(
+            CANCEL_ARRIVAL_CHECK,
+            {
+                "scheduled_task_id": _required_result_text(
+                    compensation.effect_result, "scheduled_task_id"
+                ),
+                "workflow_id": str(compensation.workflow_id),
+                "original_idempotency_key": compensation.original_idempotency_key,
+                "occurred_at": compensation.requested_at,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if cancelled is None:
+        raise ToolExecutionError("arrival check is not safely cancellable")
+    return {
+        "scheduled_task_id": cast(str, cancelled["task_id"]),
+        "status": cast(str, cancelled["status"]),
+    }
+
+
+def _required_result_text(result: Mapping[str, object], name: str) -> str:
+    """Read one nonblank provider result field without inventing a compensation target."""
+    value = result.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise ToolExecutionError("original tool result lacks required compensation provenance")
+    return value
+
+
+def _required_result_int(result: Mapping[str, object], name: str) -> int:
+    """Read one exact integer version field that protects an optimistic restoration update."""
+    value = result.get(name)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ToolExecutionError("original tool result lacks required compensation provenance")
+    return value
 
 
 def _as_json(values: Mapping[str, object]) -> str:

@@ -298,6 +298,22 @@ class ToolInvocation:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ToolCompensation:
+    """One reverse action bound to an already-completed effect and its opaque provider key."""
+
+    workflow_id: WorkflowId
+    tool_name: str
+    action: str
+    original_idempotency_key: str
+    idempotency_key: str
+    effect_result: Mapping[str, object]
+    requested_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "effect_result", _freeze_mapping(self.effect_result))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ScheduledTask:
     """A durable, idempotent task for time-driven business follow-up."""
 

@@ -142,6 +142,10 @@ class ToolAuthorizationError(PermissionError):
     """Raised when the initiating actor lacks a tool's declared write authority."""
 
 
+class TerminalToolExecutionError(RuntimeError):
+    """Raised when a tool cannot safely succeed and its completed predecessor effects must unwind."""
+
+
 _TOOL_CATALOG: dict[ToolName, ToolDefinition] = {
     ToolName.CREATE_REPLACEMENT_PO: ToolDefinition(
         name=ToolName.CREATE_REPLACEMENT_PO,
@@ -224,3 +228,17 @@ def build_tool_idempotency_key(
     )
     digest = sha256(canonical_input.encode("utf-8")).hexdigest()[:24]
     return f"tool:v1:{workflow_id}:{step_index}:{definition.name.value}:{digest}"
+
+
+def build_compensation_idempotency_key(
+    workflow_id: WorkflowId,
+    step_index: int,
+    action: CompensationAction | str,
+    original_idempotency_key: str,
+) -> str:
+    """Derive a distinct, retry-stable key for one declared reverse action."""
+    if step_index < 1 or not original_idempotency_key.strip():
+        raise ValueError("compensation requires a positive step and original idempotency key")
+    declared_action = CompensationAction(action)
+    digest = sha256(original_idempotency_key.encode("utf-8")).hexdigest()[:24]
+    return f"compensation:v1:{workflow_id}:{step_index}:{declared_action.value}:{digest}"

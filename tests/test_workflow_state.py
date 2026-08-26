@@ -99,6 +99,49 @@ class MemoryWorkflowStateStore:
     ) -> Any | None:
         return None
 
+    def fail_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        error: str,
+        failed_at: datetime,
+    ) -> Any | None:
+        return None
+
+    def begin_compensation(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        started_at: datetime,
+    ) -> Any | None:
+        return None
+
+    def start_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        started_at: datetime,
+    ) -> Any | None:
+        return None
+
+    def complete_compensation_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        result: Mapping[str, object],
+        finish_workflow: bool,
+        completed_at: datetime,
+    ) -> Any | None:
+        return None
+
 
 def staged_snapshot() -> Any:
     """Stage a fresh pending workflow once for adapter-mapping contract tests."""
@@ -498,6 +541,80 @@ def test_postgres_adapter_commits_tool_started_then_result_and_cursor_in_separat
         '{"replacement_purchase_order_id": "replacement-po-1"}'
     )
     assert transaction.execute.call_args_list[4].args[1]["finish_workflow"] is False
+
+
+def test_postgres_adapter_durably_records_terminal_failure_and_compensation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure, compensation start, reverse result, and terminal closure all retain exact CAS facts."""
+    from enterprise_agent.adapters import workflow_state
+
+    snapshot = staged_snapshot()
+    engine = MagicMock()
+    transaction = engine.begin.return_value.__enter__.return_value
+    transition = MagicMock()
+    transition.scalar_one_or_none.return_value = str(snapshot.workflow.workflow_id)
+    transaction.execute.side_effect = [transition] * 6
+    monkeypatch.setattr(workflow_state, "create_engine", lambda _: engine)
+    monkeypatch.setattr(
+        workflow_state, "_load_snapshot", lambda _connection, _workflow_id: snapshot
+    )
+    adapter = workflow_state.PostgresWorkflowStateAdapter("postgresql+psycopg://ignored")
+    failure_at = NOW + timedelta(minutes=3)
+
+    assert (
+        adapter.fail_tool_step(
+            snapshot.workflow.workflow_id,
+            worker_id="worker-a",
+            expected_step_index=3,
+            idempotency_key="tool:v1:workflow:3:create_replacement_po:abc",
+            error="provider rejected the action",
+            failed_at=failure_at,
+        )
+        == snapshot
+    )
+    assert (
+        adapter.begin_compensation(
+            snapshot.workflow.workflow_id,
+            worker_id="worker-a",
+            started_at=failure_at,
+        )
+        == snapshot
+    )
+    assert (
+        adapter.start_compensation_step(
+            snapshot.workflow.workflow_id,
+            worker_id="worker-a",
+            expected_step_index=3,
+            started_at=failure_at,
+        )
+        == snapshot
+    )
+    assert (
+        adapter.complete_compensation_step(
+            snapshot.workflow.workflow_id,
+            worker_id="worker-a",
+            expected_step_index=3,
+            result={"status": "cancelled"},
+            finish_workflow=True,
+            completed_at=failure_at,
+        )
+        == snapshot
+    )
+
+    assert transaction.execute.call_args_list[0].args[1]["error"] == "provider rejected the action"
+    assert transaction.execute.call_args_list[1].args[1]["failed_workflow_status"] == "failed"
+    assert transaction.execute.call_args_list[2].args[1]["compensating_workflow_status"] == (
+        "compensating"
+    )
+    assert (
+        transaction.execute.call_args_list[3].args[1]["compensating_step_status"] == "compensating"
+    )
+    assert transaction.execute.call_args_list[4].args[1]["result"] == '{"status": "cancelled"}'
+    assert (
+        transaction.execute.call_args_list[5].args[1]["compensated_workflow_status"]
+        == "compensated"
+    )
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:

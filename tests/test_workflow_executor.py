@@ -1427,6 +1427,19 @@ def test_postgres_external_tool_boundary_runs_the_declared_erp_mail_and_schedule
         "    arrival = connection.execute(text(\"SELECT task_type, status, payload->>'purchase_order_id' FROM scheduled_tasks WHERE workflow_instance_id = CAST(:workflow_id AS UUID)\"), {'workflow_id': str(snapshot.workflow.workflow_id)}).one()\n"
         "    assert arrival[0:2] == ('arrival_check', 'pending') and arrival[2] == first_result['replacement_purchase_order_id']\n"
         "    assert connection.execute(text(\"SELECT COUNT(*) FROM tool_invocations WHERE workflow_instance_id = CAST(:workflow_id AS UUID) AND status = 'succeeded'\"), {'workflow_id': str(snapshot.workflow.workflow_id)}).scalar_one() == 4\n"
+        "with engine.begin() as connection:\n"
+        "    connection.execute(text(\"UPDATE workflow_instances SET status = 'failed', completed_at = NULL, last_error = 'terminal test failure', lease_owner = 'workflow-worker-a', lease_expires_at = :lease_expires_at, updated_at = :updated_at WHERE id = CAST(:workflow_id AS UUID)\"), {'workflow_id': str(snapshot.workflow.workflow_id), 'lease_expires_at': now + timedelta(minutes=30), 'updated_at': now + timedelta(minutes=22)})\n"
+        "compensated = executor.compensate_failed_workflow(snapshot.workflow.workflow_id, worker_id='workflow-worker-a', now=now + timedelta(minutes=22))\n"
+        "assert compensated.workflow.status is WorkflowStatus.COMPENSATED\n"
+        "assert [step.status for step in compensated.steps] == [WorkflowStepStatus.SUCCEEDED, WorkflowStepStatus.SUCCEEDED, WorkflowStepStatus.COMPENSATED, WorkflowStepStatus.COMPENSATED, WorkflowStepStatus.COMPENSATED, WorkflowStepStatus.COMPENSATED]\n"
+        "with engine.connect() as connection:\n"
+        "    assert connection.execute(text(\"SELECT status FROM purchase_orders WHERE po_number LIKE 'RPL-%'\")).scalar_one() == 'cancelled'\n"
+        "    original = connection.execute(text(\"SELECT ordered_quantity::text, received_quantity::text, status, source_version FROM purchase_orders WHERE id = '00000000-0000-0000-0000-000000000401'\")).one()\n"
+        "    assert original == ('100.000', '40.000', 'delayed', 4)\n"
+        "    assert connection.execute(text(\"SELECT COUNT(*) FROM messages WHERE message_key LIKE 'compensation:v1:%:send_correction_notification:%'\")).scalar_one() == 1\n"
+        "    assert connection.execute(text(\"SELECT status FROM scheduled_tasks WHERE workflow_instance_id = CAST(:workflow_id AS UUID)\"), {'workflow_id': str(snapshot.workflow.workflow_id)}).scalar_one() == 'cancelled'\n"
+        "    assert connection.execute(text(\"SELECT COUNT(*) FROM tool_invocations WHERE workflow_instance_id = CAST(:workflow_id AS UUID) AND status = 'compensated'\"), {'workflow_id': str(snapshot.workflow.workflow_id)}).scalar_one() == 4\n"
+        "    assert connection.execute(text(\"SELECT COUNT(*) FROM tool_invocations WHERE workflow_instance_id = CAST(:workflow_id AS UUID) AND (tool_name LIKE 'cancel_%' OR tool_name LIKE 'restore_%' OR tool_name LIKE 'send_correction_%')\"), {'workflow_id': str(snapshot.workflow.workflow_id)}).scalar_one() == 4\n"
     )
     compose(
         "--profile",
