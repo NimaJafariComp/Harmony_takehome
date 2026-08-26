@@ -13,6 +13,13 @@ from .approvals import (
     ScenarioAApprovalService,
     recompute_plan_hash,
 )
+from .arrival_check import (
+    ARRIVAL_CHECK_TASK_TYPE,
+    ArrivalCheckError,
+    ArrivalCheckOutcome,
+    ArrivalCheckResult,
+    TuesdayArrivalCheckService,
+)
 from .candidates import (
     SupplierCandidate,
     SupplierCandidateFilter,
@@ -74,6 +81,7 @@ from .workflows import (
 
 __all__ = [
     "APPROVAL_ESCALATION_TASK_TYPE",
+    "ARRIVAL_CHECK_TASK_TYPE",
     "DECLARED_WORKFLOWS",
     "PO_REROUTE_V1",
     "TOOL_CATALOG",
@@ -81,6 +89,9 @@ __all__ = [
     "ApprovalRoutingOutcome",
     "ApprovalRoutingResult",
     "ApprovalRoutingService",
+    "ArrivalCheckError",
+    "ArrivalCheckOutcome",
+    "ArrivalCheckResult",
     "AuthorizedContextBundle",
     "CompensationAction",
     "CreateReplacementPOInput",
@@ -118,6 +129,7 @@ __all__ = [
     "ToolDefinition",
     "ToolName",
     "ToolNotDeclaredError",
+    "TuesdayArrivalCheckService",
     "WorkflowClaimLostError",
     "WorkflowDefinition",
     "WorkflowExecutionRejectedError",

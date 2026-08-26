@@ -133,7 +133,8 @@ INSERT_PRODUCTION_NOTIFICATION = text("""
     RETURNING id::text AS message_id
 """)
 SELECT_WORKFLOW_ATTENTION = text("""
-    SELECT plan.attention_id::text AS attention_id
+    SELECT plan.attention_id::text AS attention_id,
+           plan.actor_id::text AS actor_id
     FROM workflow_instances AS workflow
     JOIN plans AS plan ON plan.id = workflow.plan_id
     WHERE workflow.id = CAST(:workflow_id AS UUID)
@@ -620,7 +621,7 @@ def _schedule_arrival_check(
     invocation: ToolInvocation,
     input_value: ScheduleArrivalCheckInput,
 ) -> dict[str, object]:
-    """Create the durable Tuesday arrival-check record without implementing its worker yet."""
+    """Create the durable Tuesday arrival-check record with all worker-required causal bindings."""
     attention = (
         connection.execute(
             SELECT_WORKFLOW_ATTENTION,
@@ -640,7 +641,13 @@ def _schedule_arrival_check(
                 "workflow_id": str(invocation.workflow_id),
                 "idempotency_key": invocation.idempotency_key,
                 "due_at": input_value.due_at,
-                "payload": _as_json({"purchase_order_id": input_value.purchase_order_id}),
+                "payload": _as_json(
+                    {
+                        "purchase_order_id": input_value.purchase_order_id,
+                        "original_attention_id": cast(str, attention["attention_id"]),
+                        "actor_id": cast(str, attention["actor_id"]),
+                    }
+                ),
                 "occurred_at": invocation.started_at,
             },
         )

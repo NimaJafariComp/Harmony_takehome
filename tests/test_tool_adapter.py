@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -345,11 +346,11 @@ def test_each_concrete_effect_persists_only_its_bounded_result() -> None:
     )
     assert scheduled["scheduled_task_id"] == "task-1"
     assert scheduled["due_at"] == "2026-08-25T09:00:00+00:00"
-    assert scheduler_connection.execute.call_args_list[1].args[1]["payload"] == (
-        '{"actor_id":"00000000-0000-0000-0000-000000000001",'
-        '"original_attention_id":"00000000-0000-0000-0000-000000000601",'
-        '"purchase_order_id":"replacement-1"}'
-    )
+    assert json.loads(scheduler_connection.execute.call_args_list[1].args[1]["payload"]) == {
+        "actor_id": "00000000-0000-0000-0000-000000000001",
+        "original_attention_id": "00000000-0000-0000-0000-000000000601",
+        "purchase_order_id": "replacement-1",
+    }
 
 
 def test_each_concrete_compensation_reverses_only_the_bound_provider_result() -> None:

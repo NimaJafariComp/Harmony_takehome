@@ -13,6 +13,8 @@ from enterprise_agent.domain import (
     AttentionId,
     AttentionItem,
     AttentionStatus,
+    Evidence,
+    EvidenceId,
     InvalidAttentionTransitionError,
     RunId,
     ScenarioAStockoutTrigger,
@@ -36,17 +38,26 @@ def stockout_trigger() -> ScenarioAStockoutTrigger:
 
 
 def attention_row(
-    *, status: str = "open", resolved_at: datetime | None = None
+    *,
+    status: str = "open",
+    cause: str = "projected_stockout",
+    dedupe_key: str | None = None,
+    source_versions: dict[str, int] | None = None,
+    resolved_at: datetime | None = None,
 ) -> dict[str, object]:
     """Return the database mapping shape owned by the attention adapter."""
     return {
         "id": ATTENTION_ID,
         "scenario": "scenario_a",
-        "cause": "projected_stockout",
-        "dedupe_key": stockout_trigger().dedupe_key,
+        "cause": cause,
+        "dedupe_key": stockout_trigger().dedupe_key if dedupe_key is None else dedupe_key,
         "status": status,
         "created_at": NOW,
-        "source_versions": {"inventory:00000000-0000-0000-0000-000000000501": 4},
+        "source_versions": (
+            {"inventory:00000000-0000-0000-0000-000000000501": 4}
+            if source_versions is None
+            else source_versions
+        ),
         "resolved_at": resolved_at,
     }
 
@@ -65,6 +76,19 @@ def configured_engine(*results: MagicMock) -> MagicMock:
     connection = engine.begin.return_value.__enter__.return_value
     connection.execute.side_effect = results
     return engine
+
+
+def replacement_purchase_order(*, source_version: int = 3) -> Evidence:
+    """Build the exact ERP row that causally supports a missing-receipt follow-up."""
+    return Evidence(
+        evidence_id=EvidenceId("erp:purchase_order:replacement"),
+        source="erp",
+        record_type="purchase_order",
+        record_id="00000000-0000-0000-0000-000000000499",
+        source_version=source_version,
+        observed_at=NOW,
+        payload={"ordered_quantity": "60", "received_quantity": "0"},
+    )
 
 
 def test_stockout_trigger_key_is_stable_and_tracks_every_risk_input() -> None:
@@ -175,6 +199,138 @@ def test_attention_adapter_allows_only_forward_lifecycle_transitions(
             RunId("run-stockout-1"),
             NOW + timedelta(minutes=2),
         )
+
+
+def test_attention_adapter_rejects_a_persisted_transition_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale worker cannot write an attention lifecycle transition after another worker wins."""
+    from enterprise_agent.adapters import attention
+
+    engine = configured_engine(mapping_result(one_or_none=None))
+    monkeypatch.setattr(attention, "create_engine", lambda _: engine)
+    adapter = attention.PostgresAttentionAdapter("postgresql+psycopg://ignored")
+    opened = AttentionItem(
+        attention_id=AttentionId(ATTENTION_ID),
+        scenario="scenario_a",
+        cause="projected_stockout",
+        dedupe_key=stockout_trigger().dedupe_key,
+        status=AttentionStatus.OPEN,
+        created_at=NOW,
+        source_versions={"inventory:00000000-0000-0000-0000-000000000501": 4},
+    )
+
+    with pytest.raises(InvalidAttentionTransitionError, match="no longer valid"):
+        adapter.transition(
+            opened,
+            AttentionStatus.PENDING_APPROVAL,
+            RunId("run-transition-race"),
+            NOW + timedelta(minutes=1),
+        )
+
+
+def test_attention_adapter_loads_one_current_item_or_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker can safely distinguish a current attention record from stale scheduler work."""
+    from enterprise_agent.adapters import attention
+
+    engine = MagicMock()
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value = mapping_result(one_or_none=attention_row())
+    monkeypatch.setattr(attention, "create_engine", lambda _: engine)
+    adapter = attention.PostgresAttentionAdapter("postgresql+psycopg://ignored")
+
+    loaded = adapter.load(AttentionId(ATTENTION_ID))
+    connection.execute.return_value = mapping_result(one_or_none=None)
+    missing = adapter.load(AttentionId("00000000-0000-0000-0000-000000000a02"))
+
+    assert loaded is not None
+    assert loaded.attention_id == AttentionId(ATTENTION_ID)
+    assert missing is None
+    assert connection.execute.call_args_list[0].args[1] == {"attention_id": ATTENTION_ID}
+
+
+def test_attention_adapter_creates_or_reuses_versioned_arrival_followup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated receipt checks share one causal version, while a newer PO version creates new work."""
+    from enterprise_agent.adapters import attention
+
+    original = AttentionItem(
+        attention_id=AttentionId(ATTENTION_ID),
+        scenario="scenario_a",
+        cause="projected_stockout",
+        dedupe_key=stockout_trigger().dedupe_key,
+        status=AttentionStatus.OPEN,
+        created_at=NOW,
+        source_versions={"inventory:00000000-0000-0000-0000-000000000501": 4},
+    )
+    created_row = attention_row(
+        cause="arrival_check",
+        dedupe_key="arrival-check-v3",
+        source_versions={"purchase_order:00000000-0000-0000-0000-000000000499": 3},
+    )
+    existing_row = attention_row(
+        cause="arrival_check",
+        dedupe_key="arrival-check-v3",
+        source_versions={"purchase_order:00000000-0000-0000-0000-000000000499": 3},
+    )
+    newer_row = attention_row(
+        cause="arrival_check",
+        dedupe_key="arrival-check-v4",
+        source_versions={"purchase_order:00000000-0000-0000-0000-000000000499": 4},
+    )
+    engine = configured_engine(
+        mapping_result(one_or_none=created_row),
+        MagicMock(),
+        mapping_result(one_or_none=None),
+        mapping_result(one=existing_row),
+        MagicMock(),
+        mapping_result(one_or_none=newer_row),
+        MagicMock(),
+    )
+    monkeypatch.setattr(attention, "create_engine", lambda _: engine)
+    adapter = attention.PostgresAttentionAdapter("postgresql+psycopg://ignored")
+
+    created = adapter.register_arrival_followup(
+        original_attention=original,
+        purchase_order=replacement_purchase_order(),
+        run_id=RunId("run-arrival-create"),
+        detected_at=NOW,
+    )
+    reused = adapter.register_arrival_followup(
+        original_attention=original,
+        purchase_order=replacement_purchase_order(),
+        run_id=RunId("run-arrival-reuse"),
+        detected_at=NOW,
+    )
+    newer = adapter.register_arrival_followup(
+        original_attention=original,
+        purchase_order=replacement_purchase_order(source_version=4),
+        run_id=RunId("run-arrival-newer"),
+        detected_at=NOW,
+    )
+
+    connection = engine.begin.return_value.__enter__.return_value
+    first_params = connection.execute.call_args_list[0].args[1]
+    second_params = connection.execute.call_args_list[2].args[1]
+    newer_params = connection.execute.call_args_list[5].args[1]
+    assert created.created is True
+    assert reused.created is False
+    assert newer.created is True
+    assert created.attention.cause == "arrival_check"
+    assert first_params["source_versions"] == (
+        '{"purchase_order:00000000-0000-0000-0000-000000000499": 3}'
+    )
+    assert first_params["dedupe_key"] == second_params["dedupe_key"]
+    assert first_params["dedupe_key"] != newer_params["dedupe_key"]
+    assert newer.attention.source_versions == {
+        "purchase_order:00000000-0000-0000-0000-000000000499": 4
+    }
+    assert connection.execute.call_args_list[1].args[1]["event_type"] == "followup.reopened"
+    assert connection.execute.call_args_list[4].args[1]["event_type"] == "followup.reopened"
+    assert connection.execute.call_args_list[6].args[1]["event_type"] == "followup.reopened"
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:

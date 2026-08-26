@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from datetime import datetime
@@ -16,6 +17,7 @@ from enterprise_agent.domain import (
     AttentionItem,
     AttentionRegistration,
     AttentionStatus,
+    Evidence,
     InvalidAttentionTransitionError,
     RunId,
     ScenarioAStockoutTrigger,
@@ -36,6 +38,11 @@ SELECT_ATTENTION_BY_KEY = text("""
     SELECT id, scenario, cause, dedupe_key, status, source_versions, created_at, resolved_at
     FROM attention_items
     WHERE dedupe_key = :dedupe_key
+""")
+SELECT_ATTENTION_BY_ID = text("""
+    SELECT id, scenario, cause, dedupe_key, status, source_versions, created_at, resolved_at
+    FROM attention_items
+    WHERE id = CAST(:attention_id AS UUID)
 """)
 UPDATE_ATTENTION_STATUS = text("""
     UPDATE attention_items
@@ -87,6 +94,73 @@ class PostgresAttentionAdapter:
                 event_type="attention.detected" if created else "attention.deduplicated",
                 occurred_at=trigger.detected_at,
                 payload={"created": created},
+            )
+        return AttentionRegistration(attention=attention, created=created)
+
+    def load(self, attention_id: AttentionId) -> AttentionItem | None:
+        """Load exactly one durable attention item for a later causal follow-up transition."""
+        with self._engine.connect() as connection:
+            row = (
+                connection.execute(SELECT_ATTENTION_BY_ID, {"attention_id": str(attention_id)})
+                .mappings()
+                .one_or_none()
+            )
+        return None if row is None else _attention_from_row(row)
+
+    def register_arrival_followup(
+        self,
+        *,
+        original_attention: AttentionItem,
+        purchase_order: Evidence,
+        run_id: RunId,
+        detected_at: datetime,
+    ) -> AttentionRegistration:
+        """Create or reuse one source-version-bound missing-receipt attention item."""
+        source_versions = {
+            f"purchase_order:{purchase_order.record_id}": purchase_order.source_version
+        }
+        dedupe_key = _arrival_followup_dedupe_key(
+            original_attention.attention_id,
+            purchase_order.record_id,
+            source_versions,
+        )
+        with self._engine.begin() as connection:
+            row = (
+                connection.execute(
+                    INSERT_ATTENTION,
+                    {
+                        "attention_id": str(uuid4()),
+                        "scenario": "scenario_a",
+                        "cause": "arrival_check",
+                        "dedupe_key": dedupe_key,
+                        "status": AttentionStatus.OPEN.value,
+                        "source_versions": json.dumps(source_versions, sort_keys=True),
+                        "created_at": detected_at,
+                    },
+                )
+                .mappings()
+                .one_or_none()
+            )
+            created = row is not None
+            if row is None:
+                row = (
+                    connection.execute(SELECT_ATTENTION_BY_KEY, {"dedupe_key": dedupe_key})
+                    .mappings()
+                    .one()
+                )
+            attention = _attention_from_row(row)
+            _append_audit_attempt(
+                connection=connection,
+                attention=attention,
+                trigger=None,
+                run_id=run_id,
+                event_type="followup.reopened",
+                occurred_at=detected_at,
+                payload={
+                    "created": created,
+                    "original_attention_id": str(original_attention.attention_id),
+                    "purchase_order_id": purchase_order.record_id,
+                },
             )
         return AttentionRegistration(attention=attention, created=created)
 
@@ -145,6 +219,25 @@ def _insert_parameters(trigger: ScenarioAStockoutTrigger) -> dict[str, object]:
         "source_versions": json.dumps(dict(trigger.source_versions)),
         "created_at": trigger.detected_at,
     }
+
+
+def _arrival_followup_dedupe_key(
+    original_attention_id: AttentionId,
+    purchase_order_id: str,
+    source_versions: Mapping[str, int],
+) -> str:
+    """Bind missing-receipt re-entry to causal attention, PO identity, and current source versions."""
+    canonical = json.dumps(
+        {
+            "cause": "arrival_check",
+            "original_attention_id": str(original_attention_id),
+            "purchase_order_id": purchase_order_id,
+            "source_versions": dict(source_versions),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"scenario_a:arrival_check:v1:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
 
 def _attention_from_row(row: RowMapping) -> AttentionItem:

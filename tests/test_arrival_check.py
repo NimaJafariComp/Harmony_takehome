@@ -8,6 +8,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from enterprise_agent.application.arrival_check import (
+    ArrivalCheckError,
+    ArrivalCheckOutcome,
+    TuesdayArrivalCheckService,
+)
 from enterprise_agent.domain import (
     ActorContext,
     AttentionId,
@@ -45,17 +50,22 @@ def original_attention() -> AttentionItem:
     )
 
 
-def purchase_order(*, received_quantity: str) -> Evidence:
+def purchase_order(
+    *,
+    received_quantity: str,
+    ordered_quantity: str = "60",
+    source_version: int = 3,
+) -> Evidence:
     """Return the exact current ERP receipt evidence for the replacement purchase order."""
     return Evidence(
         evidence_id=EvidenceId("erp:purchase_order:replacement"),
         source="erp",
         record_type="purchase_order",
         record_id=REPLACEMENT_PURCHASE_ORDER_ID,
-        source_version=3,
+        source_version=source_version,
         observed_at=TUESDAY,
         payload={
-            "ordered_quantity": "60",
+            "ordered_quantity": ordered_quantity,
             "received_quantity": received_quantity,
             "status": "open",
         },
@@ -173,9 +183,8 @@ class MemoryArrivalAttentionStore:
 
 def arrival_service(
     evidence: tuple[Evidence, ...],
-) -> tuple[object, MemoryArrivalAttentionStore, RecordingErp]:
-    """Construct the pending Tuesday behavior without importing it until the RED contract runs."""
-    from enterprise_agent.application.arrival_check import TuesdayArrivalCheckService
+) -> tuple[TuesdayArrivalCheckService, MemoryArrivalAttentionStore, RecordingErp]:
+    """Construct the Tuesday receipt checker and its bounded provider fakes."""
 
     attention = MemoryArrivalAttentionStore({ORIGINAL_ATTENTION_ID: original_attention()})
     erp = RecordingErp(evidence)
@@ -189,8 +198,6 @@ def arrival_service(
 @pytest.mark.critical
 def test_tuesday_full_receipt_resolves_the_original_attention() -> None:
     """A full explicit receipt satisfies the follow-up and closes only its causal attention item."""
-    from enterprise_agent.application.arrival_check import ArrivalCheckOutcome
-
     service, attention, erp = arrival_service((purchase_order(received_quantity="60"),))
 
     result = service.handle_claimed_task(
@@ -218,8 +225,6 @@ def test_tuesday_full_receipt_resolves_the_original_attention() -> None:
 @pytest.mark.critical
 def test_partial_or_missing_receipt_opens_one_source_version_specific_follow_up() -> None:
     """A partial receipt never masquerades as arrival and retrying the task cannot duplicate follow-up."""
-    from enterprise_agent.application.arrival_check import ArrivalCheckOutcome
-
     service, attention, _ = arrival_service((purchase_order(received_quantity="20"),))
     task = claimed_arrival_task()
 
@@ -243,6 +248,145 @@ def test_partial_or_missing_receipt_opens_one_source_version_specific_follow_up(
     assert retry.followup == first.followup
     assert len(attention.followups) == 1
     assert attention.records[ORIGINAL_ATTENTION_ID].status is AttentionStatus.OPEN
+
+
+def test_newer_purchase_order_update_creates_a_distinct_arrival_follow_up() -> None:
+    """A later authoritative PO version is causal new evidence, not a duplicate of an older check."""
+    service, attention, erp = arrival_service((purchase_order(received_quantity="0"),))
+    task = claimed_arrival_task()
+
+    first = service.handle_claimed_task(
+        task,
+        checked_at=TUESDAY,
+        run_id=RunId("run-arrival-version-3"),
+    )
+    erp.evidence = (purchase_order(received_quantity="20", source_version=4),)
+    newer = service.handle_claimed_task(
+        task,
+        checked_at=TUESDAY,
+        run_id=RunId("run-arrival-version-4"),
+    )
+
+    assert first.followup is not None
+    assert newer.followup is not None
+    assert first.followup.dedupe_key != newer.followup.dedupe_key
+    assert newer.followup.source_versions == {f"purchase_order:{REPLACEMENT_PURCHASE_ORDER_ID}": 4}
+    assert len(attention.followups) == 2
+
+
+def test_missing_or_terminal_original_attention_cannot_query_or_mutate_erp_state() -> None:
+    """Stale scheduler work is harmless if its causal attention item disappeared or already finished."""
+    missing_service, missing_attention, missing_erp = arrival_service(
+        (purchase_order(received_quantity="60"),)
+    )
+    missing_attention.records.clear()
+
+    missing = missing_service.handle_claimed_task(
+        claimed_arrival_task(),
+        checked_at=TUESDAY,
+        run_id=RunId("run-arrival-missing-attention"),
+    )
+
+    terminal_service, terminal_attention, terminal_erp = arrival_service(
+        (purchase_order(received_quantity="60"),)
+    )
+    terminal_attention.records[ORIGINAL_ATTENTION_ID] = replace(
+        original_attention(), status=AttentionStatus.RESOLVED, resolved_at=TUESDAY
+    )
+    terminal = terminal_service.handle_claimed_task(
+        claimed_arrival_task(),
+        checked_at=TUESDAY,
+        run_id=RunId("run-arrival-terminal"),
+    )
+
+    assert missing.outcome is ArrivalCheckOutcome.MISSING_ATTENTION
+    assert terminal.outcome is ArrivalCheckOutcome.NOT_ACTIONABLE
+    assert missing_erp.queries == []
+    assert terminal_erp.queries == []
+
+
+@pytest.mark.parametrize(
+    ("task", "checked_at", "evidence", "error_fragment"),
+    [
+        (
+            replace(
+                claimed_arrival_task(), status=ScheduledTaskStatus.PENDING, lease_expires_at=None
+            ),
+            TUESDAY,
+            (purchase_order(received_quantity="60"),),
+            "scheduler lease",
+        ),
+        (
+            replace(claimed_arrival_task(), due_at=TUESDAY + timedelta(seconds=1)),
+            TUESDAY,
+            (purchase_order(received_quantity="60"),),
+            "not due",
+        ),
+        (
+            replace(claimed_arrival_task(), due_at=TUESDAY.replace(tzinfo=None)),
+            TUESDAY,
+            (purchase_order(received_quantity="60"),),
+            "task due time",
+        ),
+        (
+            replace(
+                claimed_arrival_task(),
+                payload={
+                    "purchase_order_id": REPLACEMENT_PURCHASE_ORDER_ID,
+                    "original_attention_id": str(ORIGINAL_ATTENTION_ID),
+                },
+            ),
+            TUESDAY,
+            (purchase_order(received_quantity="60"),),
+            "lacks actor_id",
+        ),
+        (
+            claimed_arrival_task(),
+            TUESDAY,
+            (),
+            "one current purchase-order",
+        ),
+        (
+            claimed_arrival_task(),
+            TUESDAY,
+            (purchase_order(received_quantity="0", ordered_quantity="0"),),
+            "zero ordered quantity",
+        ),
+        (
+            claimed_arrival_task(),
+            TUESDAY,
+            (purchase_order(received_quantity="-1"),),
+            "invalid received_quantity",
+        ),
+        (
+            claimed_arrival_task(),
+            TUESDAY,
+            (purchase_order(received_quantity="NaN"),),
+            "invalid received_quantity",
+        ),
+        (
+            claimed_arrival_task(),
+            TUESDAY,
+            (purchase_order(received_quantity="not-a-number"),),
+            "invalid received_quantity",
+        ),
+    ],
+)
+def test_arrival_check_rejects_unsafe_scheduler_or_erp_evidence(
+    task: ScheduledTask,
+    checked_at: datetime,
+    evidence: tuple[Evidence, ...],
+    error_fragment: str,
+) -> None:
+    """The worker fails closed rather than fabricating an arrival decision from unsafe data."""
+    service, _, _ = arrival_service(evidence)
+
+    with pytest.raises(ArrivalCheckError, match=error_fragment):
+        service.handle_claimed_task(
+            task,
+            checked_at=checked_at,
+            run_id=RunId("run-arrival-unsafe"),
+        )
 
 
 @pytest.mark.parametrize(
@@ -275,8 +419,6 @@ def test_arrival_check_rejects_invalid_scheduler_state_or_causal_binding(
     error_fragment: str,
 ) -> None:
     """Only a due, leased, fully bound arrival task can influence attention state."""
-    from enterprise_agent.application.arrival_check import ArrivalCheckError
-
     service, _, _ = arrival_service((purchase_order(received_quantity="60"),))
 
     with pytest.raises(ArrivalCheckError, match=error_fragment):
