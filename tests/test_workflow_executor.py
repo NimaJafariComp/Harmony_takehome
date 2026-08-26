@@ -98,12 +98,16 @@ class MemoryWorkflowStore:
     snapshots: dict[WorkflowId, WorkflowStateSnapshot]
     claim_calls: list[tuple[WorkflowId, str]]
     complete_guard_calls: list[tuple[WorkflowId, str, int]]
+    start_tool_calls: list[tuple[WorkflowId, str, int, str]]
+    complete_tool_calls: list[tuple[WorkflowId, str, int, str]]
     lose_next_guard_transition: bool
 
     def __init__(self) -> None:
         self.snapshots = {}
         self.claim_calls = []
         self.complete_guard_calls = []
+        self.start_tool_calls = []
+        self.complete_tool_calls = []
         self.lose_next_guard_transition = False
 
     def create(self, snapshot: WorkflowStateSnapshot) -> None:
@@ -191,6 +195,95 @@ class MemoryWorkflowStore:
         self.snapshots[workflow_id] = updated
         return updated
 
+    def start_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        started_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Model the durable ``tool.started`` commit required before an external call."""
+        self.start_tool_calls.append(
+            (workflow_id, worker_id, expected_step_index, idempotency_key)
+        )
+        snapshot = self.snapshots.get(workflow_id)
+        if snapshot is None:
+            return None
+        workflow = snapshot.workflow
+        if (
+            workflow.status is not WorkflowStatus.RUNNING
+            or workflow.lease_owner != worker_id
+            or workflow.lease_expires_at is None
+            or workflow.lease_expires_at <= started_at
+            or workflow.current_step != expected_step_index - 1
+        ):
+            return None
+        step = snapshot.steps[expected_step_index - 1]
+        if step.tool_name is None or step.status is not WorkflowStepStatus.PENDING:
+            return None
+        steps = list(snapshot.steps)
+        steps[expected_step_index - 1] = replace(
+            step,
+            status=WorkflowStepStatus.RUNNING,
+            idempotency_key=idempotency_key,
+            attempt_count=step.attempt_count + 1,
+            started_at=started_at,
+            updated_at=started_at,
+        )
+        updated = WorkflowStateSnapshot(workflow=workflow, steps=tuple(steps))
+        self.snapshots[workflow_id] = updated
+        return updated
+
+    def complete_tool_step(
+        self,
+        workflow_id: WorkflowId,
+        *,
+        worker_id: str,
+        expected_step_index: int,
+        idempotency_key: str,
+        result: dict[str, object],
+        completed_at: datetime,
+    ) -> WorkflowStateSnapshot | None:
+        """Model the separate result-plus-cursor transaction after a tool returns."""
+        self.complete_tool_calls.append(
+            (workflow_id, worker_id, expected_step_index, idempotency_key)
+        )
+        snapshot = self.snapshots.get(workflow_id)
+        if snapshot is None:
+            return None
+        workflow = snapshot.workflow
+        if (
+            workflow.status is not WorkflowStatus.RUNNING
+            or workflow.lease_owner != worker_id
+            or workflow.lease_expires_at is None
+            or workflow.lease_expires_at <= completed_at
+            or workflow.current_step != expected_step_index - 1
+        ):
+            return None
+        step = snapshot.steps[expected_step_index - 1]
+        if (
+            step.tool_name is None
+            or step.status is not WorkflowStepStatus.RUNNING
+            or step.idempotency_key != idempotency_key
+        ):
+            return None
+        steps = list(snapshot.steps)
+        steps[expected_step_index - 1] = replace(
+            step,
+            status=WorkflowStepStatus.SUCCEEDED,
+            result=result,
+            completed_at=completed_at,
+            updated_at=completed_at,
+        )
+        updated = WorkflowStateSnapshot(
+            workflow=replace(workflow, current_step=expected_step_index, updated_at=completed_at),
+            steps=tuple(steps),
+        )
+        self.snapshots[workflow_id] = updated
+        return updated
+
 
 @dataclass
 class MemoryApprovals:
@@ -224,6 +317,7 @@ def executor_setup(
     approval: Approval | None = None,
     actor: ActorContext | None = None,
     snapshot: WorkflowStateSnapshot | None = None,
+    tool_executor: Any | None = None,
 ) -> tuple[Any, MemoryWorkflowStore, Plan, Approval]:
     """Stage a workflow and construct its executor with only controlled dependencies."""
     from enterprise_agent.application.workflow_executor import ScenarioAWorkflowExecutor
@@ -240,11 +334,14 @@ def executor_setup(
         )
     else:
         store.create(snapshot)
-    executor = ScenarioAWorkflowExecutor(
-        workflow_store=store,
-        approvals=MemoryApprovals((plan, stored_approval)),
-        identity=MemoryIdentity(actor or actor_with(ALL_SCENARIO_A_WRITE_SCOPES)),
-    )
+    executor_arguments: dict[str, Any] = {
+        "workflow_store": store,
+        "approvals": MemoryApprovals((plan, stored_approval)),
+        "identity": MemoryIdentity(actor or actor_with(ALL_SCENARIO_A_WRITE_SCOPES)),
+    }
+    if tool_executor is not None:
+        executor_arguments["tool_executor"] = tool_executor
+    executor = ScenarioAWorkflowExecutor(**executor_arguments)
     return executor, store, plan, stored_approval
 
 
@@ -647,6 +744,122 @@ def test_guard_execution_rejects_a_missing_declared_step() -> None:
             worker_id="worker-a",
             completed_at=NOW + timedelta(minutes=3),
         )
+
+
+@dataclass
+class RecordingToolExecutor:
+    """Record a deliberately small external tool double without mutating workflow state."""
+
+    events: list[str]
+    result: dict[str, object]
+    error: Exception | None = None
+
+    def execute(self, actor: ActorContext, invocation: Any) -> dict[str, object]:
+        """Represent the independently committed ERP/mail/scheduler side effect."""
+        assert actor.user_id == UserId("00000000-0000-0000-0000-000000000001")
+        assert invocation.tool_name == "create_replacement_po"
+        assert invocation.status.value == "started"
+        self.events.append("tool.execute")
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def _advance_to_first_tool(executor: Any, plan: Plan) -> None:
+    """Complete the two declared read-only guards before the first external workflow step."""
+    claimed = executor.claim(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=2),
+        lease_expires_at=NOW + timedelta(minutes=12),
+        current_source_versions=plan.source_versions,
+    )
+    first_guard = executor.advance_next_guard(
+        claimed,
+        worker_id="worker-a",
+        completed_at=NOW + timedelta(minutes=3),
+    )
+    executor.advance_next_guard(
+        first_guard,
+        worker_id="worker-a",
+        completed_at=NOW + timedelta(minutes=4),
+    )
+
+
+@pytest.mark.critical
+def test_executor_durably_starts_an_external_tool_before_invocation_then_commits_result() -> None:
+    """Tool effects occur only between separate durable started and succeeded transitions."""
+    events: list[str] = []
+    tools = RecordingToolExecutor(
+        events=events,
+        result={"replacement_purchase_order_id": "replacement-po-1"},
+    )
+    executor, store, plan, _ = executor_setup(tool_executor=tools)
+    _advance_to_first_tool(executor, plan)
+
+    started = executor.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=5),
+        lease_expires_at=NOW + timedelta(minutes=12),
+        current_source_versions=plan.source_versions,
+    )
+
+    assert len(store.start_tool_calls) == 1
+    assert store.complete_tool_calls == []
+    assert events == []
+    started_step = store.load(WORKFLOW_ID).steps[2]
+    assert started_step.status is WorkflowStepStatus.RUNNING
+    assert started_step.idempotency_key == started.invocation.idempotency_key
+    assert started.invocation.parameters == {
+        "original_purchase_order_id": "po-4812-y",
+        "supplier_id": "supplier-z",
+        "production_order_id": "production-4812",
+        "quantity": "60",
+    }
+
+    completed = executor.execute_started_tool(
+        started,
+        worker_id="worker-a",
+        completed_at=NOW + timedelta(minutes=6),
+    )
+
+    assert events == ["tool.execute"]
+    assert len(store.complete_tool_calls) == 1
+    assert completed.workflow.current_step == 3
+    assert completed.steps[2].status is WorkflowStepStatus.SUCCEEDED
+    assert completed.steps[2].result == {"replacement_purchase_order_id": "replacement-po-1"}
+
+
+def test_executor_leaves_a_durable_started_tool_for_safe_retry_when_the_effect_fails() -> None:
+    """An effect failure cannot accidentally advance its workflow cursor or hide the started key."""
+    tools = RecordingToolExecutor(
+        events=[],
+        result={},
+        error=RuntimeError("simulated external outage"),
+    )
+    executor, store, plan, _ = executor_setup(tool_executor=tools)
+    _advance_to_first_tool(executor, plan)
+    started = executor.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="worker-a",
+        now=NOW + timedelta(minutes=5),
+        lease_expires_at=NOW + timedelta(minutes=12),
+        current_source_versions=plan.source_versions,
+    )
+
+    with pytest.raises(RuntimeError, match="external outage"):
+        executor.execute_started_tool(
+            started,
+            worker_id="worker-a",
+            completed_at=NOW + timedelta(minutes=6),
+        )
+
+    retained = store.load(WORKFLOW_ID)
+    assert retained.workflow.current_step == 2
+    assert retained.steps[2].status is WorkflowStepStatus.RUNNING
+    assert retained.steps[2].idempotency_key == started.invocation.idempotency_key
+    assert store.complete_tool_calls == []
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
