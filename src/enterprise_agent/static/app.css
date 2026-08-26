@@ -151,6 +151,20 @@ code,
   text-align: right;
 }
 
+.app-nav {
+  display: flex;
+  gap: 0.9rem;
+  margin-left: auto;
+  font-family: var(--utility);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.app-nav a {
+  padding: 0.35rem 0.2rem;
+  text-decoration-thickness: 0.1em;
+}
+
 .shell {
   width: min(100% - 2rem, 74rem);
   margin: 0 auto;

@@ -100,14 +100,13 @@ def create_local_approval_decision_service() -> LocalApprovalDecisionPort:
 
 
 def create_local_demo_clock_control_service() -> LocalDemoClockControlPort:
-    """Build the one mutable local-demo control only for an explicit true local setting."""
+    """Build the one mutable local-demo control only for the strict synthetic database target."""
     try:
         environment = load_local_environment(default_env_path())
     except ValueError:
         return UnconfiguredLocalDemoClockControlService()
     database_url = environment.get("DATABASE_URL", "").strip()
-    demo_mode_enabled = environment.get("DEMO_MODE", "").strip().lower() == "true"
-    if not database_url or not demo_mode_enabled:
+    if not database_url:
         return UnconfiguredLocalDemoClockControlService()
     try:
         _require_local_demo_database(database_url, allow_test_database=False)
@@ -115,7 +114,6 @@ def create_local_demo_clock_control_service() -> LocalDemoClockControlPort:
         return UnconfiguredLocalDemoClockControlService()
     return LocalDemoClockControlService(
         clock=PostgresDemoClock(database_url),
-        demo_mode_enabled=True,
     )
 
 

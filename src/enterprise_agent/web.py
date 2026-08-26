@@ -341,9 +341,10 @@ def create_app(
         """Render declared workflow/recovery progress while keeping raw state inputs and errors hidden."""
         return render_page(request, "workflow.html", workflow=review_service.workflow(workflow_id))
 
-    @application.get("/demo-clock", response_class=HTMLResponse)
+    @application.get("/demo", response_class=HTMLResponse)
+    @application.get("/demo-clock", response_class=HTMLResponse, include_in_schema=False)
     def demo_clock_page(request: Request) -> HTMLResponse:
-        """Render local demo time plus its one visibly gated advance control."""
+        """Render the discoverable local demo page plus its one bounded time control."""
         demo_clock = review_service.demo_clock()
         controls = demo_clock_controls.availability()
         csrf_session: str | None = None
@@ -388,8 +389,8 @@ def create_app(
             return review_error(
                 request,
                 status_code=403,
-                title="Demo clock controls are locked",
-                message="Set DEMO_MODE=true locally, then reload the demo clock.",
+                title="Demo clock controls are unavailable",
+                message="Start the local deterministic demo database, then reload the demo page.",
             )
         except LocalDemoClockControlUnavailableError:
             return review_error(

@@ -733,8 +733,8 @@ def test_fastapi_testclient_submits_only_bound_same_origin_forms_and_handles_sta
     assert controls.advances == 0
 
 
-def test_fastapi_testclient_fails_closed_when_demo_mode_is_revoked_after_render() -> None:
-    """A valid rendered token cannot advance time if the guarded demo control becomes unavailable."""
+def test_fastapi_testclient_fails_closed_when_demo_control_is_revoked_after_render() -> None:
+    """A valid rendered token cannot advance time if the guarded local control becomes unavailable."""
     from fastapi.testclient import TestClient
 
     from enterprise_agent.web import create_app
@@ -753,7 +753,7 @@ def test_fastapi_testclient_fails_closed_when_demo_mode_is_revoked_after_render(
         forbidden = client.post("/demo-clock/advance", data={"csrf_token": token.group(1)})
 
     assert forbidden.status_code == 403
-    assert "Demo clock controls are locked" in forbidden.text
+    assert "Demo clock controls are unavailable" in forbidden.text
     assert controls.advances == 0
 
 

@@ -1,4 +1,4 @@
-"""Explicitly demo-gated local clock control for the optional verification UI."""
+"""Strict-local-target clock control for the optional verification UI."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Protocol
 
 
 class LocalDemoClockControlDisabledError(RuntimeError):
-    """Raised when a caller attempts the optional clock write without explicit demo mode."""
+    """Raised when an unconfigured UI import attempts the optional clock write."""
 
 
 class LocalDemoClockControlUnavailableError(RuntimeError):
@@ -41,7 +41,7 @@ class LocalDemoClockControlPort(Protocol):
     """Browser-facing contract that excludes reset, seed, workflow, and recovery operations."""
 
     def availability(self) -> DemoClockControlAvailability:
-        """State whether an explicit local demo setting permits time advancement."""
+        """State whether strict local-demo composition permits time advancement."""
         ...
 
     def advance_one_day(self) -> DemoClockAdvanceResult:
@@ -51,19 +51,16 @@ class LocalDemoClockControlPort(Protocol):
 
 @dataclass(slots=True)
 class LocalDemoClockControlService:
-    """Permit a fixed one-day clock advance only after composition explicitly enables demo mode."""
+    """Permit a fixed one-day clock advance after composition validates the local demo target."""
 
     clock: DemoClockAdvancePort
-    demo_mode_enabled: bool
 
     def availability(self) -> DemoClockControlAvailability:
-        """Expose the immutable configuration decision without leaking local settings."""
-        return DemoClockControlAvailability(can_advance=self.demo_mode_enabled)
+        """Expose successful strict-local composition without leaking local settings."""
+        return DemoClockControlAvailability(can_advance=True)
 
     def advance_one_day(self) -> DemoClockAdvanceResult:
         """Advance only persisted demo time, never a workflow, plan, provider, or business record."""
-        if not self.demo_mode_enabled:
-            raise LocalDemoClockControlDisabledError("demo clock control is disabled")
         try:
             current_at = self.clock.advance(timedelta(days=1))
         except RuntimeError as error:
@@ -75,7 +72,7 @@ class LocalDemoClockControlService:
 
 @dataclass(frozen=True, slots=True)
 class UnconfiguredLocalDemoClockControlService:
-    """Fail closed when local configuration has not explicitly enabled mutable demo time."""
+    """Fail closed unless composition has validated the strict local demo database target."""
 
     def availability(self) -> DemoClockControlAvailability:
         """Render a clear locked state without opening a database connection."""
