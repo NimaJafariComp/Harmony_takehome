@@ -251,6 +251,36 @@ def test_live_evaluation_shell_runs_one_explicitly_confirmed_case(
     ]
 
 
+def test_operator_shell_routes_guarded_live_demo_from_the_keyboard_menu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live end-to-end demo is reachable without reconstructing a Docker command."""
+    choices = iter(("7", "b"))
+    routed: list[str] = []
+    monkeypatch.setattr(cli, "_prompt_with_cancellation", lambda *_args, **_kwargs: next(choices))
+    monkeypatch.setattr(cli, "_run_live_demo_shell", lambda: routed.append("live-demo"))
+
+    cli._run_operator_shell()
+
+    assert routed == ["live-demo"]
+
+
+def test_live_demo_shell_forwards_an_explicit_profile_and_fixed_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The terminal route preserves the CLI's provider, case, and confirmation controls."""
+    prompts = iter(("openai", "scenario-a-reroute"))
+    invoked: list[dict[str, str]] = []
+    monkeypatch.setattr(cli, "_render_live_demo_catalogue", lambda: None)
+    monkeypatch.setattr(cli, "_prompt_with_cancellation", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(cli, "_run_shell_command", lambda command: command())
+    monkeypatch.setattr(cli, "live_demo", lambda **kwargs: invoked.append(kwargs))
+
+    cli._run_live_demo_shell()
+
+    assert invoked == [{"profile": "openai", "case": "scenario-a-reroute"}]
+
+
 def test_status_json_and_no_color_preserve_semantics_and_copyable_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

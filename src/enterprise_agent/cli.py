@@ -373,6 +373,12 @@ def _run_operator_shell() -> None:
             description="Inspect the fixed synthetic LLM evaluation cases.",
             boundary="Listing only; no provider request or write.",
         ),
+        MenuEntry(
+            key="7",
+            title="Guarded live local demo",
+            description="Stage one live provider proposal for human approval.",
+            boundary="Resets only local synthetic data; provider request and local review records require confirmation.",
+        ),
     )
     while True:
         presenter = _terminal_presenter()
@@ -381,7 +387,7 @@ def _run_operator_shell() -> None:
             title="Normal operator mode",
             subtitle="Use existing safe commands through a concise keyboard menu",
             entries=entries,
-            prompt="Choose 1–6. Enter b to return to Home.",
+            prompt="Choose 1–7. Enter b to return to Home.",
         )
         try:
             choice = _prompt_with_cancellation("Operator action").strip().lower()
@@ -416,7 +422,10 @@ def _run_operator_shell() -> None:
         if choice == "6":
             _run_live_evaluation_shell()
             continue
-        typer.echo("Choose 1–6 or b to return.")
+        if choice == "7":
+            _run_live_demo_shell()
+            continue
+        typer.echo("Choose 1–7 or b to return.")
 
 
 def _run_live_evaluation_shell() -> None:
@@ -463,6 +472,30 @@ def _run_live_evaluation_shell() -> None:
             execute=True,
         )
     )
+
+
+def _run_live_demo_shell() -> None:
+    """Start one fixed approval-gated live demo from the terminal shell."""
+    _render_live_demo_catalogue()
+    try:
+        profile = normalize_llm_profile(
+            _prompt_with_cancellation(
+                "Provider", default=_runtime_environment().get("LLM_PROFILE", "openai")
+            )
+        )
+        case_id = _prompt_with_cancellation("Live demo case ID").strip()
+        select_live_demo_case(case_id)
+    except InteractiveFlowCancelled:
+        typer.echo("live demo: cancelled; no provider request or local write was made")
+        return
+    except ValueError:
+        typer.echo("live demo: choose openai, claude, or openrouter; no provider request was made")
+        return
+    except LiveDemoSelectionError:
+        typer.echo("live demo: choose a listed case ID; no provider request or local write was made")
+        return
+
+    _run_shell_command(lambda: live_demo(profile=profile, case=case_id))
 
 
 def _run_shell_command(command: Callable[[], None]) -> None:

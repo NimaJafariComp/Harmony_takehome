@@ -8,6 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol, cast, runtime_checkable
 from urllib.request import Request, urlopen
+from uuid import UUID
 
 from enterprise_agent.application.audit_trail import append_material_audit_event
 from enterprise_agent.application.planning import (
@@ -286,6 +287,8 @@ def _json_default(value: object) -> object:
         return str(value)
     if isinstance(value, datetime | date):
         return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, Mapping):
         return dict(value)
     raise TypeError(f"cannot JSON encode {type(value).__name__}")

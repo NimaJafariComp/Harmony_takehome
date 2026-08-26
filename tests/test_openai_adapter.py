@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import MagicMock
 from urllib.request import Request
+from uuid import UUID
 
 import pytest
 
@@ -351,6 +352,24 @@ def test_openai_adapter_wraps_discriminated_recommendations_in_a_supported_root_
         "outcome": "MANUAL_REVIEW",
         "reason": "A human should review the exception.",
     }
+
+
+def test_openai_request_serializes_authorized_uuid_evidence_values() -> None:
+    """Live local contexts may carry UUID-backed records without failing before transport."""
+    from enterprise_agent.adapters.openai import _request_for
+
+    typed_evidence = replace(
+        prompt().evidence[0],
+        payload={"purchase_order_id": UUID("00000000-0000-0000-0000-000000000481")},
+    )
+    request = _request_for(replace(prompt(), evidence=(typed_evidence,)), model="gpt-5.6-luna")
+    content = cast(dict[str, Any], cast(list[object], request["input"])[0])
+    message_content = cast(list[object], content["content"])
+    payload = json.loads(cast(dict[str, str], message_content[0])["text"])
+
+    assert payload["evidence"][0]["payload"]["purchase_order_id"] == (
+        "00000000-0000-0000-0000-000000000481"
+    )
 
 
 def test_openai_adapter_rejects_an_undeclared_response_schema_without_calling_the_provider() -> (
