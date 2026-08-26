@@ -43,12 +43,12 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M12 - Documentation, transcript, and final verification |
-| Current task | M12.1 - Write README |
-| Required task progress | 55 / 62 complete |
+| Current task | M12.5 - Finalize deterministic demo command |
+| Required task progress | 59 / 62 complete |
 | Optional task progress | 27 / 27 complete |
 | Acceptance criteria progress | 11 / 14 satisfied; 3 in progress |
-| Last validated commit | `b86595d` |
-| Last completed-task push | M11.1-M11.4 bounded terminal app shell (`b86595d`) |
+| Last validated commit | `41f57c9` |
+| Last completed-task push | M12.4 final reviewer transcript (`41f57c9`) |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -197,7 +197,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M12.1 Write README | `complete` | AC-14 | Test: `tests/test_compose.py tests/test_web.py` - PASS (26 focused contracts); Ruff formatting/check and strict MyPy - PASS; `docker compose --profile tools config -q` - PASS. The Compose UI health route returned its safe readiness payload from the running service. Evidence: [README.md](README.md) documents the one-command deterministic demo, terminal shell, provider setup/evaluation, A/B/C stories, loopback UI launch, tests, extension rules, and intentional cuts. The opt-in UI service publishes only `127.0.0.1:8080` while reaching PostgreSQL through the private Compose network. Commit: `26ccd31`; this status entry is recorded in the following commit. |
 | M12.2 Write `MODEL.md` | `complete` | AC-02, AC-14 | Test: `tests/test_seed.py` - PASS (7 focused seed, scope, causal-timeline, and reset-safety contracts); `git diff --check` - PASS. Evidence: [MODEL.md](MODEL.md) documents the retained entities, Scenario A/B/C records, deliberate noise, provider scopes, mutable clock, versioned freshness data, durable control-plane records, and intentionally omitted ERP breadth. Commit: `9a5e02d`; this status entry is recorded in the following commit. |
 | M12.3 Write `DESIGN.md` | `complete` | AC-14 | Test: scoped-provider, Scenario A gate, workflow executor, scheduler, audit explanation, and provider-contract suites - PASS (103 focused contracts); `git diff --check` - PASS. Evidence: [DESIGN.md](DESIGN.md) explains the modular-monolith trade-off, scoped identity/authorization, durable memory, fixed workflow engine, recovery, provider boundary, and production scaling path. Commit: `5abed69`; this status entry is recorded in the following commit. |
-| M12.4 Create recorded final transcript | `not_started` | AC-11, AC-14 | - |
+| M12.4 Create recorded final transcript | `complete` | AC-11, AC-14 | Validation: `make demo` - PASS; four isolated Scenario A/B/C PostgreSQL transcript contracts - PASS (4 in 19.47s); focused replacement-PO crash/restart contract - PASS; `git diff --check` - PASS. Manual no-write OpenAI scorecard (`gpt-5.6-luna`, fixed synthetic bait case) - PASS (4/4 checks; 823 tokens; estimated $0.0003266); no ledger entry written. Evidence: [TRANSCRIPT.md](TRANSCRIPT.md) records the commands, deterministic control-plane walkthrough, approval, backup, Tuesday, recovery, and audit trace, optional Scenario C, and clearly separated live scorecard without credentials or raw model text. Commit: `41f57c9`; this status entry is recorded in the following commit. |
 | M12.5 Finalize deterministic demo command | `not_started` | AC-14 | - |
 | M12.6 Run final validation suite | `not_started` | AC-01, AC-13, AC-14 | - |
 | M12.7 Review requirements coverage | `not_started` | AC-01 through AC-14 | - |
@@ -351,3 +351,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | M12.1 | Completed the reviewer README and Compose UI launch path. | Test: 26 focused Compose/UI contracts, Ruff format/lint, strict MyPy, and rendered Compose configuration - PASS. The actual UI container served its safe health payload on its local listener; this workspace's Docker host did not expose published ports, so browser reachability was validated through the container rather than claimed from the host. `README.md` now gives reviewers direct commands for deterministic demo, interactive terminal, local Compose UI, provider setup, synthetic no-write evaluation, tests, extension boundaries, and intentional cuts. | `26ccd31` plus this status commit pushed to `origin/main`. |
 | 2026-08-26 | M12.2 | Documented the synthetic company model. | Test: `tests/test_seed.py` - PASS (7 focused contracts); documentation whitespace validation - PASS. `MODEL.md` records the exact seeded purchasing, quality, communications, authorization, clock, and optional bulletin facts, then separates seed noise and fixed test mutations from deliberately omitted ERP breadth. | `9a5e02d` plus this status commit pushed to `origin/main`. |
 | 2026-08-26 | M12.3 | Completed the required architecture design reference. | Test: 103 focused provider-scope, policy-gate, workflow, scheduler, audit, and adapter contracts - PASS. `DESIGN.md` explains how ports and adapters constrain data flow, why state is durable rather than conversational, how fixed workflows and idempotency protect effects, and how the modular monolith can scale without splitting its approval boundary. | `5abed69` plus this status commit pushed to `origin/main`. |
+| 2026-08-26 | M12.4 | Recorded the reproducible final reviewer walkthrough. | Validation: `make demo` - PASS; four isolated Scenario A/B/C PostgreSQL control-plane transcripts - PASS (4 in 19.47s); focused Scenario A replacement-PO crash/restart - PASS; `git diff --check` - PASS. One explicit OpenAI `gpt-5.6-luna` fixed-synthetic evaluation passed 4/4 checks with 823 tokens and $0.0003266 estimated cost; it used the in-memory no-write evaluator and wrote no ledger record. `TRANSCRIPT.md` captures the deterministic approval, backup, recovery, Tuesday, audit, B, and optional C traces separately from this live compatibility signal. | `41f57c9` plus this status commit pushed to `origin/main`. |
