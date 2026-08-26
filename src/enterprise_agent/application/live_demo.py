@@ -187,6 +187,7 @@ _LIVE_DEMO_CASES: tuple[LiveDemoCase, ...] = (
     ),
 )
 _LIVE_DEMO_CASES_BY_ID = {str(case.case_id): case for case in _LIVE_DEMO_CASES}
+_PROVIDER_NAMES_BY_PROFILE = {"openai": "openai", "claude": "anthropic", "openrouter": "openrouter"}
 
 
 def live_demo_cases() -> tuple[LiveDemoCase, ...]:
@@ -703,7 +704,7 @@ def _validated_recommendation(
     configuration: ProviderConfiguration,
 ) -> ScenarioARecommendation | ScenarioBRecommendation | ScenarioCRecommendation | LiveDemoResult:
     """Apply the owned schema one more time before a provider result can reach any gate or plan."""
-    if not response.is_success or response.provider != configuration.profile:
+    if not response.is_success or response.provider != _PROVIDER_NAMES_BY_PROFILE[configuration.profile]:
         return _planner_failure_result(
             case=case,
             run_id=run_id,

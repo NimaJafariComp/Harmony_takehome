@@ -31,6 +31,13 @@ def test_live_demo_catalogue_is_fixed_to_one_seeded_story_per_scenario() -> None
         select_live_demo_case("arbitrary-live-prompt")
 
 
+def test_live_demo_matches_the_claude_profile_to_its_anthropic_adapter_identity() -> None:
+    """A completed Claude result reaches schema validation instead of failing on a naming alias."""
+    from enterprise_agent.application.live_demo import _PROVIDER_NAMES_BY_PROFILE
+
+    assert _PROVIDER_NAMES_BY_PROFILE["claude"] == "anthropic"
+
+
 @pytest.mark.parametrize(
     ("profile", "adapter_name"),
     (
