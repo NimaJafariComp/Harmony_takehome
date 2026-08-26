@@ -22,7 +22,7 @@ from enterprise_agent.application.tools import (
     NotifyProductionInput,
     ReallocateLotInput,
 )
-from enterprise_agent.ports import PromptEnvelope, StructuredLLMResponse
+from enterprise_agent.ports import LLMGenerationResult, PromptEnvelope
 
 
 class InvalidScenarioARecommendationError(ValueError):
@@ -151,7 +151,7 @@ class FakeLLMPort:
             dict(recommendations)
         )
 
-    def generate(self, prompt: PromptEnvelope) -> StructuredLLMResponse:
+    def generate(self, prompt: PromptEnvelope) -> LLMGenerationResult:
         """Return configured output or a safe manual-review recommendation for unknown scenarios."""
         scenario_key = f"{prompt.attention.scenario}:{prompt.attention.cause}"
         recommendation = self._recommendations.get(scenario_key)
@@ -160,7 +160,7 @@ class FakeLLMPort:
                 outcome="MANUAL_REVIEW",
                 reason=f"No fake recommendation configured for {scenario_key}.",
             )
-        return StructuredLLMResponse(
+        return LLMGenerationResult.succeeded(
             provider="fake",
             model="deterministic-fake-v1",
             output=recommendation.model_dump(mode="json"),

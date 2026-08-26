@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Self, runtime_checkable
 
 from enterprise_agent.domain import (
     ActorContext,
@@ -62,16 +63,81 @@ class PromptEnvelope:
     response_schema: str
 
 
+class LLMGenerationStatus(StrEnum):
+    """The complete safe outcome vocabulary returned by every configured LLM adapter."""
+
+    SUCCEEDED = "succeeded"
+    INVALID_RESPONSE = "invalid_response"
+    TIMEOUT = "timeout"
+    PROVIDER_FAILURE = "provider_failure"
+    REFUSAL = "refusal"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
-class StructuredLLMResponse:
-    """Provider-neutral structured output before application-schema validation."""
+class LLMGenerationResult:
+    """One provider-neutral structured success or sanitized failure that cannot become prompt input."""
 
     provider: str
     model: str
-    output: Mapping[str, object]
+    status: LLMGenerationStatus = LLMGenerationStatus.SUCCEEDED
+    output: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "output", MappingProxyType(dict(self.output)))
+        provider = self.provider.strip()
+        model = self.model.strip()
+        if not provider:
+            raise ValueError("LLM provider is required")
+        if not model:
+            raise ValueError("LLM model is required")
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "model", model)
+        if self.status is LLMGenerationStatus.SUCCEEDED:
+            if self.output is None or not isinstance(self.output, Mapping):
+                raise ValueError("successful LLM result requires structured output")
+            object.__setattr__(self, "output", MappingProxyType(dict(self.output)))
+        elif self.output is not None:
+            raise ValueError("failed LLM result must not include output")
+
+    @classmethod
+    def succeeded(
+        cls,
+        *,
+        provider: str,
+        model: str,
+        output: Mapping[str, object],
+    ) -> Self:
+        """Normalize one transport-validated structured provider response."""
+        return cls(
+            provider=provider, model=model, status=LLMGenerationStatus.SUCCEEDED, output=output
+        )
+
+    @classmethod
+    def failed(
+        cls,
+        *,
+        provider: str,
+        model: str,
+        status: LLMGenerationStatus,
+    ) -> Self:
+        """Normalize a safe failure category without retaining provider error text or payloads."""
+        if status is LLMGenerationStatus.SUCCEEDED:
+            raise ValueError("failed LLM result requires a failure status")
+        return cls(provider=provider, model=model, status=status)
+
+    @property
+    def is_success(self) -> bool:
+        """Return whether this result contains structured output eligible for schema validation."""
+        return self.status is LLMGenerationStatus.SUCCEEDED
+
+    def require_output(self) -> Mapping[str, object]:
+        """Return structured output or refuse to pass a provider failure into application planning."""
+        if not self.is_success or self.output is None:
+            raise ValueError(f"LLM result has no structured output: {self.status.value}")
+        return self.output
+
+
+# Compatibility name retained while callers migrate from the success-only pre-M7 contract.
+StructuredLLMResponse = LLMGenerationResult
 
 
 @runtime_checkable
@@ -358,6 +424,6 @@ class SchedulerPort(Protocol):
 class LLMPort(Protocol):
     """Generate one validated-transport structured response from an authorized prompt."""
 
-    def generate(self, prompt: PromptEnvelope) -> StructuredLLMResponse:
-        """Call only the explicitly selected provider profile; never fall back implicitly."""
+    def generate(self, prompt: PromptEnvelope) -> LLMGenerationResult:
+        """Call only the selected provider and normalize success or a safe failure without fallback."""
         ...

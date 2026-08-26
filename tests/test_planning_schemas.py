@@ -167,8 +167,8 @@ def test_fake_llm_is_scenario_configurable_and_defaults_to_manual_review() -> No
     assert first == second
     assert first.provider == "fake"
     assert first.model == "deterministic-fake-v1"
-    assert validate_scenario_a_recommendation(first.output) == configured
-    fallback = validate_scenario_a_recommendation(unconfigured.output)
+    assert validate_scenario_a_recommendation(first.require_output()) == configured
+    fallback = validate_scenario_a_recommendation(unconfigured.require_output())
     assert isinstance(fallback, ManualReviewRecommendation)
     assert fallback.reason == "No fake recommendation configured for scenario_b:quality_hold."
 

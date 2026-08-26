@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -22,7 +24,7 @@ def test_successful_llm_result_exposes_only_immutable_structured_output() -> Non
     assert result.output == {"outcome": "MANUAL_REVIEW", "reason": "Evidence conflicts."}
     assert result.require_output() == result.output
     with pytest.raises(TypeError):
-        result.output["outcome"] = "ENTER_WORKFLOW"  # type: ignore[index]
+        cast(dict[str, object], result.require_output())["outcome"] = "ENTER_WORKFLOW"
 
 
 @pytest.mark.parametrize(
