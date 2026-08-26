@@ -103,7 +103,7 @@ def test_llm_smoke_command_reports_only_safe_success_metadata(
     assert observed_configurations == [
         ProviderConfiguration(profile="openai", model="gpt-5.6-luna", api_key="smoke-openai-secret")
     ]
-    assert "llm-smoke: succeeded (profile: openai, model: gpt-5.6-luna)" in result.stdout
+    assert "llm-smoke: succeeded (profile: openai, model: gpt-5.6-luna;" in result.stdout
     assert "no business data was sent" in result.stdout
     assert "smoke-openai-secret" not in result.output
     assert "Probe returned structured output" not in result.output

@@ -1,4 +1,4 @@
-.PHONY: demo format-check lint migrate seed test test-critical typecheck verify
+.PHONY: demo format-check lint llm-smoke migrate seed test test-critical typecheck verify
 
 format-check:
 	uv run ruff format --check .
@@ -33,3 +33,6 @@ seed: migrate
 
 demo:
 	@echo "Demo command is not available until M8."
+
+llm-smoke:
+	LLM_PROFILE="$(LLM_PROFILE)" uv run enterprise-agent llm-smoke

@@ -37,6 +37,7 @@ from enterprise_agent.seed import (
     reset_database,
     seed_database,
 )
+from enterprise_agent.smoke import run_smoke
 
 app = typer.Typer(
     help="Operate the enterprise agent harness.",
@@ -92,6 +93,31 @@ def run() -> None:
         f"(profile: {configuration.profile}, model: {configuration.model}); "
         "scenario execution is not available until M8."
     )
+
+
+@app.command(name="llm-smoke")
+def llm_smoke() -> None:
+    """Run one deliberate fixed-input provider probe without any business-system data or writes."""
+    try:
+        configuration = load_provider_settings(_runtime_environment())
+    except (ConfigurationError, ValueError) as error:
+        typer.echo(f"configuration: llm smoke refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+
+    try:
+        result = run_smoke(configuration)
+    except ValueError as error:
+        typer.echo(f"llm-smoke: refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+
+    message = (
+        f"llm-smoke: {result.status.value} "
+        f"(profile: {configuration.profile}, model: {configuration.model}; no business data was sent)"
+    )
+    if not result.is_success:
+        typer.echo(message, err=True)
+        raise typer.Exit(code=1)
+    typer.echo(message)
 
 
 @app.command()

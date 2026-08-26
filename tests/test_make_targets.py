@@ -38,6 +38,14 @@ def test_makefile_exposes_all_standard_validation_targets() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_llm_smoke_target_passes_an_explicit_provider_selection_to_the_cli() -> None:
+    """The documented manual target selects one profile without running a provider during validation."""
+    result = run_make("-n", "llm-smoke", "LLM_PROFILE=openai")
+
+    assert result.returncode == 0, result.stderr
+    assert 'LLM_PROFILE="openai" uv run enterprise-agent llm-smoke' in result.stdout
+
+
 def test_critical_test_target_executes_the_critical_suite() -> None:
     """The focused safety suite can run independently of the full suite."""
     result = run_make("test-critical")
