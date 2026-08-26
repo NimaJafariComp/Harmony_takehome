@@ -4,6 +4,7 @@ from enterprise_agent.domain import InvalidAttentionTransitionError
 
 from .attention import PostgresAttentionAdapter
 from .audit import AuditEventError, PostgresAuditAdapter
+from .claude import ClaudeMessagesAdapter, ClaudeMessagesTransport, UrllibClaudeMessagesTransport
 from .clock import DemoClockNotInitializedError, PostgresDemoClock
 from .identity import IdentityNotFoundError, PostgresIdentityAdapter
 from .openai import OpenAIResponsesAdapter, OpenAIResponsesTransport, UrllibOpenAIResponsesTransport
@@ -25,6 +26,8 @@ from .workflow_state import PostgresWorkflowStateAdapter
 
 __all__ = [
     "AuditEventError",
+    "ClaudeMessagesAdapter",
+    "ClaudeMessagesTransport",
     "DemoClockNotInitializedError",
     "IdentityNotFoundError",
     "InvalidAttentionTransitionError",
@@ -47,5 +50,6 @@ __all__ = [
     "ScheduledTaskIdempotencyError",
     "ToolExecutionError",
     "UnsupportedEvidenceTypeError",
+    "UrllibClaudeMessagesTransport",
     "UrllibOpenAIResponsesTransport",
 ]

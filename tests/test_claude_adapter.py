@@ -181,8 +181,18 @@ def test_claude_adapter_sends_authorized_evidence_requests_json_schema_and_audit
     assert schema["$defs"]["ManualReviewRecommendation"]["additionalProperties"] is False
     assert "minLength" not in schema["$defs"]["ManualReviewRecommendation"]["properties"]["reason"]
     assert (
+        "at least 1 character"
+        in schema["$defs"]["ManualReviewRecommendation"]["properties"]["reason"]["description"]
+    )
+    assert (
         "exclusiveMinimum"
         not in schema["$defs"]["EnterWorkflowRecommendation"]["properties"]["quantity"]["anyOf"][0]
+    )
+    assert (
+        "greater than 0"
+        in schema["$defs"]["EnterWorkflowRecommendation"]["properties"]["quantity"]["anyOf"][0][
+            "description"
+        ]
     )
     assert API_KEY not in json.dumps(request)
     assert audit.events[0].event_type == "llm.completed"
@@ -256,6 +266,11 @@ def test_claude_adapter_rejects_an_undeclared_schema_without_calling_the_provide
         ({"stop_reason": "max_tokens", "content": []}, LLMGenerationStatus.PROVIDER_FAILURE),
         (["not a message object"], LLMGenerationStatus.INVALID_RESPONSE),
         ({"stop_reason": "end_turn"}, LLMGenerationStatus.INVALID_RESPONSE),
+        ({"stop_reason": "end_turn", "content": []}, LLMGenerationStatus.INVALID_RESPONSE),
+        (
+            {"stop_reason": "end_turn", "content": [{"type": "thinking"}]},
+            LLMGenerationStatus.INVALID_RESPONSE,
+        ),
         ({"stop_reason": "end_turn", "content": [None]}, LLMGenerationStatus.INVALID_RESPONSE),
         (
             {"stop_reason": "end_turn", "content": [{"type": "text"}]},
