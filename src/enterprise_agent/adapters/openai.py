@@ -271,11 +271,12 @@ def _json_default(value: object) -> object:
 
 
 def _openai_strict_schema(value: object) -> object:
-    """Require every object property while retaining nullable field types for OpenAI strict output."""
+    """Normalize shared schemas to the subset accepted by the configured OpenAI model family."""
     if isinstance(value, Mapping):
         normalized = {
             "anyOf" if key == "oneOf" else key: _openai_strict_schema(child)
             for key, child in value.items()
+            if key != "pattern"
         }
         properties = normalized.get("properties")
         if isinstance(properties, Mapping):
