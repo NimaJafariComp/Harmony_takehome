@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from enterprise_agent import cli
 from enterprise_agent.config import ConfigurationError, load_settings
+from enterprise_agent.llm_setup import curated_models_for
 
 pytestmark = pytest.mark.unit
 
@@ -113,7 +114,11 @@ def test_live_model_discovery_intersects_account_visible_models_with_adapter_rev
     assert models[0].recommended is True
     assert captured["request"].full_url == expected_url
     assert captured["request"].get_method() == "GET"
-    assert captured["request"].get_header("Authorization") == "Bearer discovery-key"
+    if profile == "claude":
+        assert captured["request"].get_header("X-api-key") == "discovery-key"
+        assert captured["request"].get_header("Anthropic-version") == "2023-06-01"
+    else:
+        assert captured["request"].get_header("Authorization") == "Bearer discovery-key"
 
 
 def test_live_model_discovery_refuses_to_suggest_unreviewed_or_unsupported_models(
@@ -323,6 +328,9 @@ def test_run_interactively_creates_a_hidden_key_profile_with_the_recommended_mod
     monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
     monkeypatch.setattr(typer, "prompt", fake_prompt)
     monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        cli, "discover_compatible_models", lambda profile, _key: curated_models_for(profile)
+    )
 
     result = CliRunner().invoke(cli.app, ["run"])
 
@@ -382,6 +390,9 @@ def test_explicit_setup_verifies_only_the_selected_provider_and_allows_a_custom_
     monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
     monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
     monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        cli, "discover_compatible_models", lambda profile, _key: curated_models_for(profile)
+    )
 
     def record_verification(profile: str, api_key: str) -> bool:
         verification_calls.append((profile, api_key))
@@ -435,6 +446,9 @@ def test_failed_explicit_verification_does_not_write_or_echo_the_key(
     monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
     monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
     monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        cli, "discover_compatible_models", lambda profile, _key: curated_models_for(profile)
+    )
     monkeypatch.setattr(cli, "verify_credential", lambda *_args, **_kwargs: False)
 
     result = CliRunner().invoke(cli.app, ["llm-setup"])

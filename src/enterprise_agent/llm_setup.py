@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from types import MappingProxyType
@@ -21,6 +22,11 @@ _VERIFICATION_ENDPOINTS: Final = {
     "claude": "https://api.anthropic.com/v1/models?limit=1",
     "openrouter": "https://openrouter.ai/api/v1/auth/key",
 }
+_MODEL_DISCOVERY_ENDPOINTS: Final = {
+    "openai": "https://api.openai.com/v1/models",
+    "claude": "https://api.anthropic.com/v1/models?limit=1000",
+    "openrouter": "https://openrouter.ai/api/v1/models",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +36,10 @@ class CuratedModel:
     model_id: str
     label: str
     recommended: bool = False
+
+
+class ModelDiscoveryError(ValueError):
+    """Raised when a provider model list cannot safely yield an adapter-reviewed suggestion."""
 
 
 CURATED_MODEL_CATALOG: Mapping[str, tuple[CuratedModel, ...]] = MappingProxyType(
@@ -78,6 +88,51 @@ def curated_models_for(profile: str) -> tuple[CuratedModel, ...]:
     return CURATED_MODEL_CATALOG[normalized_profile]
 
 
+def discover_compatible_models(
+    profile: str,
+    api_key: str,
+    *,
+    timeout_seconds: float = 5.0,
+) -> tuple[CuratedModel, ...]:
+    """Return only account-visible curated models whose adapter contract is explicitly reviewed.
+
+    The provider's key-scoped model list is used only in memory to prove account visibility.  The
+    application never promotes arbitrary provider-list entries into recommendations.
+    """
+    normalized_profile = _profile_or_value_error(profile)
+    credential = _safe_value(api_key, name="API key")
+    if timeout_seconds <= 0:
+        raise ValueError("model discovery timeout must be positive")
+
+    request = Request(
+        _MODEL_DISCOVERY_ENDPOINTS[normalized_profile],
+        headers=_provider_headers(normalized_profile, credential),
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (
+        OSError,
+        TimeoutError,
+        TypeError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as error:
+        raise ModelDiscoveryError("could not retrieve models for the selected provider") from error
+
+    entries = _model_entries(payload)
+    compatible = tuple(
+        model
+        for model in curated_models_for(normalized_profile)
+        if _model_is_available_and_compatible(normalized_profile, model.model_id, entries)
+    )
+    if not compatible:
+        raise ModelDiscoveryError("no adapter-reviewed models are available to this API key")
+    return _with_available_recommendation(compatible)
+
+
 def default_env_path() -> Path:
     """Return the only local profile file used by the CLI from its current working directory."""
     return Path.cwd() / ".env"
@@ -116,17 +171,68 @@ def verify_credential(profile: str, api_key: str, *, timeout_seconds: float = 5.
     if timeout_seconds <= 0:
         raise ValueError("verification timeout must be positive")
 
-    headers = {"Content-Type": "application/json"}
-    if normalized_profile == "claude":
-        headers.update({"Anthropic-Version": _ANTHROPIC_VERSION, "X-Api-Key": credential})
-    else:
-        headers["Authorization"] = f"Bearer {credential}"
+    headers = _provider_headers(normalized_profile, credential)
     request = Request(_VERIFICATION_ENDPOINTS[normalized_profile], headers=headers, method="GET")
     try:
         with urlopen(request, timeout=timeout_seconds):
             return True
     except (OSError, TimeoutError, ValueError):
         return False
+
+
+def _provider_headers(profile: str, credential: str) -> dict[str, str]:
+    """Return selected-provider metadata headers without retaining the supplied credential elsewhere."""
+    headers = {"Content-Type": "application/json"}
+    if profile == "claude":
+        headers.update({"Anthropic-Version": _ANTHROPIC_VERSION, "X-Api-Key": credential})
+    else:
+        headers["Authorization"] = f"Bearer {credential}"
+    return headers
+
+
+def _model_entries(payload: object) -> tuple[Mapping[str, object], ...]:
+    """Extract the one trusted response shape while retaining no provider response outside this call."""
+    if not isinstance(payload, Mapping):
+        raise ModelDiscoveryError("could not retrieve models for the selected provider")
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise ModelDiscoveryError("could not retrieve models for the selected provider")
+    entries: list[Mapping[str, object]] = []
+    for value in data:
+        if not isinstance(value, Mapping):
+            raise ModelDiscoveryError("could not retrieve models for the selected provider")
+        entries.append(value)
+    return tuple(entries)
+
+
+def _model_is_available_and_compatible(
+    profile: str,
+    model_id: str,
+    entries: tuple[Mapping[str, object], ...],
+) -> bool:
+    """Require an exact provider-listed ID and Claude's declared structured-output capability."""
+    for entry in entries:
+        if entry.get("id") != model_id:
+            continue
+        if profile != "claude":
+            return True
+        capabilities = entry.get("capabilities")
+        if not isinstance(capabilities, Mapping):
+            return False
+        structured_outputs = capabilities.get("structured_outputs")
+        return (
+            isinstance(structured_outputs, Mapping) and structured_outputs.get("supported") is True
+        )
+    return False
+
+
+def _with_available_recommendation(
+    models: tuple[CuratedModel, ...],
+) -> tuple[CuratedModel, ...]:
+    """Keep the curated default when visible, otherwise recommend the first safe visible option."""
+    if any(model.recommended for model in models):
+        return models
+    return (replace(models[0], recommended=True), *models[1:])
 
 
 def _read_env_file(env_path: Path) -> dict[str, str]:

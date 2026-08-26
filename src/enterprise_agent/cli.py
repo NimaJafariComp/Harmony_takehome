@@ -25,8 +25,9 @@ from enterprise_agent.domain import RunId
 from enterprise_agent.llm_setup import (
     CuratedModel,
     LLMSetupSelection,
-    curated_models_for,
+    ModelDiscoveryError,
     default_env_path,
+    discover_compatible_models,
     load_local_environment,
     save_llm_profile,
     verify_credential,
@@ -212,12 +213,16 @@ def _interactive_llm_setup() -> ProviderConfiguration:
     selected_profile = cast(str, typer.prompt("Provider"))
     try:
         profile = normalize_llm_profile(selected_profile)
-        catalog = curated_models_for(profile)
     except ValueError as error:
         typer.echo(f"configuration: setup refused ({error})", err=True)
         raise typer.Exit(code=1) from error
 
     api_key = cast(str, typer.prompt(f"{profile.title()} API key", hide_input=True))
+    try:
+        catalog = discover_compatible_models(profile, api_key)
+    except (ModelDiscoveryError, ValueError) as error:
+        typer.echo(f"configuration: setup refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
     verified = False
     if typer.confirm("Verify this key with a no-generation request now?", default=False):
         try:
@@ -248,7 +253,7 @@ def _interactive_llm_setup() -> ProviderConfiguration:
 
 def _prompt_model_choice(catalog: tuple[CuratedModel, ...]) -> str:
     """Display only curated adapter-reviewed models plus an explicit custom-ID selection."""
-    typer.echo("Available models:")
+    typer.echo("Available adapter-compatible models for this key:")
     for index, model in enumerate(catalog, start=1):
         marker = " (recommended)" if model.recommended else ""
         typer.echo(f"  {index}. {model.label}: {model.model_id}{marker}")

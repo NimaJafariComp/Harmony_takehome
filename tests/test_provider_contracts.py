@@ -86,7 +86,7 @@ class FixedClock:
         return NOW
 
 
-AdapterFactory = Callable[[RecordingTransport, RecordingAudit, str], LLMPort]
+AdapterFactory = Callable[[RecordingTransport, RecordingAudit, str, str], LLMPort]
 ResponseFactory = Callable[[dict[str, object]], dict[str, object]]
 
 
@@ -107,13 +107,14 @@ def _openai_adapter(
     transport: RecordingTransport,
     audit: RecordingAudit,
     api_key: str,
+    model: str,
 ) -> LLMPort:
     """Build an OpenAI adapter solely with a recording transport."""
     from enterprise_agent.adapters.openai import OpenAIResponsesAdapter
 
     return OpenAIResponsesAdapter(
         api_key=api_key,
-        model="gpt-5.6-luna",
+        model=model,
         transport=transport,
         audit=audit,
         clock=FixedClock(),
@@ -124,13 +125,14 @@ def _claude_adapter(
     transport: RecordingTransport,
     audit: RecordingAudit,
     api_key: str,
+    model: str,
 ) -> LLMPort:
     """Build a Claude adapter solely with a recording transport."""
     from enterprise_agent.adapters.claude import ClaudeMessagesAdapter
 
     return ClaudeMessagesAdapter(
         api_key=api_key,
-        model="claude-sonnet-5",
+        model=model,
         transport=transport,
         audit=audit,
         clock=FixedClock(),
@@ -141,13 +143,14 @@ def _openrouter_adapter(
     transport: RecordingTransport,
     audit: RecordingAudit,
     api_key: str,
+    model: str,
 ) -> LLMPort:
     """Build an OpenRouter adapter solely with a recording transport."""
     from enterprise_agent.adapters.openrouter import OpenRouterChatCompletionsAdapter
 
     return OpenRouterChatCompletionsAdapter(
         api_key=api_key,
-        model="nvidia/nemotron-3-ultra-550b-a55b:free",
+        model=model,
         transport=transport,
         audit=audit,
         clock=FixedClock(),
@@ -274,7 +277,9 @@ def test_selected_adapters_share_one_valid_structured_output_contract(
         )
     )
 
-    result = contract.create_adapter(transport, audit, "contract-test-key").generate(prompt())
+    result = contract.create_adapter(
+        transport, audit, "contract-test-key", contract.model
+    ).generate(prompt())
 
     assert result.status is LLMGenerationStatus.SUCCEEDED
     assert result.provider == contract.provider
@@ -317,7 +322,9 @@ def test_selected_adapters_fail_closed_without_cross_provider_fallback(
     audit = RecordingAudit()
     transport = RecordingTransport(response)
 
-    result = contract.create_adapter(transport, audit, "contract-test-key").generate(prompt())
+    result = contract.create_adapter(
+        transport, audit, "contract-test-key", contract.model
+    ).generate(prompt())
 
     assert result.status is expected_status
     assert result.provider == contract.provider
@@ -344,9 +351,34 @@ def test_selected_adapters_reject_missing_credentials_before_using_a_mock_transp
     )
 
     with pytest.raises(ValueError, match="API key is required"):
-        contract.create_adapter(transport, RecordingAudit(), " ")
+        contract.create_adapter(transport, RecordingAudit(), " ", contract.model)
 
     assert transport.requests == []
+
+
+@pytest.mark.parametrize("contract", PROVIDER_CONTRACTS, ids=lambda contract: contract.profile)
+def test_every_adapter_reviewed_catalog_model_passes_its_provider_contract(
+    contract: ProviderContract,
+) -> None:
+    """A catalog addition must pass the same normalized adapter contract before setup may suggest it."""
+    for catalog_model in CURATED_MODEL_CATALOG[contract.profile]:
+        audit = RecordingAudit()
+        transport = RecordingTransport(
+            contract.completed_response(
+                {"outcome": "MANUAL_REVIEW", "reason": "A person must resolve this exception."}
+            )
+        )
+
+        result = contract.create_adapter(
+            transport,
+            audit,
+            "contract-test-key",
+            catalog_model.model_id,
+        ).generate(prompt())
+
+        assert result.status is LLMGenerationStatus.SUCCEEDED
+        assert result.model == catalog_model.model_id
+        assert len(transport.requests) == 1
 
 
 @pytest.mark.parametrize("contract", PROVIDER_CONTRACTS, ids=lambda contract: contract.profile)
@@ -381,6 +413,11 @@ def test_interactive_setup_preserves_other_profiles_and_hides_the_selected_key(
     monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
     monkeypatch.setattr(typer, "prompt", fake_prompt)
     monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        cli,
+        "discover_compatible_models",
+        lambda profile, _key: CURATED_MODEL_CATALOG[profile],
+    )
 
     result = CliRunner().invoke(cli.app, ["llm-setup"])
 
