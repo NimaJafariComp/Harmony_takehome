@@ -19,6 +19,7 @@ class WorkflowStepName(StrEnum):
     CONFIRM_ALTERNATE_LEAD_TIME = "confirm_alternate_lead_time"
     CREATE_REPLACEMENT_PO = "create_replacement_po"
     REDUCE_OR_CANCEL_ORIGINAL_PO = "reduce_or_cancel_original_po"
+    PLACE_PURCHASE_ORDER_HOLD = "place_purchase_order_hold"
     NOTIFY_PRODUCTION = "notify_production"
     SCHEDULE_ARRIVAL_CHECK = "schedule_arrival_check"
     REALLOCATE_LOT = "reallocate_lot"

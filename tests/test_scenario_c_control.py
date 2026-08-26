@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -15,6 +15,10 @@ from enterprise_agent.application.planning import (
     ManualReviewRecommendation,
 )
 from enterprise_agent.application.scenario_c_context import ScenarioCContextBundle
+from enterprise_agent.application.scenario_c_control import (
+    ScenarioCControlRejectedError,
+    ScenarioCControlService,
+)
 from enterprise_agent.application.tools import NotifyProductionInput, PlacePurchaseOrderHoldInput
 from enterprise_agent.application.workflow_state import WorkflowStateService
 from enterprise_agent.domain import (
@@ -30,13 +34,15 @@ from enterprise_agent.domain import (
 )
 
 NOW = datetime(2026, 8, 24, 9, tzinfo=UTC)
+RecommendationFactory = Callable[[ScenarioCContextBundle], HoldAndNotifyRecommendation]
+SourceVersionFactory = Callable[[ScenarioCContextBundle], Mapping[str, int]]
 DANA = ActorContext(
     user_id=UserId("00000000-0000-0000-0000-000000000001"),
     role="purchasing_manager",
     scopes=frozenset({Scope("erp:po:hold"), Scope("production:notify")}),
     plant_ids=frozenset({PlantId("PLANT-CHI")}),
     backup_approver_id=None,
-    approval_limits={"USD": Decimal("10000")},
+    approval_limits={"USD": Decimal(10000)},
 )
 
 
@@ -120,10 +126,8 @@ def _recommendation(context: ScenarioCContextBundle) -> HoldAndNotifyRecommendat
     )
 
 
-def _control() -> tuple[object, MagicMock, MagicMock]:
+def _control() -> tuple[ScenarioCControlService, MagicMock, MagicMock]:
     """Wire the real shared application services to isolated persistence spies."""
-    from enterprise_agent.application.scenario_c_control import ScenarioCControlService
-
     approval_store = MagicMock()
     workflow_store = MagicMock()
     return (
@@ -174,25 +178,27 @@ def test_supplier_risk_control_stages_one_immutable_hold_then_notify_plan() -> N
     ("recommendation", "current_source_versions", "error_match"),
     [
         (
-            lambda context: replace(
-                _recommendation(context),
-                hold_purchase_order=PlacePurchaseOrderHoldInput(
-                    purchase_order_id="po-unrelated",
-                    production_order_id=context.production_order.record_id,
-                    expected_purchase_order_version=context.purchase_order.source_version,
-                ),
+            lambda context: _recommendation(context).model_copy(
+                update={
+                    "hold_purchase_order": PlacePurchaseOrderHoldInput(
+                        purchase_order_id="po-unrelated",
+                        production_order_id=context.production_order.record_id,
+                        expected_purchase_order_version=context.purchase_order.source_version,
+                    )
+                },
             ),
             lambda context: context.source_versions,
             "does not target the current purchase order",
         ),
         (
-            lambda context: replace(
-                _recommendation(context),
-                hold_purchase_order=PlacePurchaseOrderHoldInput(
-                    purchase_order_id=context.purchase_order.record_id,
-                    production_order_id=context.production_order.record_id,
-                    expected_purchase_order_version=context.purchase_order.source_version + 1,
-                ),
+            lambda context: _recommendation(context).model_copy(
+                update={
+                    "hold_purchase_order": PlacePurchaseOrderHoldInput(
+                        purchase_order_id=context.purchase_order.record_id,
+                        production_order_id=context.production_order.record_id,
+                        expected_purchase_order_version=context.purchase_order.source_version + 1,
+                    )
+                },
             ),
             lambda context: context.source_versions,
             "does not bind the current purchase-order version",
@@ -206,13 +212,11 @@ def test_supplier_risk_control_stages_one_immutable_hold_then_notify_plan() -> N
     ids=("unrelated_purchase_order", "stale_embedded_po_version", "stale_context"),
 )
 def test_supplier_risk_control_rejects_unbound_or_stale_hold_before_any_persistence(
-    recommendation: object,
-    current_source_versions: object,
+    recommendation: RecommendationFactory,
+    current_source_versions: SourceVersionFactory,
     error_match: str,
 ) -> None:
     """The model cannot redirect a hold or revive stale supplier-risk evidence into a write plan."""
-    from enterprise_agent.application.scenario_c_control import ScenarioCControlRejectedError
-
     context = _context()
     control, approval_store, workflow_store = _control()
 

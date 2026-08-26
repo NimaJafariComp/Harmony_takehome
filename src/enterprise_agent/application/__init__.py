@@ -79,6 +79,12 @@ from .scenario_c_context import (
     ScenarioCContextBundle,
     StaleScenarioCContextEvidenceError,
 )
+from .scenario_c_control import (
+    ScenarioCControlRejectedError,
+    ScenarioCControlResult,
+    ScenarioCControlService,
+    tool_calls_for_scenario_c_recommendation,
+)
 from .stockout import StockoutDetection, StockoutDetector, StockoutRisk
 from .supplier_risk import (
     SupplierRisk,
@@ -183,6 +189,9 @@ __all__ = [
     "ScenarioBRecommendation",
     "ScenarioCContextAssembler",
     "ScenarioCContextBundle",
+    "ScenarioCControlRejectedError",
+    "ScenarioCControlResult",
+    "ScenarioCControlService",
     "ScenarioCRecommendation",
     "ScheduleArrivalCheckInput",
     "StaleAttentionEvidenceError",
@@ -219,6 +228,7 @@ __all__ = [
     "declared_workflow",
     "recompute_plan_hash",
     "tool_calls_for_scenario_b_recommendation",
+    "tool_calls_for_scenario_c_recommendation",
     "tool_definition",
     "validate_scenario_a_recommendation",
     "validate_scenario_b_recommendation",
