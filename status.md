@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M5 - Approval routing, durable scheduling, and audit explanation |
-| Current task | M5.1 - Implement mutable demo clock |
-| Required task progress | 30 / 58 complete |
+| Current task | M5.2 - Implement durable task storage and claiming |
+| Required task progress | 31 / 58 complete |
 | Acceptance criteria progress | 6 / 14 satisfied; 6 in progress |
-| Last validated commit | `a1320ef` |
-| Last completed-task push | `a1320ef` to `origin/main` |
+| Last validated commit | `a5c515b` |
+| Last completed-task push | `a5c515b` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -106,7 +106,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M5.1 Implement mutable demo clock | `in_progress` | AC-07, AC-10 | TDD contract for persisted demo time, guarded CLI advancement, and detector clock injection is being added. |
+| M5.1 Implement mutable demo clock | `complete` | AC-07, AC-10 | Test: `tests/test_demo_clock.py`, `tests/test_cli.py::test_clock_advance_command_uses_the_local_persisted_clock`, and `tests/test_stockout_detector.py` - PASS (clock adapter 100% direct coverage).<br>Validation: `make verify` - PASS (161 tests, 92.10% coverage, clean migration).<br>Evidence: PostgreSQL persists a singleton clock; reset/seed begins Monday 09:00; positive CLI advance is local guarded and survives a new adapter; and the Scenario A detector obtains business time from `ClockPort`.<br>Commit: `a5c515b` pushed to `origin/main`. |
 | M5.2 Implement durable task storage and claiming | `not_started` | AC-10 | - |
 | M5.3 Implement end-of-day approval routing | `not_started` | AC-07 | - |
 | M5.4 Implement Tuesday arrival task | `not_started` | AC-10 | - |
@@ -160,10 +160,10 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-04 Proactive detection and dedupe | `complete` | Unit and seeded PostgreSQL contracts prove the scoped detector emits only positive, source-version-bound stockout risks; canonical keys atomically deduplicate repeats and retain audit attempts. The M3.8 end-to-end test proves the duplicate Scenario A trigger reaches the same one pending approval. |
 | AC-05 Authorized safe planning | `complete` | Typed context re-resolves identity and preserves only authorized ERP, mail, and calendar evidence; deterministic filtering, strict schemas, and the fake LLM leave only safe bounded outcomes. The seeded M3.8 run proves the entire authorized path admits only Supplier Z and produces one gate-approved immutable pending plan. |
 | AC-06 Gate, scope, policy, and approval | `in_progress` | The Scenario A gate fails closed on stale evidence, scope, PO parameter/remainder, supplier, pricing, currency-authority, and approval-limit violations. A fresh gate-approved plan is now immutable in PostgreSQL and bound to its policy/source/expiry hash plus pending approval; stale, expired, altered, mismatched, or raced records are unapprovable. M4.5 now rechecks these conditions before the first external effect and makes every concrete tool independently enforce its own scope and current ERP safety invariants; routing remains M5. |
-| AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence; end-of-day routing behavior remains M5. |
+| AC-07 Backup approval routing | `in_progress` | Seeded Dana identity exposes a backup approver and next-day out-of-office evidence. M5.1 provides the deterministic persisted clock needed for end-of-day timing; routing behavior remains M5.3. |
 | AC-08 Fixed Scenario A workflow | `complete` | `po_reroute:v1` resolves only to its immutable six-step declaration and a plan-bound durable snapshot persists that exact ordered state. The executor runs each declared effect only in sequence; M4.8 proves model-added/reordered persisted steps reject before a claim and guards cannot be skipped before a provider action. |
 | AC-09 Idempotency, compensation, and recovery | `complete` | The closed catalog derives opaque stable effect and compensation keys. PostgreSQL journals independently committed effects for replay; M4.7 proves an injected post-replacement crash resumes its started step with exactly one replacement PO, while M4.6 proves only completed effects compensate in reverse order. |
-| AC-10 Durable scheduler and Tuesday loop | `in_progress` | M4.5 creates the idempotent durable `arrival_check` record at the next Tuesday 09:00 with the replacement PO only; task claiming and Tuesday receipt handling remain M5. |
+| AC-10 Durable scheduler and Tuesday loop | `in_progress` | M4.5 creates the idempotent durable `arrival_check` record at the next Tuesday 09:00 with the replacement PO only. M5.1 adds persistent time and detector clock injection; task claiming and Tuesday receipt handling remain M5.2/M5.4. |
 | AC-11 Append-only audit reconstruction | `in_progress` | M4.5 persists an external tool invocation journal and workflow started/result records. The formal append-only audit writer and human-readable reconstruction remain M5. |
 | AC-12 Scenario B free-form path | `in_progress` | The reusable scoped-provider, planner, audit, and scheduler boundaries are established; Scenario B behavior remains M6. |
 | AC-13 Three-provider contract | `not_started` | - |
@@ -235,3 +235,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M4.8 | Started cross-boundary workflow-invariant verification. | Test: focused fixed-order, model-mutation, and stale-source contracts are being added; this verification-only task requires no production-code RED cycle. | Pending test validation. |
 | 2026-08-25 | M4.8 | Completed cross-boundary workflow-invariant verification. | Test: focused model-mutation, skipped-guard, and stale-source tests - PASS (3); `make verify` - PASS (154 tests, 92.06% coverage, clean migration). | `a1320ef` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M5.1 | Started persisted mutable demo-clock implementation. | Test: clock persistence, bounded CLI advancement, and detector clock-port contracts are being added before production code. | Pending RED checkpoint. |
+| 2026-08-25 | M5.1 | Completed persisted mutable demo-clock implementation. | Test: direct adapter, CLI, detector, and seeded PostgreSQL persistence/reset contracts - PASS; `make verify` - PASS (161 tests, 92.10% coverage, clean migration). | `a5c515b` pushed to `origin/main`; status completion pending this commit. |
