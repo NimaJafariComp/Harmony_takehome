@@ -107,7 +107,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M5.1 Implement mutable demo clock | `complete` | AC-07, AC-10 | Test: `tests/test_demo_clock.py`, `tests/test_cli.py::test_clock_advance_command_uses_the_local_persisted_clock`, and `tests/test_stockout_detector.py` - PASS (clock adapter 100% direct coverage).<br>Validation: `make verify` - PASS (161 tests, 92.10% coverage, clean migration).<br>Evidence: PostgreSQL persists a singleton clock; reset/seed begins Monday 09:00; positive CLI advance is local guarded and survives a new adapter; and the Scenario A detector obtains business time from `ClockPort`.<br>Commit: `a5c515b` pushed to `origin/main`. |
-| M5.2 Implement durable task storage and claiming | `not_started` | AC-10 | - |
+| M5.2 Implement durable task storage and claiming | `in_progress` | AC-10 | TDD contracts for idempotent persistence, ordered atomic due-task claims, lease expiry recovery, and completion fencing are being added. |
 | M5.3 Implement end-of-day approval routing | `not_started` | AC-07 | - |
 | M5.4 Implement Tuesday arrival task | `not_started` | AC-10 | - |
 | M5.5 Implement append-only audit writer | `not_started` | AC-11 | - |
@@ -236,3 +236,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M4.8 | Completed cross-boundary workflow-invariant verification. | Test: focused model-mutation, skipped-guard, and stale-source tests - PASS (3); `make verify` - PASS (154 tests, 92.06% coverage, clean migration). | `a1320ef` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M5.1 | Started persisted mutable demo-clock implementation. | Test: clock persistence, bounded CLI advancement, and detector clock-port contracts are being added before production code. | Pending RED checkpoint. |
 | 2026-08-25 | M5.1 | Completed persisted mutable demo-clock implementation. | Test: direct adapter, CLI, detector, and seeded PostgreSQL persistence/reset contracts - PASS; `make verify` - PASS (161 tests, 92.10% coverage, clean migration). | `a5c515b` pushed to `origin/main`; status completion pending this commit. |
+| 2026-08-25 | M5.2 | Started durable scheduled-task storage and claim implementation. | Test: idempotent persistence, due ordering, concurrent-safe leasing, expiry reclaim, and stale completion fencing are being added before production code. | Pending RED checkpoint. |
