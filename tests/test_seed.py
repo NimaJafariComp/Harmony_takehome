@@ -67,6 +67,7 @@ def inspect_seed(database_url: str) -> dict[str, Any]:
         "            'out_of_office': rows(\"SELECT users.display_name, starts_at::text, ends_at::text FROM calendar_events JOIN users ON users.id = calendar_events.user_id WHERE event_type = 'out_of_office'\"),\n"
         "        },\n"
         "        'scenario_b': {\n"
+        "            'production': rows(\"SELECT orders.order_number, orders.required_quantity::text, orders.start_date::text, users.display_name AS supervisor FROM production_orders orders JOIN users ON users.id = orders.supervisor_id WHERE orders.order_number LIKE 'Q-%' ORDER BY orders.order_number\"),\n"
         "            'allocations': rows(\"SELECT lots.lot_number, lots.status, allocations.allocated_quantity::text, orders.order_number FROM production_allocations allocations JOIN quality_lots lots ON lots.id = allocations.quality_lot_id JOIN production_orders orders ON orders.id = allocations.production_order_id ORDER BY lots.lot_number\"),\n"
         "            'lots': rows(\"SELECT lot_number, status, quantity::text, source_version FROM quality_lots ORDER BY lot_number\"),\n"
         "        },\n"
@@ -263,6 +264,20 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
         },
     ]
     assert first_seed["scenario_a"]["out_of_office"][0]["display_name"] == "Dana Buyer"
+    assert first_seed["scenario_b"]["production"] == [
+        {
+            "order_number": "Q-7001",
+            "required_quantity": "80.000",
+            "start_date": "2026-08-27",
+            "supervisor": "Priya Production",
+        },
+        {
+            "order_number": "Q-7002",
+            "required_quantity": "200.000",
+            "start_date": "2026-08-27",
+            "supervisor": "Priya Production",
+        },
+    ]
     assert first_seed["scenario_b"]["allocations"] == [
         {
             "allocated_quantity": "80.000",
@@ -297,6 +312,22 @@ def test_reset_and_seed_create_repeatable_scenario_and_edge_case_data(
             "status": "held",
         },
     ]
+    scopes_by_user = {
+        user: {row["scope"] for row in first_seed["scopes"] if row["display_name"] == user}
+        for user in ("Quinn Quality", "Priya Production")
+    }
+    assert scopes_by_user["Quinn Quality"] == {
+        "erp:lot:reallocate",
+        "production:notify",
+        "purchasing:shortage:notify",
+        "quality:lot:read",
+        "quality:read",
+    }
+    assert scopes_by_user["Priya Production"] == {"production:notify", "production:read"}
+    assert not (
+        scopes_by_user["Quinn Quality"]
+        & {"erp:po:read", "erp:po:create", "erp:po:cancel", "mail:read", "calendar:read"}
+    )
 
 
 def test_reset_refuses_any_database_other_than_the_local_demo_target() -> None:

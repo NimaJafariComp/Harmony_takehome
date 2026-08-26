@@ -118,7 +118,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M6.1 Add quality-lot data and quality actor | `not_started` | AC-02, AC-12 | - |
+| M6.1 Add quality-lot data and quality actor | `in_progress` | AC-02, AC-12 | TDD contract for held/allocated and released/no-coverage lots, three-day production impact, production-supervisor ownership, and quality-only actor scopes is being added. |
 | M6.2 Implement quality detector and context | `not_started` | AC-12 | - |
 | M6.3 Define Scenario B proposal schemas | `not_started` | AC-12 | - |
 | M6.4 Implement Scenario B tools | `not_started` | AC-06, AC-09, AC-12 | - |
@@ -248,3 +248,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M5.6 | Completed read-only audit explanation. | Test: controlled-vocabulary rendering, safe payload omission, invalid-ledger refusal, CLI behavior, and PostgreSQL ledger-only reconstruction - PASS (explainer: 100% direct line-and-branch coverage); `make verify` - PASS (257 tests, 94% coverage, clean migration). | `d781c24` pushed to `origin/main`; status completion pending this commit. |
 | 2026-08-25 | M5.7 | Started timing and audit-completeness implementation. | Test: the seeded path must retain one run ID through EOD routing, workflow effects, the durable Tuesday task, re-entry, and `audit explain`; existing critical contracts retain backup-routing conditions, task reclaim, and Tuesday resolution proof. | Pending RED checkpoint. |
 | 2026-08-25 | M5.7 | Completed timing and audit-completeness behavior. | Test: one seeded cross-boundary Scenario A ledger plus direct context/approval/routing/arrival/executor/state/tool contracts - PASS (110 focused); `make verify` - PASS (261 tests, 93.62% coverage, clean migration). | `e5922a6` pushed to `origin/main`; status completion pending this commit. |
+| 2026-08-25 | M6.1 | Started quality-lot data and quality-actor implementation. | Test: held/allocated and released/no-coverage data, three-day production impact, supervisor ownership, and quality-only scope isolation are being added before the migration and seed changes. | Pending RED checkpoint. |

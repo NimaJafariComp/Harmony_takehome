@@ -97,6 +97,7 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert expected_tables.issubset(schema["tables"])
     assert {"email", "role", "approval_limit_amount"}.issubset(schema["columns"]["users"])
     assert {"part_id", "supplier_id", "status"}.issubset(schema["columns"]["purchase_orders"])
+    assert "supervisor_id" in schema["columns"]["production_orders"]
     assert {"approver_id", "plan_hash", "policy_version", "source_versions"}.issubset(
         schema["columns"]["plans"]
     )
@@ -136,12 +137,14 @@ def test_core_schema_migration_creates_domain_tables_relationships_and_indexes(
     assert {"part_id->parts", "supplier_id->suppliers"}.issubset(
         schema["foreign_keys"]["purchase_orders"]
     )
+    assert "supervisor_id->users" in schema["foreign_keys"]["production_orders"]
     assert "attention_id->attention_items" in schema["foreign_keys"]["plans"]
     assert "approver_id->users" in schema["foreign_keys"]["plans"]
     assert "plan_id->plans" in schema["foreign_keys"]["workflow_instances"]
     assert "workflow_instance_id->workflow_instances" in schema["foreign_keys"]["workflow_steps"]
     assert "workflow_instance_id->workflow_instances" in schema["foreign_keys"]["tool_invocations"]
     assert "ix_purchase_orders_part_id_status" in schema["indexes"]["purchase_orders"]
+    assert "ix_production_orders_supervisor_id" in schema["indexes"]["production_orders"]
     assert "ix_messages_purchase_order_id_received_at" in schema["indexes"]["messages"]
     assert "ix_attention_items_status_created_at" in schema["indexes"]["attention_items"]
     assert (
