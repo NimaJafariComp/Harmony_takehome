@@ -77,7 +77,7 @@ def test_local_llm_evaluation_lists_only_configured_profiles_and_returns_a_scala
     assert [(profile.profile, profile.model) for profile in availability.profiles] == [
         ("openai", "gpt-5.6-luna")
     ]
-    assert len(availability.cases) == 10
+    assert len(availability.cases) == 13
     assert receipt.profile == "openai"
     assert receipt.model == "gpt-5.6-luna"
     assert receipt.report.passed

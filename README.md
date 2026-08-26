@@ -124,7 +124,7 @@ Run a harmless connection probe explicitly:
 enterprise-agent llm-smoke
 ```
 
-Inspect the ten fixed synthetic evaluation stories, then opt in to one named request:
+Inspect the thirteen fixed synthetic evaluation stories, then opt in to one named request:
 
 ```sh
 enterprise-agent llm-evaluate --list

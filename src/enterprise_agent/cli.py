@@ -583,7 +583,7 @@ def llm_evaluate(
     ] = None,
     all_cases: Annotated[
         bool,
-        typer.Option("--all", help="Evaluate the full fixed ten-case synthetic pack."),
+        typer.Option("--all", help="Evaluate the full fixed thirteen-case synthetic pack."),
     ] = False,
     list_cases: Annotated[
         bool,

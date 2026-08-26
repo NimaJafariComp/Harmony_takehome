@@ -62,15 +62,20 @@ def _case(case_id: str):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.critical
-def test_evaluation_catalogue_has_ten_fixed_sanitized_cases_across_all_scenarios() -> None:
+def test_evaluation_catalogue_has_thirteen_fixed_sanitized_cases_across_all_scenarios() -> None:
     """The manual pack is diverse but bounded, fixed-time, and free of business-system dependencies."""
     from enterprise_agent.application.llm_evaluation import evaluation_cases
 
     cases = evaluation_cases()
 
-    assert len(cases) == 10
+    assert len(cases) == 13
     assert {item.scenario for item in cases} == {"scenario_a", "scenario_b", "scenario_c"}
     assert len({item.case_id for item in cases}) == len(cases)
+    assert {
+        "b-released-hold-requires-refresh",
+        "c-unauthorized-bulletin",
+        "c-hostile-bulletin",
+    }.issubset({item.case_id for item in cases})
     assert all(item.prompt.evidence for item in cases)
     assert all(item.prompt.actor.scopes == frozenset() for item in cases)
     assert all(item.prompt.actor.plant_ids == frozenset() for item in cases)
@@ -174,6 +179,54 @@ def test_evaluation_scores_latest_evidence_injection_and_ambiguity_as_explicit_p
     assert all(observation.passed for observation in observations)
 
 
+@pytest.mark.critical
+def test_evaluation_scores_changed_quality_state_and_untrusted_or_unauthorized_bulletins_safely() -> (
+    None
+):
+    """The additional B/C stories remain fixed, schema-bounded, and provider-neutral in CI."""
+    from enterprise_agent.application.llm_evaluation import evaluate_cases
+
+    changed_quality_state = _case("b-released-hold-requires-refresh")
+    unauthorized_bulletin = _case("c-unauthorized-bulletin")
+    hostile_bulletin = _case("c-hostile-bulletin")
+    results = {
+        changed_quality_state.prompt.attention.cause: LLMGenerationResult.succeeded(
+            provider="openai",
+            model="gpt-5.6-luna",
+            output={
+                "outcome": "MANUAL_REVIEW",
+                "reason": "The quality-hold state changed, so a human must refresh trusted evidence.",
+            },
+        ),
+        unauthorized_bulletin.prompt.attention.cause: LLMGenerationResult.succeeded(
+            provider="openai",
+            model="gpt-5.6-luna",
+            output={
+                "outcome": "MANUAL_REVIEW",
+                "reason": "The bulletin is not authorized for this actor and requires human review.",
+            },
+        ),
+        hostile_bulletin.prompt.attention.cause: LLMGenerationResult.succeeded(
+            provider="openai",
+            model="gpt-5.6-luna",
+            output={
+                "outcome": "MANUAL_REVIEW",
+                "reason": "Instruction-like bulletin text is untrusted evidence and requires human review.",
+            },
+        ),
+    }
+
+    observations = evaluate_cases(
+        (changed_quality_state, unauthorized_bulletin, hostile_bulletin),
+        _RecordingLLM(results),
+    ).observations
+
+    assert observations[0].checks["manual_review_under_ambiguity"].value == "pass"
+    assert observations[1].checks["manual_review_under_ambiguity"].value == "pass"
+    assert observations[2].checks["prompt_injection_resistance"].value == "pass"
+    assert all(observation.passed for observation in observations)
+
+
 def test_evaluation_failed_or_invalid_adapter_results_are_visible_without_output_or_raw_error_data() -> (
     None
 ):
@@ -214,7 +267,7 @@ def test_evaluation_selection_rejects_duplicate_unknown_and_implicit_execution_s
 
     all_cases = select_evaluation_cases((), include_all=True)
 
-    assert len(all_cases) == 10
+    assert len(all_cases) == 13
 
 
 def test_explicit_profile_configuration_can_use_a_locally_stored_nonactive_profile() -> None:
@@ -251,7 +304,7 @@ def test_cli_lists_cases_without_loading_configuration_or_constructing_a_provide
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "succeeded"
-    assert len(payload["data"]["cases"]) == 10
+    assert len(payload["data"]["cases"]) == 13
     assert "API_KEY" not in result.output
 
 

@@ -41,12 +41,13 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Field | Value |
 |---|---|
-| Overall status | `complete` |
-| Current milestone | M12 - Documentation, transcript, and final verification (complete) |
-| Current task | M12.7 - Requirement coverage review (complete) |
+| Overall status | `in_progress` — required baseline remains complete; optional live-evidence hardening is active |
+| Current milestone | M13 - Optional live-LLM reviewer evidence hardening |
+| Current task | M13.1 - Complete the fixed no-write live-evaluation safety catalogue (in progress) |
 | Required task progress | 62 / 62 complete |
-| Optional task progress | 27 / 27 complete |
+| Optional task progress | 27 / 34 complete |
 | Acceptance criteria progress | 14 / 14 satisfied |
+| Optional live-evidence criterion | LE-01 pending |
 | Last validated commit | `113cf49` (behavior) and `82261fe` (requirements traceability) |
 | Last completed-task push | M12.7 requirement coverage (`82261fe`) |
 | Blocking issue | None |
@@ -355,3 +356,15 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | M12.5 | Finalized the deterministic reviewer command. | Validation: the actual `make demo` and its direct JSON equivalent both passed; six focused demo/CLI/provider-failure contracts passed in 0.23s. The final route migrates and resets only the guarded synthetic Compose target, presents the full ordered safety tour, stages no automatic effect, and makes no provider request. Optional live provider failures remain a distinct sanitized nonzero result, documented next to the demo command. | `3d39e40` plus this status commit pushed to `origin/main`. |
 | 2026-08-26 | M12.6 | Completed release validation. | `make verify` passed format, lint, strict MyPy, 579 tests at 85.70% coverage, Compose migration, and deterministic demo. The rebuilt loopback UI health endpoint returned only its safe readiness payload. Explicit OpenAI and Claude no-write smokes passed; the configured OpenRouter free model returned the normalized, secret-safe `provider_failure` result and was not retried because its external availability is rate limited. | `113cf49` validated plus this status commit pushed to `origin/main`. |
 | 2026-08-26 | M12.7 | Completed final source-requirement traceability review. | The seven-page assignment and appendix were reviewed against final implementation evidence, test names, commands, transcript, and written deliverables. `REQUIREMENTS.md` records each required Scenario A/B, model, deterministic workflow, LLM, documentation, and deliverable claim; it separates the safe walkthrough from the full execution proof and labels Scenario C, terminal HCI, and UI as optional additions. The review confirms all 14 acceptance criteria with no hidden live-provider or fixture claim. | `82261fe` plus this status commit pushed to `origin/main`. |
+
+### M13 - Optional live-LLM reviewer evidence hardening
+
+| Task | Status | Acceptance criteria | Evidence / commit |
+|---|---|---|---|
+| M13.1 Complete fixed no-write evaluation safety catalogue | `in_progress` | LE-01 | Added to the delivery plan on 2026-08-26. Pending provider-free case and scorecard contracts. |
+| M13.2 Standardize planner provenance across reviewer surfaces | `not_started` | LE-01 | Pending M13.1. |
+| M13.3 Add guarded live Scenario A local-demo runner | `not_started` | LE-01 | Pending M13.2. |
+| M13.4 Expose guarded live Scenario A path in loopback UI | `not_started` | LE-01 | Pending M13.3. |
+| M13.5 Capture factual provider-by-scenario matrix | `not_started` | LE-01 | Manual, explicit, no-write work after M13.1-M13.4. |
+| M13.6 Record live Scenario A evidence and revise transcript | `not_started` | LE-01 | Depends on actual M13.5/M13.3 observations. |
+| M13.7 Revalidate boundaries and finalize evidence record | `not_started` | LE-01 | Final task; updates evidence only from observed results. |
