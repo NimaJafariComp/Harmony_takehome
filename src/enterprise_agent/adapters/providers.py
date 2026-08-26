@@ -174,6 +174,29 @@ QUALITY_QUERIES = {
         ORDER BY production_orders.order_number
     """),
 }
+KNOWLEDGE_QUERIES = {
+    "supplier_risk_bulletin": _scoped_statement("""
+        SELECT
+            supplier_risk_bulletins.id,
+            supplier_risk_bulletins.bulletin_key,
+            supplier_risk_bulletins.supplier_id,
+            supplier_risk_bulletins.plant_id,
+            supplier_risk_bulletins.risk_level,
+            supplier_risk_bulletins.status,
+            supplier_risk_bulletins.body,
+            supplier_risk_bulletins.source_version,
+            supplier_risk_bulletins.updated_at
+        FROM supplier_risk_bulletins
+        WHERE supplier_risk_bulletins.plant_id IN :plant_ids
+          AND supplier_risk_bulletins.status = 'active'
+          AND supplier_risk_bulletins.superseded_by_id IS NULL
+          AND (
+              :has_record_filter = FALSE
+              OR CAST(supplier_risk_bulletins.id AS TEXT) = ANY(CAST(:record_ids AS TEXT[]))
+          )
+        ORDER BY supplier_risk_bulletins.bulletin_key, supplier_risk_bulletins.source_version
+    """),
+}
 MAIL_QUERY = text("""
     SELECT
         messages.id,
@@ -257,6 +280,35 @@ class PostgresQualityAdapter(_PostgresProvider):
             for record_type in requested_types:
                 rows = connection.execute(QUALITY_QUERIES[record_type], parameters).mappings().all()
                 evidence.extend(_quality_evidence(record_type, row) for row in rows)
+        return tuple(evidence)
+
+
+class PostgresKnowledgeAdapter(_PostgresProvider):
+    """Return only active, current supplier-risk bulletins for an authorized plant actor."""
+
+    def query(self, actor: ActorContext, query: EvidenceQuery) -> tuple[Evidence, ...]:
+        """Enforce knowledge scope, plant visibility, and bulletin currentness in provider SQL."""
+        requested_types = _validate_record_types(
+            query.record_types,
+            KNOWLEDGE_QUERIES,
+            "knowledge",
+        )
+        if (
+            not requested_types
+            or "knowledge:bulletin:read" not in actor.scopes
+            or not actor.plant_ids
+        ):
+            return ()
+
+        parameters = _record_filter_parameters(query.record_ids)
+        parameters["plant_ids"] = sorted(actor.plant_ids)
+        evidence: list[Evidence] = []
+        with self._engine.connect() as connection:
+            for record_type in requested_types:
+                rows = (
+                    connection.execute(KNOWLEDGE_QUERIES[record_type], parameters).mappings().all()
+                )
+                evidence.extend(_knowledge_evidence(record_type, row) for row in rows)
         return tuple(evidence)
 
 
@@ -355,6 +407,24 @@ def _quality_evidence(record_type: str, row: RowMapping) -> Evidence:
     return Evidence(
         evidence_id=EvidenceId(f"quality:{record_type}:{row['id']}"),
         source="quality",
+        record_type=record_type,
+        record_id=str(row["id"]),
+        source_version=cast(int, row["source_version"]),
+        observed_at=cast(datetime, row["updated_at"]),
+        payload=payload,
+    )
+
+
+def _knowledge_evidence(record_type: str, row: RowMapping) -> Evidence:
+    """Map current knowledge rows to evidence while preserving bulletin text as opaque data."""
+    payload = {
+        key: value
+        for key, value in row.items()
+        if key not in {"id", "source_version", "updated_at"}
+    }
+    return Evidence(
+        evidence_id=EvidenceId(f"knowledge:{record_type}:{row['id']}"),
+        source="knowledge",
         record_type=record_type,
         record_id=str(row["id"]),
         source_version=cast(int, row["source_version"]),

@@ -6,6 +6,7 @@ from .attention import (
     InvalidAttentionTransitionError,
     ScenarioAStockoutTrigger,
     ScenarioBQualityHoldTrigger,
+    ScenarioCSupplierRiskTrigger,
     require_attention_transition,
 )
 from .contracts import (
@@ -67,6 +68,7 @@ __all__ = [
     "RunId",
     "ScenarioAStockoutTrigger",
     "ScenarioBQualityHoldTrigger",
+    "ScenarioCSupplierRiskTrigger",
     "ScheduledTask",
     "ScheduledTaskId",
     "ScheduledTaskStatus",

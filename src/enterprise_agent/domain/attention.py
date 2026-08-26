@@ -216,6 +216,100 @@ class ScenarioBQualityHoldTrigger:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ScenarioCSupplierRiskTrigger:
+    """A versioned detector signal for a current supplier-risk bulletin affecting production."""
+
+    detector: str
+    bulletin_id: str
+    bulletin_version: int
+    supplier_id: str
+    purchase_order_id: str
+    purchase_order_version: int
+    production_order_id: str
+    production_order_version: int
+    part_id: str
+    production_start_date: date
+    detected_at: datetime
+    source_versions: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("detector", self.detector),
+            ("bulletin ID", self.bulletin_id),
+            ("supplier ID", self.supplier_id),
+            ("purchase-order ID", self.purchase_order_id),
+            ("production-order ID", self.production_order_id),
+            ("part ID", self.part_id),
+        ):
+            if not value.strip():
+                raise ValueError(f"{field_name} must not be blank")
+        if (
+            min(
+                self.bulletin_version,
+                self.purchase_order_version,
+                self.production_order_version,
+            )
+            < 1
+        ):
+            raise ValueError("supplier-risk source versions must be positive")
+        if self.detected_at.tzinfo is None:
+            raise ValueError("detected_at must be timezone-aware")
+
+        versions = {str(source): int(version) for source, version in self.source_versions.items()}
+        if any(not source or version < 1 for source, version in versions.items()):
+            raise ValueError("source versions must use non-empty names and positive values")
+        object.__setattr__(self, "source_versions", MappingProxyType(versions))
+
+    @property
+    def scenario(self) -> str:
+        """Identify the optional Scenario C attention namespace."""
+        return "scenario_c"
+
+    @property
+    def cause(self) -> str:
+        """Identify the durable business cause created by this trigger."""
+        return "supplier_risk"
+
+    @property
+    def dedupe_key(self) -> str:
+        """Return a key that changes with every material risk bulletin or affected order fact."""
+        canonical_signal = json.dumps(
+            {
+                "bulletin_id": self.bulletin_id,
+                "bulletin_version": self.bulletin_version,
+                "detector": self.detector,
+                "part_id": self.part_id,
+                "production_order_id": self.production_order_id,
+                "production_order_version": self.production_order_version,
+                "production_start_date": self.production_start_date.isoformat(),
+                "purchase_order_id": self.purchase_order_id,
+                "purchase_order_version": self.purchase_order_version,
+                "supplier_id": self.supplier_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        signal_hash = hashlib.sha256(canonical_signal.encode("utf-8")).hexdigest()
+        return f"scenario_c:supplier_risk:v1:{signal_hash}"
+
+    @property
+    def audit_payload(self) -> Mapping[str, object]:
+        """Expose provenance-safe risk facts without persisting untrusted bulletin body text."""
+        return {
+            "detector": self.detector,
+            "bulletin_id": self.bulletin_id,
+            "bulletin_version": self.bulletin_version,
+            "supplier_id": self.supplier_id,
+            "purchase_order_id": self.purchase_order_id,
+            "purchase_order_version": self.purchase_order_version,
+            "production_order_id": self.production_order_id,
+            "production_order_version": self.production_order_version,
+            "part_id": self.part_id,
+            "production_start_date": self.production_start_date.isoformat(),
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AttentionRegistration:
     """The durable result of creating or deduplicating one detector signal."""
 

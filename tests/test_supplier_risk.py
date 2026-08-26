@@ -99,7 +99,7 @@ def production_order(*, status: str = "scheduled", part_id: str = "part-noise") 
             "order_number": "C-9001",
             "part_id": part_id,
             "plant_id": "PLANT-CHI",
-            "required_quantity": Decimal("75"),
+            "required_quantity": Decimal(75),
             "start_date": date(2026, 8, 28),
             "status": status,
         },

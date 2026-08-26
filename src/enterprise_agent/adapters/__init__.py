@@ -17,6 +17,7 @@ from .plan_approvals import PostgresPlanApprovalAdapter
 from .providers import (
     PostgresCalendarAdapter,
     PostgresErpAdapter,
+    PostgresKnowledgeAdapter,
     PostgresMailAdapter,
     PostgresQualityAdapter,
     UnsupportedEvidenceTypeError,
@@ -46,6 +47,7 @@ __all__ = [
     "PostgresDemoClock",
     "PostgresErpAdapter",
     "PostgresIdentityAdapter",
+    "PostgresKnowledgeAdapter",
     "PostgresMailAdapter",
     "PostgresPlanApprovalAdapter",
     "PostgresQualityAdapter",

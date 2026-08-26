@@ -69,7 +69,19 @@ from .scenario_b_control import (
     ScenarioBControlService,
     tool_calls_for_scenario_b_recommendation,
 )
+from .scenario_c_context import (
+    MissingScenarioCContextEvidenceError,
+    ScenarioCContextAssembler,
+    ScenarioCContextBundle,
+    StaleScenarioCContextEvidenceError,
+)
 from .stockout import StockoutDetection, StockoutDetector, StockoutRisk
+from .supplier_risk import (
+    SupplierRisk,
+    SupplierRiskDetection,
+    SupplierRiskDetector,
+    SupplierRiskEvidenceError,
+)
 from .tools import (
     TOOL_CATALOG,
     CompensationAction,
@@ -137,6 +149,7 @@ __all__ = [
     "ManualReviewRecommendation",
     "MissingScenarioAContextEvidenceError",
     "MissingScenarioBContextEvidenceError",
+    "MissingScenarioCContextEvidenceError",
     "NoActionRecommendation",
     "NotifyProductionInput",
     "PendingPlanApproval",
@@ -160,9 +173,12 @@ __all__ = [
     "ScenarioBControlResult",
     "ScenarioBControlService",
     "ScenarioBRecommendation",
+    "ScenarioCContextAssembler",
+    "ScenarioCContextBundle",
     "ScheduleArrivalCheckInput",
     "StaleAttentionEvidenceError",
     "StaleScenarioBContextEvidenceError",
+    "StaleScenarioCContextEvidenceError",
     "StockoutDetection",
     "StockoutDetector",
     "StockoutRisk",
@@ -171,6 +187,10 @@ __all__ = [
     "SupplierCandidateResult",
     "SupplierExclusion",
     "SupplierExclusionReason",
+    "SupplierRisk",
+    "SupplierRiskDetection",
+    "SupplierRiskDetector",
+    "SupplierRiskEvidenceError",
     "ToolAuthorizationError",
     "ToolDefinition",
     "ToolName",
