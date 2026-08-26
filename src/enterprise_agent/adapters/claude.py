@@ -96,6 +96,8 @@ class ClaudeMessagesAdapter:
         self._model = model.strip()
         if not self._model:
             raise ValueError("Claude model is required")
+        if not api_key.strip():
+            raise ValueError("Claude API key is required")
         self._transport = (
             UrllibClaudeMessagesTransport(api_key=api_key) if transport is None else transport
         )

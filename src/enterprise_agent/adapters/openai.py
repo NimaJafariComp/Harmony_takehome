@@ -89,6 +89,8 @@ class OpenAIResponsesAdapter:
         self._model = model.strip()
         if not self._model:
             raise ValueError("OpenAI model is required")
+        if not api_key.strip():
+            raise ValueError("OpenAI API key is required")
         self._transport = (
             UrllibOpenAIResponsesTransport(api_key=api_key) if transport is None else transport
         )

@@ -90,6 +90,8 @@ class OpenRouterChatCompletionsAdapter:
         self._model = model.strip()
         if not self._model:
             raise ValueError("OpenRouter model is required")
+        if not api_key.strip():
+            raise ValueError("OpenRouter API key is required")
         self._transport = (
             UrllibOpenRouterChatCompletionsTransport(api_key=api_key)
             if transport is None
