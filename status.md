@@ -48,8 +48,8 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Optional task progress | 29 / 34 complete |
 | Acceptance criteria progress | 14 / 14 satisfied |
 | Optional live-evidence criterion | LE-01 in progress |
-| Last validated commit | `3303fac` (M13.2 audit Run-ID label follow-up) |
-| Last completed-task push | M13.2 reviewer-surface follow-up (`3303fac`; companion status record) |
+| Last validated commit | `bbb414b` (M11.3-M11.4 terminal HCI/Compose follow-up) |
+| Last completed-task push | M11.3-M11.4 terminal HCI/Compose follow-up (`bbb414b`; companion status record) |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -359,6 +359,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | 2026-08-26 | M13.2 | Standardized visible planner provenance across reviewer surfaces. | Test: 48 guided/local/live evaluation and FastAPI contracts plus 41 terminal/CLI contracts - PASS; `make test-critical` - PASS (72); Ruff format/lint, strict MyPy, and `git diff --check` - PASS. The shared sanitized record makes fake/deterministic versus live source, provider/profile/model, schema validation, and gate non-invocation explicit in CLI text, JSON, and the loopback UI. Fixed-provider tests verified no secret, raw response, prompt, or business write is exposed; a real LIVE transcript remains deferred until it is observed in M13.6. | `7497881` implementation; completion recorded in this status commit. |
 | 2026-08-26 | M13.2 follow-up | Labeled audit explanation targets as run IDs in terminal status. | Test: `tests/test_operator_status_run_id_labels.py`, operator-status, terminal-presentation, terminal-usability, and CLI contracts - PASS (49); Ruff format/lint, strict MyPy, and `git diff --check` - PASS. The Audit actions table now renders each `Run ID` in its own field next to its read-only command, so `demo-scenario-a-reroute` and `demo-scenario-c-pending` cannot be mistaken for approval or workflow UUIDs. | `3303fac` implementation; completion recorded in this status commit. |
+| 2026-08-26 | M11.3-M11.4 follow-up | Refined the reviewer terminal shell and local Compose ergonomics. | Test: isolated staged terminal/CLI/evaluation/Make/Compose contracts - PASS (62); `make test-critical` - PASS (72); Ruff format/lint, strict MyPy, and Compose configuration - PASS. The shell clears superseded views, preserves command results until Enter, requires explicit profile/case confirmation before the existing no-write evaluator, renders narrow evaluation cards and scorecards with each safety rule, and presents concise Make shortcuts. Docker build dependencies now cache separately; Compose accepts an absent `.env` for credential-free deterministic commands while using configured local keys when present. `PROJECT_DEFENSE_GUIDE.tex` remains local-only by the user-added ignore rule. | `bbb414b` implementation; completion recorded in this status commit. |
 
 ### M13 - Optional live-LLM reviewer evidence hardening
 
