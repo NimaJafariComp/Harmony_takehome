@@ -28,6 +28,8 @@ This starts the private Compose PostgreSQL service, applies migrations, resets a
 
 No provider profile or API key is required for this command. A failure from the separately opt-in `llm-smoke` or `llm-evaluate` commands is reported as a sanitized nonzero result and never changes, blocks, or becomes hidden inside the deterministic demo.
 
+For the one-command, fully executed acceptance proof, run `make verify`. It runs the full deterministic test suite, including Scenario A through approval, effects, and Tuesday follow-up; Scenario B; crash/restart and other failure cases; then migration and this reviewer demo. It is an automated proof run rather than an interactive approval session.
+
 To inspect the available stories before resetting the local demo data:
 
 ```sh
