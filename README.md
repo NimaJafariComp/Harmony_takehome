@@ -4,6 +4,8 @@ A safe, durable enterprise-agent harness for the purchasing and quality scenario
 
 The repository includes all required Scenario A and Scenario B behavior, optional Scenario C, a keyboard-first terminal shell, and a loopback-only local review user interface (UI).
 
+Read [CONNECTOR_SCHEMAS.md](CONNECTOR_SCHEMAS.md) for the scoped ERP, quality, mail, calendar, knowledge, identity, and tool contracts with realistic synthetic seed examples.
+
 ## Review the control-plane evidence
 
 | Area | Evidence in this harness |

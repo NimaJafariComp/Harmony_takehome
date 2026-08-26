@@ -4,6 +4,8 @@ This reference describes the deterministic company data that powers the harness.
 
 Run `make demo` to reset and seed the model into the private local Compose database. The seed uses fixed identifiers and a fixed starting time, so test cases and audit records remain reproducible.
 
+For connector-owned field lists and realistic synthetic records, read [CONNECTOR_SCHEMAS.md](CONNECTOR_SCHEMAS.md).
+
 ## Model boundaries
 
 The model represents one plant, `PLANT-CHI`, with three parts, five suppliers, four users, three purchase orders, four production orders, three quality lots, three supplier messages, one calendar event, and three supplier-risk bulletins.
