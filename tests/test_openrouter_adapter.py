@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import MagicMock
 from urllib.request import Request
+from uuid import UUID
 
 import pytest
 
@@ -259,6 +260,23 @@ def test_openrouter_adapter_uses_the_declared_scenario_b_schema() -> None:
     assert output_schema["discriminator"]["propertyName"] == "outcome"
     assert output_schema["$defs"]["ReallocateLotInput"]["additionalProperties"] is False
     assert cast(dict[str, Any], request["response_format"])["json_schema"]["strict"] is True
+
+
+def test_openrouter_request_serializes_authorized_uuid_evidence_values() -> None:
+    """Scenario B UUID evidence cannot fail before OpenRouter receives the request."""
+    from enterprise_agent.adapters.openrouter import _request_for
+
+    typed_evidence = replace(
+        prompt().evidence[0],
+        payload={"quality_lot_id": UUID("00000000-0000-0000-0000-000000000701")},
+    )
+    request = _request_for(replace(prompt(), evidence=(typed_evidence,)), model=MODEL)
+    messages = cast(list[dict[str, Any]], request["messages"])
+    payload = json.loads(cast(str, messages[1]["content"]))
+
+    assert payload["evidence"][0]["payload"]["quality_lot_id"] == (
+        "00000000-0000-0000-0000-000000000701"
+    )
 
 
 def test_openrouter_adapter_rejects_an_undeclared_schema_without_calling_the_provider() -> None:

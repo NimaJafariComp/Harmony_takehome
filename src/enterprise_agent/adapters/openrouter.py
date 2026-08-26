@@ -8,6 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol, cast, runtime_checkable
 from urllib.request import Request, urlopen
+from uuid import UUID
 
 from enterprise_agent.application.audit_trail import append_material_audit_event
 from enterprise_agent.application.planning import (
@@ -112,7 +113,7 @@ class OpenRouterChatCompletionsAdapter:
         """Normalize transport, completion, JSON, and shared-schema failures without raw details."""
         try:
             request = _request_for(prompt, model=self._model)
-        except UnsupportedRecommendationSchemaError:
+        except (UnsupportedRecommendationSchemaError, TypeError):
             return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
 
         try:
@@ -274,6 +275,8 @@ def _json_default(value: object) -> object:
         return str(value)
     if isinstance(value, datetime | date):
         return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, Mapping):
         return dict(value)
     raise TypeError(f"cannot JSON encode {type(value).__name__}")

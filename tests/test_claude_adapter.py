@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import MagicMock
 from urllib.request import Request
+from uuid import UUID
 
 import pytest
 
@@ -275,6 +276,24 @@ def test_claude_adapter_uses_the_declared_scenario_b_schema() -> None:
     assert "oneOf" not in json.dumps(schema)
     assert reallocate_lot["additionalProperties"] is False
     assert "default" not in reallocate_lot["properties"]["from_production_order_id"]
+
+
+def test_claude_request_serializes_authorized_uuid_evidence_values() -> None:
+    """Scenario B UUID evidence becomes a JSON string before the provider transport boundary."""
+    from enterprise_agent.adapters.claude import _request_for
+
+    typed_evidence = replace(
+        prompt().evidence[0],
+        payload={"quality_lot_id": UUID("00000000-0000-0000-0000-000000000701")},
+    )
+    request = _request_for(replace(prompt(), evidence=(typed_evidence,)), model="claude-sonnet-5")
+    message = cast(dict[str, Any], cast(list[object], request["messages"])[0])
+    content = cast(list[dict[str, Any]], message["content"])
+    payload = json.loads(cast(str, content[0]["text"]))
+
+    assert payload["evidence"][0]["payload"]["quality_lot_id"] == (
+        "00000000-0000-0000-0000-000000000701"
+    )
 
 
 def test_claude_adapter_normalizes_scenario_c_minimum_constraints() -> None:
