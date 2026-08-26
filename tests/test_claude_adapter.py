@@ -129,8 +129,10 @@ def test_claude_adapter_sends_authorized_evidence_requests_json_schema_and_audit
     transport = RecordingTransport(
         completed_response(
             {
-                "outcome": "MANUAL_REVIEW",
-                "reason": "Supplier timing evidence is inconclusive.",
+                "recommendation": {
+                    "outcome": "MANUAL_REVIEW",
+                    "reason": "Supplier timing evidence is inconclusive.",
+                }
             }
         )
     )
@@ -178,6 +180,11 @@ def test_claude_adapter_sends_authorized_evidence_requests_json_schema_and_audit
     output_format = cast(dict[str, Any], output_config["format"])
     schema = cast(dict[str, Any], output_format["schema"])
     assert output_format["type"] == "json_schema"
+    assert schema["type"] == "object"
+    assert schema["required"] == ["recommendation"]
+    assert schema["properties"]["recommendation"]["anyOf"]
+    assert "oneOf" not in json.dumps(schema)
+    assert "pattern" not in json.dumps(schema)
     assert schema["$defs"]["ManualReviewRecommendation"]["additionalProperties"] is False
     assert "minLength" not in schema["$defs"]["ManualReviewRecommendation"]["properties"]["reason"]
     assert (
@@ -229,7 +236,8 @@ def test_claude_adapter_uses_the_declared_scenario_b_schema() -> None:
     schema = cast(dict[str, Any], cast(dict[str, Any], output_config["format"])["schema"])
     reallocate_lot = schema["$defs"]["ReallocateLotInput"]
     assert result.status is LLMGenerationStatus.SUCCEEDED
-    assert schema["discriminator"]["propertyName"] == "outcome"
+    assert schema["properties"]["recommendation"]["anyOf"]
+    assert "oneOf" not in json.dumps(schema)
     assert reallocate_lot["additionalProperties"] is False
     assert "default" not in reallocate_lot["properties"]["from_production_order_id"]
 
