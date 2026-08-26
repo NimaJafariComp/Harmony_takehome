@@ -37,6 +37,7 @@ _STRUCTURED_OUTPUT_INSTRUCTIONS = (
 )
 _UNSUPPORTED_SCHEMA_CONSTRAINTS = {
     "exclusiveMinimum": "Must be greater than {value}.",
+    "minimum": "Must be at least {value}.",
     "minLength": "Must contain at least {value} character(s).",
     "pattern": "Must match the required pattern.",
 }

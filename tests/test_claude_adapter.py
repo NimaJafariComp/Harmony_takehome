@@ -277,6 +277,38 @@ def test_claude_adapter_uses_the_declared_scenario_b_schema() -> None:
     assert "default" not in reallocate_lot["properties"]["from_production_order_id"]
 
 
+def test_claude_adapter_normalizes_scenario_c_minimum_constraints() -> None:
+    """Scenario C's purchase-order version bound is expressed as prose for Claude's schema API."""
+    from enterprise_agent.adapters.claude import ClaudeMessagesAdapter
+
+    transport = RecordingTransport(
+        completed_response(
+            {
+                "recommendation": {
+                    "outcome": "MANUAL_REVIEW",
+                    "reason": "A person must resolve the supplier-risk exception.",
+                }
+            }
+        )
+    )
+    result = ClaudeMessagesAdapter(
+        api_key=API_KEY,
+        model="claude-sonnet-4-5",
+        transport=transport,
+        audit=RecordingAudit(),
+        clock=FixedClock(),
+    ).generate(replace(prompt(), response_schema="scenario_c_recommendation:v1"))
+
+    output_config = cast(dict[str, Any], transport.requests[0]["output_config"])
+    schema = cast(dict[str, Any], cast(dict[str, Any], output_config["format"])["schema"])
+    purchase_order_hold = schema["$defs"]["PlacePurchaseOrderHoldInput"]
+    version = purchase_order_hold["properties"]["expected_purchase_order_version"]
+
+    assert result.status is LLMGenerationStatus.SUCCEEDED
+    assert '"minimum":' not in json.dumps(schema)
+    assert "at least 1" in version["description"]
+
+
 def test_claude_adapter_rejects_an_undeclared_schema_without_calling_the_provider() -> None:
     """An unowned response schema cannot silently reach Claude or produce a fallback recommendation."""
     from enterprise_agent.adapters.claude import ClaudeMessagesAdapter

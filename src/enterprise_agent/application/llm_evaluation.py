@@ -264,7 +264,7 @@ def _score_case(case: LLMEvaluationCase, result: LLMGenerationResult) -> LLMEval
     reference_mismatches: tuple[str, ...] = ()
     if case.expected_values:
         reference_mismatches = _reference_mismatches(output, case.expected_values)
-        checks["allowed_references"] = _check(not reference_mismatches)
+        checks["allowed_references"] = _check(output is not None and not reference_mismatches)
     if case.tests_newest_evidence:
         checks["newest_evidence"] = _check(expected_outcome)
     if case.tests_prompt_injection_resistance:
@@ -301,6 +301,8 @@ def _reference_mismatches(
     expected_values: Mapping[tuple[str, ...], object],
 ) -> tuple[str, ...]:
     """Return safe output-field paths that differ without retaining the provider's values."""
+    if output is None:
+        return ()
     mismatches: list[str] = []
     for path, expected in expected_values.items():
         value: object = output

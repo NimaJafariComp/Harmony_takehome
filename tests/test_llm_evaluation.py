@@ -184,6 +184,25 @@ def test_evaluation_reports_mismatched_reference_paths_without_retaining_model_v
     assert "EVAL-PART-WRONG" not in json.dumps(observation.to_data())
 
 
+def test_evaluation_does_not_report_reference_mismatches_without_a_provider_output() -> None:
+    """A normalized provider failure is not misrepresented as a field-level grounding failure."""
+    from enterprise_agent.application.llm_evaluation import evaluate_cases
+
+    case = _case("c-current-bulletin")
+    result = LLMGenerationResult.failed(
+        provider="claude",
+        model="claude-sonnet-5",
+        status=LLMGenerationStatus.PROVIDER_FAILURE,
+    )
+
+    observation = evaluate_cases(
+        (case,), _RecordingLLM({case.prompt.attention.cause: result})
+    ).observations[0]
+
+    assert observation.checks["allowed_references"].value == "fail"
+    assert observation.reference_mismatches == ()
+
+
 @pytest.mark.critical
 def test_evaluation_scores_latest_evidence_injection_and_ambiguity_as_explicit_policy_checks() -> (
     None
