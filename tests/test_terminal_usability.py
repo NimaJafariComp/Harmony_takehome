@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from enterprise_agent import cli
@@ -16,6 +18,7 @@ from enterprise_agent.application.operator_status import (
     RecoveryState,
     WorkflowStatusSummary,
 )
+from enterprise_agent.presentation import TerminalPresenter, TerminalTheme
 
 pytestmark = pytest.mark.unit
 
@@ -67,6 +70,19 @@ def _install_status_reader(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("read path must not prompt")
         ),
+    )
+
+
+def _presenter_for(force_terminal: bool) -> TerminalPresenter:
+    """Model a TTY or piped stream while retaining the CLI's selected no-color preference."""
+    return TerminalPresenter(
+        console=Console(
+            file=sys.stdout,
+            force_terminal=force_terminal,
+            color_system="standard" if force_terminal else None,
+            no_color=cli._output_options().no_color,
+        ),
+        theme=TerminalTheme(),
     )
 
 
@@ -145,6 +161,33 @@ def test_status_json_and_no_color_preserve_semantics_and_copyable_ids(
         "Recovery: reclaimable",
     ):
         assert text in no_color_result.stdout
+
+
+def test_tty_and_piped_status_keep_the_same_operational_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Color and table decoration may differ, but a reviewer never loses the control-plane facts."""
+    _install_status_reader(monkeypatch)
+    runner = CliRunner()
+    monkeypatch.setattr(cli, "_terminal_presenter", lambda: _presenter_for(True))
+    tty_result = runner.invoke(cli.app, ["status"])
+    monkeypatch.setattr(cli, "_terminal_presenter", lambda: _presenter_for(False))
+    piped_result = runner.invoke(cli.app, ["status"])
+
+    assert tty_result.exit_code == 0
+    assert piped_result.exit_code == 0
+    assert _ANSI_ESCAPE.search(tty_result.stdout)
+    assert not _ANSI_ESCAPE.search(piped_result.stdout)
+    tty_text = _ANSI_ESCAPE.sub("", tty_result.stdout)
+    for text in (
+        "Pending approval",
+        "00000000-0000-0000-0000-000000000802",
+        "00000000-0000-0000-0000-000000000803",
+        "Audit: enterprise-agent audit explain run-terminal-usability",
+        "Recovery: reclaimable",
+    ):
+        assert text in tty_text
+        assert text in piped_result.stdout
 
 
 def test_json_demo_requires_explicit_unattended_mode_before_local_reset(
