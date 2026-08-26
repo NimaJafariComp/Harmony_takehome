@@ -1,5 +1,7 @@
 """CLI contract tests."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from typer.testing import CliRunner
 
@@ -73,3 +75,34 @@ def test_reset_command_reports_guard_failures_and_missing_database_url(
     assert "database: reset refused" in rejected_result.stderr
     assert missing_result.exit_code == 1
     assert "DATABASE_URL is required" in missing_result.stderr
+
+
+def test_clock_advance_command_uses_the_local_persisted_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operators advance deterministic demo time by a positive whole number of hours."""
+    created_urls: list[str] = []
+    advanced_by: list[timedelta] = []
+
+    class RecordingClock:
+        """Capture CLI interactions without requiring a PostgreSQL service."""
+
+        def __init__(self, database_url: str) -> None:
+            created_urls.append(database_url)
+
+        def advance(self, duration: timedelta) -> datetime:
+            advanced_by.append(duration)
+            return datetime(2026, 8, 25, 9, tzinfo=UTC)
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "PostgresDemoClock", RecordingClock, raising=False)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["clock", "advance", "--hours", "24"])
+    invalid = runner.invoke(cli.app, ["clock", "advance", "--hours", "0"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "clock: advanced to 2026-08-25T09:00:00+00:00\n"
+    assert created_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
+    assert advanced_by == [timedelta(hours=24)]
+    assert invalid.exit_code == 2

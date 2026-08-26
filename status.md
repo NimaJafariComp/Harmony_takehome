@@ -106,7 +106,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M5.1 Implement mutable demo clock | `not_started` | AC-07, AC-10 | - |
+| M5.1 Implement mutable demo clock | `in_progress` | AC-07, AC-10 | TDD contract for persisted demo time, guarded CLI advancement, and detector clock injection is being added. |
 | M5.2 Implement durable task storage and claiming | `not_started` | AC-10 | - |
 | M5.3 Implement end-of-day approval routing | `not_started` | AC-07 | - |
 | M5.4 Implement Tuesday arrival task | `not_started` | AC-10 | - |
@@ -234,3 +234,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M4.7 | Completed deterministic replacement-PO crash/restart recovery. | Test: focused crash/restart unit plus seeded PostgreSQL journal replay - PASS; `make verify` - PASS (151 tests, 91.98% coverage, clean migration). | `98546f1` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M4.8 | Started cross-boundary workflow-invariant verification. | Test: focused fixed-order, model-mutation, and stale-source contracts are being added; this verification-only task requires no production-code RED cycle. | Pending test validation. |
 | 2026-08-25 | M4.8 | Completed cross-boundary workflow-invariant verification. | Test: focused model-mutation, skipped-guard, and stale-source tests - PASS (3); `make verify` - PASS (154 tests, 92.06% coverage, clean migration). | `a1320ef` pushed to `origin/main`; status completion record pending this commit. |
+| 2026-08-25 | M5.1 | Started persisted mutable demo-clock implementation. | Test: clock persistence, bounded CLI advancement, and detector clock-port contracts are being added before production code. | Pending RED checkpoint. |

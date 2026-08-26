@@ -100,6 +100,17 @@ class FakeErp:
         return self.evidence
 
 
+@dataclass(frozen=True)
+class FixedClock:
+    """Return the deterministic business instant used by one detector test."""
+
+    current: datetime
+
+    def now(self) -> datetime:
+        """Expose the injected business time without reading the wall clock."""
+        return self.current
+
+
 @dataclass
 class RecordingAttention:
     """Capture emitted triggers while returning a minimal durable registration result."""
@@ -156,7 +167,9 @@ def test_detector_includes_safety_stock_and_all_committed_demand_before_start() 
     )
     attention = RecordingAttention()
 
-    detections = StockoutDetector(erp, attention).detect(ACTOR, RunId("run-stockout"), NOW)
+    detections = StockoutDetector(erp, attention, FixedClock(NOW)).detect(
+        ACTOR, RunId("run-stockout")
+    )
 
     assert len(detections) == 1
     assert detections[0].risk.production_order_id == "production-4812"
@@ -168,6 +181,7 @@ def test_detector_includes_safety_stock_and_all_committed_demand_before_start() 
         "production_order:production-earlier": 1,
         "production_order:production-4812": 1,
     }
+    assert attention.triggers[0].detected_at == NOW
     assert erp.queries == [EvidenceQuery(record_types=frozenset({"inventory", "production_order"}))]
 
 
@@ -187,7 +201,9 @@ def test_detector_emits_no_attention_when_projected_available_is_not_negative() 
     )
     attention = RecordingAttention()
 
-    detections = StockoutDetector(erp, attention).detect(ACTOR, RunId("run-no-risk"), NOW)
+    detections = StockoutDetector(erp, attention, FixedClock(NOW)).detect(
+        ACTOR, RunId("run-no-risk")
+    )
 
     assert detections == ()
     assert attention.triggers == []
@@ -226,7 +242,9 @@ def test_detector_excludes_past_cancelled_and_other_part_demand() -> None:
     )
     attention = RecordingAttention()
 
-    detections = StockoutDetector(erp, attention).detect(ACTOR, RunId("run-filtered"), NOW)
+    detections = StockoutDetector(erp, attention, FixedClock(NOW)).detect(
+        ACTOR, RunId("run-filtered")
+    )
 
     assert detections == ()
     assert attention.triggers == []
