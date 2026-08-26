@@ -41,6 +41,8 @@ demo: migrate
 	docker compose --profile tools run --build --rm app enterprise-agent demo --unattended
 
 tui: migrate
+	mkdir -p .enterprise-agent
+	chmod 700 .enterprise-agent
 	docker compose --profile tools run --rm app enterprise-agent
 
 status: migrate

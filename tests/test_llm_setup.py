@@ -182,6 +182,18 @@ def test_save_llm_profile_merges_existing_provider_profiles_atomically_and_owner
     assert "new-anthropic-key" not in repr(selection)
 
 
+def test_default_env_path_uses_a_configured_container_profile_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The Docker TUI can save to its narrowly mounted host profile directory."""
+    from enterprise_agent.llm_setup import default_env_path
+
+    profile_path = tmp_path / ".enterprise-agent" / "profile.env"
+    monkeypatch.setenv("ENTERPRISE_AGENT_PROFILE_PATH", str(profile_path))
+
+    assert default_env_path() == profile_path
+
+
 def test_local_environment_uses_process_values_over_env_file_without_evaluating_shell_syntax(
     tmp_path: Path,
 ) -> None:

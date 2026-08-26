@@ -159,7 +159,7 @@ In an interactive terminal, run:
 enterprise-agent llm-setup
 ```
 
-The setup flow asks for one provider, accepts its application programming interface (API) key with hidden input, can perform an explicit low-cost metadata check, intersects the account's visible models with the small adapter-reviewed catalogue, and saves only the selected profile locally. It atomically writes or merges `.env` with owner-only permissions (`0600`); it never echoes a key and preserves other configured profiles.
+The setup flow asks for one provider, accepts its application programming interface (API) key with hidden input, can perform an explicit low-cost metadata check, intersects the account's visible models with the small adapter-reviewed catalogue, and saves only the selected profile locally. The host CLI atomically writes or merges `.env` with owner-only permissions (`0600`). The Docker TUI instead persists its selection in the ignored, owner-only `.enterprise-agent/profile.env`, mounted as its only writable host configuration path; Compose loads it after `.env`. It never echoes a key or includes one in an image, log, audit record, or Git commit.
 
 The reviewed default models are:
 

@@ -6,11 +6,18 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: .enterprise-agent/profile.env
+        required: false
     depends_on:
       db:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent
+      ENTERPRISE_AGENT_PROFILE_PATH: /app/.enterprise-agent/profile.env
+    volumes:
+      - type: bind
+        source: ./.enterprise-agent
+        target: /app/.enterprise-agent
     networks:
       - agent_frontend
       - agent_backend
@@ -24,6 +31,8 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: .enterprise-agent/profile.env
+        required: false
     command: enterprise-agent-ui
     depends_on:
       db:
@@ -31,6 +40,11 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent
       ENTERPRISE_AGENT_UI_BIND_HOST: 0.0.0.0
+      ENTERPRISE_AGENT_PROFILE_PATH: /app/.enterprise-agent/profile.env
+    volumes:
+      - type: bind
+        source: ./.enterprise-agent
+        target: /app/.enterprise-agent
     networks:
       - agent_frontend
       - agent_backend

@@ -134,8 +134,9 @@ def discover_compatible_models(
 
 
 def default_env_path() -> Path:
-    """Return the only local profile file used by the CLI from its current working directory."""
-    return Path.cwd() / ".env"
+    """Return the configured owner-only profile file, or the local `.env` for host CLI use."""
+    configured_path = os.environ.get("ENTERPRISE_AGENT_PROFILE_PATH", "").strip()
+    return Path(configured_path) if configured_path else Path.cwd() / ".env"
 
 
 def load_local_environment(

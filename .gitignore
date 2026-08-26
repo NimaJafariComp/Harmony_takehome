@@ -4,6 +4,7 @@
 
 # Local Python environments and test artifacts.
 .env
+.enterprise-agent/
 .venv/
 __pycache__/
 .coverage

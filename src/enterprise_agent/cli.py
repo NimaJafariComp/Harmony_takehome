@@ -1805,7 +1805,7 @@ def _interactive_llm_setup() -> ProviderConfiguration:
     _confirm_local_write(
         ConfirmationSummary(
             action="Save local LLM profile",
-            target=f"{default_env_path().name} with owner-only permissions",
+            target=f"{default_env_path()} with owner-only permissions",
             effect=f"Selects the {profile} provider profile and chosen model.",
             freshness="Suggested models are adapter-reviewed and visible to this key; custom IDs are explicit.",
             write_consequence="Writes the selected profile, key, and model while preserving other profiles.",
