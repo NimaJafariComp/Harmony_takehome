@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Attention{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Review queue</a><span aria-hidden="true">/</span><span>Attention</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Attention item / {{ attention.scenario | replace('_', ' ') }}</p>
+    <h1>Attention / {{ attention.attention_id }}</h1>
+    <p class="lede">This item records why the selected actor must look closer, without rendering raw email, ERP, or provider content.</p>
+  </header>
+
+  <section class="record-grid" aria-label="Attention record">
+    <dl class="record-list">
+      <div><dt>Cause</dt><dd>{{ attention.cause | replace('_', ' ') }}</dd></div>
+      <div><dt>Status</dt><dd><span class="state-label" data-state="{{ attention.status }}">{{ attention.status }}</span></dd></div>
+      <div><dt>Created</dt><dd><time datetime="{{ attention.created_at }}">{{ attention.created_at }}</time></dd></div>
+      <div><dt>Resolved</dt><dd>{% if attention.resolved_at %}<time datetime="{{ attention.resolved_at }}">{{ attention.resolved_at }}</time>{% else %}Open{% endif %}</dd></div>
+    </dl>
+  </section>
+
+  <section class="ledger-section" aria-labelledby="evidence-title">
+    <div class="section-heading">
+      <div><p class="section-label">Source ledger</p><h2 id="evidence-title">Evidence references</h2></div>
+      <p>Each version identifies what the future approval or workflow must recheck.</p>
+    </div>
+    <div class="ledger-table-wrap" tabindex="0">
+      <table>
+        <thead><tr><th scope="col">Evidence reference</th><th scope="col">Source version</th></tr></thead>
+        <tbody>
+          {% for evidence in attention.evidence %}
+            <tr><th scope="row">{{ evidence.evidence_id }}</th><td>{{ evidence.source_version }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

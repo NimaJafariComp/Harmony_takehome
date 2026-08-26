@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Audit{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Review queue</a><span aria-hidden="true">/</span><span>Audit</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Append-only explanation</p>
+    <h1>Audit / {{ audit.run_id }}</h1>
+    <p class="lede">{{ audit.event_count }} material event{% if audit.event_count != 1 %}s{% endif %}, rendered only from the authorized immutable ledger.</p>
+  </header>
+
+  <section class="ledger-section audit-ledger" aria-labelledby="audit-title">
+    <div class="section-heading">
+      <div><p class="section-label">What occurred and why</p><h2 id="audit-title">Chronological explanation</h2></div>
+      <p>The renderer omits raw provider responses, credentials, and arbitrary payload content.</p>
+    </div>
+    <ol class="audit-events">
+      {% for line in audit.explanation.split('\n') if line %}
+        <li>{{ line }}</li>
+      {% endfor %}
+    </ol>
+  </section>
+{% endblock %}

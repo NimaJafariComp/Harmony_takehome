@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Enterprise Agent · Local Review{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to review content</a>
+    <header class="app-bar">
+      <a class="wordmark" href="/" aria-label="Enterprise Agent local review home">
+        <span class="wordmark-mark" aria-hidden="true">EA</span>
+        <span>
+          <span class="wordmark-name">Enterprise Agent / Local Review</span>
+          <span class="wordmark-context">Local evidence ledger</span>
+        </span>
+      </a>
+      <p class="app-scope">Loopback only · read only</p>
+    </header>
+    <main id="main-content" class="shell">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">
+      <span>Read-only local verification surface</span>
+      <span>No provider call · no credential display · no business-system write</span>
+      <code>{{ start_command }}</code>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Approval{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Review queue</a><span aria-hidden="true">/</span><span>Approval</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Immutable decision record</p>
+    <h1>Approval / {{ approval.approval_id }}</h1>
+    <p class="lede">Review the requester, assigned approver, source versions, and declared action before making any decision elsewhere.</p>
+  </header>
+
+  <section class="record-grid" aria-label="Approval record">
+    <dl class="record-list">
+      <div><dt>Decision state</dt><dd><span class="state-label" data-state="{{ approval.decision_state }}">{{ approval.decision_state }}</span></dd></div>
+      <div><dt>Requester</dt><dd>{{ approval.requester_id }}</dd></div>
+      <div><dt>Assigned approver</dt><dd>{{ approval.approver_id }}</dd></div>
+      <div><dt>Requested</dt><dd><time datetime="{{ approval.requested_at }}">{{ approval.requested_at }}</time></dd></div>
+      <div><dt>Expires</dt><dd><time datetime="{{ approval.expires_at }}">{{ approval.expires_at }}</time></dd></div>
+      <div><dt>Decision recorded</dt><dd>{% if approval.decided_at %}<time datetime="{{ approval.decided_at }}">{{ approval.decided_at }}</time>{% else %}Not decided{% endif %}</dd></div>
+    </dl>
+    <aside class="trace-card" aria-labelledby="binding-title">
+      <p class="section-label">Bound action</p>
+      <h2 id="binding-title">{{ approval.intent | replace('_', ' ') }}</h2>
+      <p>{{ approval.workflow_name or 'No workflow declared' }}{% if approval.workflow_version %} · v{{ approval.workflow_version }}{% endif %}</p>
+      <a class="text-link" href="/attention/{{ approval.attention_id }}">Open linked attention</a>
+    </aside>
+  </section>
+
+  <section class="ledger-section" aria-labelledby="version-title">
+    <div class="section-heading">
+      <div><p class="section-label">Freshness binding</p><h2 id="version-title">Evidence versions</h2></div>
+      <p>These are references only. The UI does not expose raw source records or change them.</p>
+    </div>
+    <div class="ledger-table-wrap" tabindex="0">
+      <table>
+        <thead><tr><th scope="col">Evidence reference</th><th scope="col">Source version</th></tr></thead>
+        <tbody>
+          {% for evidence_id, source_version in approval.source_versions.items() %}
+            <tr><th scope="row">{{ evidence_id }}</th><td>{{ source_version }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="policy-note">Policy: {{ approval.policy_version }}</p>
+  </section>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Workflow{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Review queue</a><span aria-hidden="true">/</span><span>Workflow</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Declared workflow / v{{ workflow.definition_version }}</p>
+    <h1>Workflow / {{ workflow.workflow_id }}</h1>
+    <p class="lede">The durable sequence below shows declared progress, retry-safe identifiers, and recovery state—never hidden inputs, results, or errors.</p>
+  </header>
+
+  <section class="record-grid" aria-label="Workflow summary">
+    <dl class="record-list">
+      <div><dt>Definition</dt><dd>{{ workflow.definition_name }}</dd></div>
+      <div><dt>Status</dt><dd><span class="state-label" data-state="{{ workflow.status }}">{{ workflow.status }}</span></dd></div>
+      <div><dt>Current step</dt><dd>{{ workflow.current_step }}</dd></div>
+      <div><dt>Recovery state</dt><dd>{{ workflow.recovery_state | replace('_', ' ') }}</dd></div>
+      <div><dt>Created</dt><dd><time datetime="{{ workflow.created_at }}">{{ workflow.created_at }}</time></dd></div>
+      <div><dt>Updated</dt><dd><time datetime="{{ workflow.updated_at }}">{{ workflow.updated_at }}</time></dd></div>
+    </dl>
+  </section>
+
+  <section class="ledger-section" aria-labelledby="step-title">
+    <div class="section-heading">
+      <div><p class="section-label">Declared order</p><h2 id="step-title">Workflow steps</h2></div>
+      <p>Step order is durable. A visible prefix correlates an effect without exposing the full key.</p>
+    </div>
+    <div class="ledger-table-wrap" tabindex="0">
+      <table>
+        <thead><tr><th scope="col">Step</th><th scope="col">Name</th><th scope="col">Tool</th><th scope="col">State</th><th scope="col">Attempts</th><th scope="col">Key prefix</th></tr></thead>
+        <tbody>
+          {% for step in workflow.steps %}
+            <tr>
+              <th scope="row">{{ step.step_index }}</th><td>{{ step.step_name }}</td><td>{{ step.tool_name or 'Guard' }}</td>
+              <td><span class="state-label" data-state="{{ step.status }}">{{ step.status }}</span></td><td>{{ step.attempt_count }}</td><td>{{ step.idempotency_key_prefix }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

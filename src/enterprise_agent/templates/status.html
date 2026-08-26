@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Status{% endblock %}
+
+{% block content %}
+  <header class="page-intro">
+    <p class="eyebrow">Review queue / selected demo actor</p>
+    <h1>What awaits approval</h1>
+    {% if status is none %}
+      <p class="lede">
+        Start the local demo before opening live evidence. This shell never asks for a provider,
+        displays a credential, or changes company state.
+      </p>
+    {% else %}
+      <p class="lede">
+        Follow the immutable record from a pending decision to its evidence, workflow state, and
+        audit explanation. This page makes no provider request or business-system write.
+      </p>
+    {% endif %}
+  </header>
+
+  {% if status is none %}
+    <section class="empty-state" aria-labelledby="setup-title">
+      <div class="trace" aria-hidden="true"></div>
+      <div>
+        <p class="section-label">Local setup required</p>
+        <h2 id="setup-title">No review data is connected yet.</h2>
+        <p>Run the deterministic demo, then restart this loopback-only review surface.</p>
+        <code class="command">make demo</code>
+      </div>
+    </section>
+  {% else %}
+    <section class="queue-summary" aria-label="Current review queue">
+      <div class="summary-item">
+        <span class="summary-number">{{ status.pending_approvals | length }}</span>
+        <span>Pending approval{% if status.pending_approvals | length != 1 %}s{% endif %}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-number">{{ status.workflows | length }}</span>
+        <span>Workflow{% if status.workflows | length != 1 %}s{% endif %} in view</span>
+      </div>
+      <div class="summary-note">Select a durable ID to review the evidence ledger.</div>
+    </section>
+
+    <section class="ledger-section" aria-labelledby="approval-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Decision queue</p>
+          <h2 id="approval-title">Pending approvals</h2>
+        </div>
+        <p>Each decision remains bound to an immutable plan and current evidence versions.</p>
+      </div>
+      {% if status.pending_approvals %}
+        <div class="ledger-table-wrap" tabindex="0">
+          <table>
+            <caption class="sr-only">Pending approvals for the selected demo actor</caption>
+            <thead>
+              <tr>
+                <th scope="col">Approval</th>
+                <th scope="col">Requester</th>
+                <th scope="col">Approver</th>
+                <th scope="col">State</th>
+                <th scope="col">Expires</th>
+                <th scope="col">Audit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for approval in status.pending_approvals %}
+                <tr>
+                  <th scope="row"><a href="/approval/{{ approval.approval_id }}">{{ approval.approval_id }}</a></th>
+                  <td>{{ approval.requester }}</td>
+                  <td>{{ approval.approver }}</td>
+                  <td><span class="state-label" data-state="{{ approval.decision_state }}">{{ approval.decision_state }}</span></td>
+                  <td><time datetime="{{ approval.expires_at }}">{{ approval.expires_at }}</time></td>
+                  <td>
+                    {% if approval.audit_run_id %}
+                      <a href="/audit/{{ approval.audit_run_id }}">{{ approval.audit_run_id }}</a>
+                    {% else %}
+                      <span class="quiet">Not recorded</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-copy">No pending approval is recorded for this actor.</p>
+      {% endif %}
+    </section>
+
+    <section class="ledger-section" aria-labelledby="workflow-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Recovery ledger</p>
+          <h2 id="workflow-title">Workflow state</h2>
+        </div>
+        <p>Only declared workflow progress and a safe recovery category are shown.</p>
+      </div>
+      {% if status.workflows %}
+        <div class="ledger-table-wrap" tabindex="0">
+          <table>
+            <caption class="sr-only">Workflow state for the selected demo actor</caption>
+            <thead>
+              <tr>
+                <th scope="col">Workflow</th>
+                <th scope="col">Status</th>
+                <th scope="col">Current step</th>
+                <th scope="col">Recovery state</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for workflow in status.workflows %}
+                <tr>
+                  <th scope="row"><a href="/workflow/{{ workflow.workflow_id }}">{{ workflow.workflow_id }}</a></th>
+                  <td><span class="state-label" data-state="{{ workflow.status }}">{{ workflow.status }}</span></td>
+                  <td>{{ workflow.current_step }}</td>
+                  <td>{{ workflow.recovery_state | replace('_', ' ') }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-copy">No durable workflow is recorded for this actor.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}
