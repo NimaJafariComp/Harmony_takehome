@@ -5,18 +5,20 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import cast
 from uuid import uuid4
 
 from pydantic import ValidationError
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Connection, Engine, RowMapping
 
 from enterprise_agent.application.tools import (
     CompensationAction,
     CreateReplacementPOInput,
+    FlagShortageToPurchasingInput,
     NotifyProductionInput,
+    ReallocateLotInput,
     ReduceOrCancelPOInput,
     ScheduleArrivalCheckInput,
     TerminalToolExecutionError,
@@ -30,6 +32,8 @@ from enterprise_agent.domain import (
     ToolInvocation,
     ToolInvocationStatus,
 )
+
+ProviderRow = Mapping[str, object] | RowMapping
 
 INSERT_INVOCATION = text("""
     INSERT INTO tool_invocations (
@@ -116,9 +120,103 @@ REDUCE_OR_CANCEL_ORIGINAL_PO = text("""
     RETURNING ordered_quantity, received_quantity, status, source_version
 """)
 SELECT_PRODUCTION_RECIPIENT = text("""
+    SELECT users.email
+    FROM production_orders
+    JOIN users ON users.id = production_orders.supervisor_id
+    WHERE production_orders.id = CAST(:production_order_id AS UUID)
+      AND production_orders.status IN ('scheduled', 'in_progress')
+      AND users.role = 'production_supervisor'
+      AND users.email IS NOT NULL
+    FOR SHARE OF production_orders, users
+""")
+SELECT_REALLOCATE_LOT_FOR_UPDATE = text("""
+    SELECT id::text AS quality_lot_id,
+           part_id::text AS part_id,
+           plant_id,
+           quantity,
+           status,
+           production_order_id::text AS production_order_id,
+           allocated_quantity,
+           source_version
+    FROM quality_lots
+    WHERE id = CAST(:quality_lot_id AS UUID)
+    FOR UPDATE
+""")
+SELECT_REALLOCATION_PRODUCTION_FOR_UPDATE = text("""
+    SELECT id::text AS production_order_id, part_id::text AS part_id, plant_id, status
+    FROM production_orders
+    WHERE id = CAST(:production_order_id AS UUID)
+    FOR UPDATE
+""")
+SELECT_ALLOCATION_FOR_UPDATE = text("""
+    SELECT id::text AS allocation_id, allocated_quantity, source_version
+    FROM production_allocations
+    WHERE quality_lot_id = CAST(:quality_lot_id AS UUID)
+      AND production_order_id = CAST(:production_order_id AS UUID)
+    FOR UPDATE
+""")
+INSERT_ALLOCATION = text("""
+    INSERT INTO production_allocations (
+        id, quality_lot_id, production_order_id, allocated_quantity, source_version,
+        created_at, updated_at
+    ) VALUES (
+        CAST(:allocation_id AS UUID), CAST(:quality_lot_id AS UUID),
+        CAST(:production_order_id AS UUID), CAST(:allocated_quantity AS NUMERIC), 1,
+        :occurred_at, :occurred_at
+    )
+    RETURNING id::text AS allocation_id, allocated_quantity, source_version
+""")
+UPDATE_ALLOCATION_QUANTITY = text("""
+    UPDATE production_allocations
+    SET allocated_quantity = CAST(:allocated_quantity AS NUMERIC),
+        source_version = source_version + 1,
+        updated_at = :occurred_at
+    WHERE id = CAST(:allocation_id AS UUID)
+      AND source_version = :source_version
+    RETURNING id::text AS allocation_id, allocated_quantity, source_version
+""")
+UPDATE_LOT_ALLOCATION = text("""
+    UPDATE quality_lots
+    SET allocated_quantity = CAST(:allocated_quantity AS NUMERIC),
+        production_order_id = CAST(:production_order_id AS UUID),
+        source_version = source_version + 1,
+        updated_at = :occurred_at
+    WHERE id = CAST(:quality_lot_id AS UUID)
+      AND source_version = :source_version
+    RETURNING id::text AS quality_lot_id, allocated_quantity, source_version
+""")
+SELECT_SHORTAGE_PRODUCTION_FOR_UPDATE = text("""
+    SELECT id::text AS production_order_id,
+           part_id::text AS part_id,
+           plant_id,
+           required_quantity,
+           status
+    FROM production_orders
+    WHERE id = CAST(:production_order_id AS UUID)
+    FOR UPDATE
+""")
+SELECT_RELEASED_LOTS_FOR_SHARE = text("""
+    SELECT lots.quantity,
+           lots.allocated_quantity,
+           COALESCE(
+               (
+                   SELECT allocations.allocated_quantity
+                   FROM production_allocations AS allocations
+                   WHERE allocations.quality_lot_id = lots.id
+                     AND allocations.production_order_id = CAST(:production_order_id AS UUID)
+               ),
+               0
+           ) AS allocated_to_production_quantity
+    FROM quality_lots AS lots
+    WHERE lots.part_id = CAST(:part_id AS UUID)
+      AND lots.plant_id = :plant_id
+      AND lots.status = 'released'
+    FOR SHARE OF lots
+""")
+SELECT_PURCHASING_RECIPIENT = text("""
     SELECT email
     FROM users
-    WHERE role = 'production_supervisor' AND email IS NOT NULL
+    WHERE role = 'purchasing_manager' AND email IS NOT NULL
     ORDER BY id ASC
     LIMIT 1
 """)
@@ -200,14 +298,32 @@ CANCEL_ARRIVAL_CHECK = text("""
       AND status = 'pending'
     RETURNING id::text AS task_id, status
 """)
+DELETE_CREATED_ALLOCATION = text("""
+    DELETE FROM production_allocations
+    WHERE id = CAST(:allocation_id AS UUID)
+      AND allocated_quantity = CAST(:allocated_quantity AS NUMERIC)
+      AND source_version = :source_version
+    RETURNING id::text AS allocation_id
+""")
+RESTORE_LOT_ALLOCATION = text("""
+    UPDATE quality_lots
+    SET allocated_quantity = CAST(:allocated_quantity AS NUMERIC),
+        production_order_id = CAST(:production_order_id AS UUID),
+        source_version = source_version + 1,
+        updated_at = :occurred_at
+    WHERE id = CAST(:quality_lot_id AS UUID)
+      AND allocated_quantity = CAST(:expected_allocated_quantity AS NUMERIC)
+      AND source_version = :source_version
+    RETURNING id::text AS quality_lot_id, allocated_quantity, source_version
+""")
 
 
 class ToolExecutionError(TerminalToolExecutionError):
     """Raised when a typed tool request cannot safely produce its declared side effect."""
 
 
-class PostgresScenarioAToolAdapter:
-    """Run reviewed Scenario A effects behind an external-style idempotency journal boundary."""
+class PostgresToolAdapter:
+    """Run reviewed catalog effects behind an external-style idempotency journal boundary."""
 
     def __init__(self, database_url: str) -> None:
         """Connect the independently committed simulated provider boundary to PostgreSQL."""
@@ -343,6 +459,9 @@ class PostgresScenarioAToolAdapter:
             return result
 
 
+PostgresScenarioAToolAdapter = PostgresToolAdapter
+
+
 def _validated_input(actor: ActorContext, invocation: ToolInvocation) -> ToolInput:
     """Make each concrete tool enforce its own declared scope and strict input model."""
     if (
@@ -356,17 +475,7 @@ def _validated_input(actor: ActorContext, invocation: ToolInvocation) -> ToolInp
         input_value = definition.input_model.model_validate(dict(invocation.parameters))
     except ValidationError as error:
         raise ToolExecutionError("tool invocation parameters are invalid") from error
-    if not isinstance(
-        input_value,
-        (
-            CreateReplacementPOInput,
-            ReduceOrCancelPOInput,
-            NotifyProductionInput,
-            ScheduleArrivalCheckInput,
-        ),
-    ):
-        raise ToolExecutionError("tool is outside the Scenario A execution boundary")
-    return input_value
+    return cast(ToolInput, input_value)
 
 
 def _validate_compensation(actor: ActorContext, compensation: ToolCompensation) -> None:
@@ -381,7 +490,9 @@ def _validate_compensation(actor: ActorContext, compensation: ToolCompensation) 
         original_tool = ToolName(compensation.tool_name)
         action = CompensationAction(compensation.action)
     except ValueError as error:
-        raise ToolExecutionError("tool compensation is outside the Scenario A boundary") from error
+        raise ToolExecutionError(
+            "tool compensation is outside the reviewed tool catalog"
+        ) from error
     definition = authorize_tool(actor, original_tool)
     if definition.compensation is not action:
         raise ToolExecutionError("tool compensation action does not match the original effect")
@@ -462,7 +573,13 @@ def _execute_effect(
         input_value, ScheduleArrivalCheckInput
     ):
         return _schedule_arrival_check(connection, invocation, input_value)
-    raise ToolExecutionError("tool input does not match its declared Scenario A effect")
+    if tool_name is ToolName.REALLOCATE_LOT and isinstance(input_value, ReallocateLotInput):
+        return _reallocate_lot(connection, invocation, input_value)
+    if tool_name is ToolName.FLAG_SHORTAGE_TO_PURCHASING and isinstance(
+        input_value, FlagShortageToPurchasingInput
+    ):
+        return _flag_shortage_to_purchasing(connection, invocation, input_value)
+    raise ToolExecutionError("tool input does not match its declared effect")
 
 
 def _execute_compensation_effect(
@@ -478,7 +595,9 @@ def _execute_compensation_effect(
         return _send_correction_notification(connection, compensation)
     if action is CompensationAction.CANCEL_ARRIVAL_CHECK:
         return _cancel_arrival_check(connection, compensation)
-    raise ToolExecutionError("tool compensation action is outside the Scenario A boundary")
+    if action is CompensationAction.RESTORE_PRIOR_ALLOCATION:
+        return _restore_prior_allocation(connection, compensation)
+    raise ToolExecutionError("tool compensation action is outside the reviewed tool catalog")
 
 
 def _create_replacement_purchase_order(
@@ -584,7 +703,10 @@ def _notify_production(
     input_value: NotifyProductionInput,
 ) -> dict[str, object]:
     """Persist one idempotent, minimally scoped production notification."""
-    recipient = connection.execute(SELECT_PRODUCTION_RECIPIENT).scalar_one_or_none()
+    recipient = connection.execute(
+        SELECT_PRODUCTION_RECIPIENT,
+        {"production_order_id": input_value.production_order_id},
+    ).scalar_one_or_none()
     if not isinstance(recipient, str):
         raise ToolExecutionError("production notification recipient is unavailable")
     created = (
@@ -595,7 +717,7 @@ def _notify_production(
                 "message_key": invocation.idempotency_key,
                 "sender": "enterprise-agent@example.invalid",
                 "recipient": recipient,
-                "subject": f"Production order {input_value.production_order_id}: purchase-order update",
+                "subject": f"Production order {input_value.production_order_id}: enterprise-agent update",
                 "body": input_value.message,
                 "occurred_at": invocation.started_at,
                 "payload": _as_json(
@@ -613,6 +735,253 @@ def _notify_production(
         "message_id": cast(str, created["message_id"]),
         "recipient": recipient,
         "production_order_id": input_value.production_order_id,
+    }
+
+
+def _reallocate_lot(
+    connection: Connection,
+    invocation: ToolInvocation,
+    input_value: ReallocateLotInput,
+) -> dict[str, object]:
+    """Move only a current released lot between matching, runnable production allocations."""
+    lot = (
+        connection.execute(
+            SELECT_REALLOCATE_LOT_FOR_UPDATE,
+            {"quality_lot_id": input_value.quality_lot_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if lot is None:
+        raise ToolExecutionError("quality lot is not currently reallocatable")
+    if lot["status"] != "released":
+        raise ToolExecutionError("quality lot is not currently reallocatable")
+
+    previous_lot_allocation = _decimal_value(lot["allocated_quantity"])
+    quantity = input_value.quantity
+    source_allocation: ProviderRow | None = None
+    source_previous_quantity: Decimal | None = None
+    source_effect_version: int | None = None
+    remaining_source_quantity: Decimal | None = None
+    if input_value.from_production_order_id is None:
+        if _decimal_value(lot["quantity"]) - previous_lot_allocation < quantity:
+            raise ToolExecutionError("quality lot is not currently reallocatable")
+        next_lot_allocation = previous_lot_allocation + quantity
+        next_lot_production_order_id: str | None = input_value.to_production_order_id
+    else:
+        source_allocation = (
+            connection.execute(
+                SELECT_ALLOCATION_FOR_UPDATE,
+                {
+                    "quality_lot_id": input_value.quality_lot_id,
+                    "production_order_id": input_value.from_production_order_id,
+                },
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if source_allocation is None:
+            raise ToolExecutionError("quality lot is not currently reallocatable")
+        source_previous_quantity = _decimal_value(source_allocation["allocated_quantity"])
+        if (
+            source_previous_quantity < quantity
+            or source_previous_quantity > previous_lot_allocation
+        ):
+            raise ToolExecutionError("quality lot is not currently reallocatable")
+        remaining_source_quantity = source_previous_quantity - quantity
+        updated_source = _update_allocation_quantity(
+            connection,
+            allocation_id=_required_row_text(source_allocation, "allocation_id"),
+            allocated_quantity=remaining_source_quantity,
+            source_version=_required_row_int(source_allocation, "source_version"),
+            occurred_at=invocation.started_at,
+        )
+        if updated_source is None:
+            raise ToolExecutionError("source allocation changed before reallocation completed")
+        source_effect_version = _required_row_int(updated_source, "source_version")
+        next_lot_allocation = previous_lot_allocation
+        next_lot_production_order_id = (
+            input_value.to_production_order_id
+            if lot["production_order_id"] == input_value.from_production_order_id
+            and remaining_source_quantity == Decimal(0)
+            else _optional_row_text(lot, "production_order_id")
+        )
+
+    target = (
+        connection.execute(
+            SELECT_REALLOCATION_PRODUCTION_FOR_UPDATE,
+            {"production_order_id": input_value.to_production_order_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if (
+        target is None
+        or target["status"] not in {"scheduled", "in_progress"}
+        or target["part_id"] != lot["part_id"]
+        or target["plant_id"] != lot["plant_id"]
+    ):
+        raise ToolExecutionError("quality lot is not currently reallocatable")
+
+    destination = (
+        connection.execute(
+            SELECT_ALLOCATION_FOR_UPDATE,
+            {
+                "quality_lot_id": input_value.quality_lot_id,
+                "production_order_id": input_value.to_production_order_id,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    updated_destination: ProviderRow | None
+    if destination is None:
+        destination_previous_quantity = Decimal(0)
+        updated_destination = (
+            connection.execute(
+                INSERT_ALLOCATION,
+                {
+                    "allocation_id": str(uuid4()),
+                    "quality_lot_id": input_value.quality_lot_id,
+                    "production_order_id": input_value.to_production_order_id,
+                    "allocated_quantity": str(quantity),
+                    "occurred_at": invocation.started_at,
+                },
+            )
+            .mappings()
+            .one()
+        )
+    else:
+        destination_previous_quantity = _decimal_value(destination["allocated_quantity"])
+        updated_destination = _update_allocation_quantity(
+            connection,
+            allocation_id=_required_row_text(destination, "allocation_id"),
+            allocated_quantity=destination_previous_quantity + quantity,
+            source_version=_required_row_int(destination, "source_version"),
+            occurred_at=invocation.started_at,
+        )
+    if updated_destination is None:
+        raise ToolExecutionError("destination allocation changed before reallocation completed")
+    updated_lot = (
+        connection.execute(
+            UPDATE_LOT_ALLOCATION,
+            {
+                "quality_lot_id": input_value.quality_lot_id,
+                "allocated_quantity": str(next_lot_allocation),
+                "production_order_id": next_lot_production_order_id,
+                "source_version": _required_row_int(lot, "source_version"),
+                "occurred_at": invocation.started_at,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if updated_lot is None:
+        raise ToolExecutionError("quality lot changed before reallocation completed")
+    return {
+        "quality_lot_id": input_value.quality_lot_id,
+        "to_production_order_id": input_value.to_production_order_id,
+        "quantity": _decimal_text(quantity),
+        "previous_lot_allocated_quantity": _decimal_text(previous_lot_allocation),
+        "previous_lot_production_order_id": _optional_row_text(lot, "production_order_id"),
+        "lot_source_version": _required_row_int(updated_lot, "source_version"),
+        "destination_allocation_id": _required_row_text(updated_destination, "allocation_id"),
+        "destination_previous_quantity": _decimal_text(destination_previous_quantity),
+        "destination_source_version": _required_row_int(updated_destination, "source_version"),
+        "source_allocation_id": (
+            _required_row_text(source_allocation, "allocation_id")
+            if source_allocation is not None
+            else None
+        ),
+        "source_previous_quantity": (
+            _decimal_text(source_previous_quantity)
+            if source_previous_quantity is not None
+            else None
+        ),
+        "source_source_version": source_effect_version,
+    }
+
+
+def _flag_shortage_to_purchasing(
+    connection: Connection,
+    invocation: ToolInvocation,
+    input_value: FlagShortageToPurchasingInput,
+) -> dict[str, object]:
+    """Escalate a current exact shortage to purchasing without trusting stale planner quantities."""
+    production = (
+        connection.execute(
+            SELECT_SHORTAGE_PRODUCTION_FOR_UPDATE,
+            {"production_order_id": input_value.production_order_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if (
+        production is None
+        or production["part_id"] != input_value.part_id
+        or production["status"] not in {"scheduled", "in_progress"}
+    ):
+        raise ToolExecutionError("production shortage is not currently actionable")
+    released_lots = (
+        connection.execute(
+            SELECT_RELEASED_LOTS_FOR_SHARE,
+            {
+                "part_id": input_value.part_id,
+                "plant_id": production["plant_id"],
+                "production_order_id": input_value.production_order_id,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    available_quantity = sum(
+        (
+            _decimal_value(row["quantity"])
+            - _decimal_value(row["allocated_quantity"])
+            + _decimal_value(row["allocated_to_production_quantity"])
+            for row in released_lots
+        ),
+        start=Decimal(0),
+    )
+    current_shortage = _decimal_value(production["required_quantity"]) - available_quantity
+    if current_shortage <= Decimal(0) or current_shortage != input_value.shortage_quantity:
+        raise ToolExecutionError("production shortage is not currently actionable")
+    recipient = connection.execute(SELECT_PURCHASING_RECIPIENT).scalar_one_or_none()
+    if not isinstance(recipient, str):
+        raise ToolExecutionError("purchasing shortage recipient is unavailable")
+    created = (
+        connection.execute(
+            INSERT_PRODUCTION_NOTIFICATION,
+            {
+                "message_id": str(uuid4()),
+                "message_key": invocation.idempotency_key,
+                "sender": "enterprise-agent@example.invalid",
+                "recipient": recipient,
+                "subject": f"Production shortage: {input_value.production_order_id}",
+                "body": (
+                    f"Current released-lot coverage is short by {_decimal_text(current_shortage)} units for "
+                    f"part {input_value.part_id}."
+                ),
+                "occurred_at": invocation.started_at,
+                "payload": _as_json(
+                    {
+                        "production_order_id": input_value.production_order_id,
+                        "part_id": input_value.part_id,
+                        "shortage_quantity": _decimal_text(current_shortage),
+                        "workflow_id": str(invocation.workflow_id),
+                    }
+                ),
+            },
+        )
+        .mappings()
+        .one()
+    )
+    return {
+        "message_id": _required_row_text(created, "message_id"),
+        "recipient": recipient,
+        "production_order_id": input_value.production_order_id,
+        "part_id": input_value.part_id,
+        "shortage_quantity": _decimal_text(current_shortage),
     }
 
 
@@ -798,6 +1167,158 @@ def _cancel_arrival_check(
     }
 
 
+def _restore_prior_allocation(
+    connection: Connection, compensation: ToolCompensation
+) -> dict[str, object]:
+    """Restore only a lot allocation that still exactly matches the journaled provider result."""
+    result = compensation.effect_result
+    quantity = _required_result_decimal(result, "quantity")
+    destination_previous_quantity = _required_result_decimal(
+        result, "destination_previous_quantity"
+    )
+    destination_source_version = _required_result_int(result, "destination_source_version")
+    destination_allocation_id = _required_result_text(result, "destination_allocation_id")
+    restored_destination: ProviderRow | None
+    if destination_previous_quantity == Decimal(0):
+        restored_destination = (
+            connection.execute(
+                DELETE_CREATED_ALLOCATION,
+                {
+                    "allocation_id": destination_allocation_id,
+                    "allocated_quantity": str(quantity),
+                    "source_version": destination_source_version,
+                },
+            )
+            .mappings()
+            .one_or_none()
+        )
+    else:
+        restored_destination = _update_allocation_quantity(
+            connection,
+            allocation_id=destination_allocation_id,
+            allocated_quantity=destination_previous_quantity,
+            source_version=destination_source_version,
+            occurred_at=compensation.requested_at,
+        )
+    if restored_destination is None:
+        raise ToolExecutionError("destination allocation is not safely restorable")
+
+    source_allocation_id = _optional_result_text(result, "source_allocation_id")
+    source_previous_quantity = _optional_result_decimal(result, "source_previous_quantity")
+    source_source_version = _optional_result_int(result, "source_source_version")
+    if source_allocation_id is not None:
+        if source_previous_quantity is None or source_source_version is None:
+            raise ToolExecutionError("original tool result lacks required compensation provenance")
+        restored_source = _update_allocation_quantity(
+            connection,
+            allocation_id=source_allocation_id,
+            allocated_quantity=source_previous_quantity,
+            source_version=source_source_version,
+            occurred_at=compensation.requested_at,
+        )
+        if restored_source is None:
+            raise ToolExecutionError("source allocation is not safely restorable")
+    elif source_previous_quantity is not None or source_source_version is not None:
+        raise ToolExecutionError("original tool result lacks required compensation provenance")
+
+    previous_lot_allocation = _required_result_decimal(result, "previous_lot_allocated_quantity")
+    expected_lot_allocation = (
+        previous_lot_allocation
+        if source_allocation_id is not None
+        else previous_lot_allocation + quantity
+    )
+    restored_lot = (
+        connection.execute(
+            RESTORE_LOT_ALLOCATION,
+            {
+                "quality_lot_id": _required_result_text(result, "quality_lot_id"),
+                "allocated_quantity": str(previous_lot_allocation),
+                "production_order_id": _optional_result_text(
+                    result, "previous_lot_production_order_id"
+                ),
+                "expected_allocated_quantity": str(expected_lot_allocation),
+                "source_version": _required_result_int(result, "lot_source_version"),
+                "occurred_at": compensation.requested_at,
+            },
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if restored_lot is None:
+        raise ToolExecutionError("quality lot allocation is not safely restorable")
+    return {
+        "quality_lot_id": _required_row_text(restored_lot, "quality_lot_id"),
+        "allocated_quantity": _decimal_text(_decimal_value(restored_lot["allocated_quantity"])),
+        "source_version": _required_row_int(restored_lot, "source_version"),
+    }
+
+
+def _update_allocation_quantity(
+    connection: Connection,
+    *,
+    allocation_id: str,
+    allocated_quantity: Decimal,
+    source_version: int,
+    occurred_at: object,
+) -> ProviderRow | None:
+    """CAS one normalized allocation so stale effects cannot overwrite another allocation change."""
+    return cast(
+        ProviderRow | None,
+        connection.execute(
+            UPDATE_ALLOCATION_QUANTITY,
+            {
+                "allocation_id": allocation_id,
+                "allocated_quantity": str(allocated_quantity),
+                "source_version": source_version,
+                "occurred_at": occurred_at,
+            },
+        )
+        .mappings()
+        .one_or_none(),
+    )
+
+
+def _decimal_value(value: object) -> Decimal:
+    """Convert one database numeric field without accepting malformed compensation provenance."""
+    if isinstance(value, bool):
+        raise ToolExecutionError("tool provider returned invalid numeric state")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError) as error:
+        raise ToolExecutionError("tool provider returned invalid numeric state") from error
+
+
+def _decimal_text(value: Decimal) -> str:
+    """Emit stable quantity text without database scale noise in journaled provider results."""
+    return format(value.normalize(), "f")
+
+
+def _required_row_text(row: ProviderRow, name: str) -> str:
+    """Read one nonblank text field from the locked provider row."""
+    value = row.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise ToolExecutionError("tool provider returned incomplete state")
+    return value
+
+
+def _optional_row_text(row: ProviderRow, name: str) -> str | None:
+    """Read a nullable text field from one provider row without inventing a target."""
+    value = row.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ToolExecutionError("tool provider returned incomplete state")
+    return value
+
+
+def _required_row_int(row: ProviderRow, name: str) -> int:
+    """Read one positive integer source version from a locked provider row."""
+    value = row.get(name)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ToolExecutionError("tool provider returned incomplete state")
+    return value
+
+
 def _required_result_text(result: Mapping[str, object], name: str) -> str:
     """Read one nonblank provider result field without inventing a compensation target."""
     value = result.get(name)
@@ -810,6 +1331,54 @@ def _required_result_int(result: Mapping[str, object], name: str) -> int:
     """Read one exact integer version field that protects an optimistic restoration update."""
     value = result.get(name)
     if isinstance(value, bool) or not isinstance(value, int):
+        raise ToolExecutionError("original tool result lacks required compensation provenance")
+    return value
+
+
+def _optional_result_text(result: Mapping[str, object], name: str) -> str | None:
+    """Read an explicitly nullable text provenance field without broadening a reverse target."""
+    value = result.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ToolExecutionError("original tool result lacks required compensation provenance")
+    return value
+
+
+def _required_result_decimal(result: Mapping[str, object], name: str) -> Decimal:
+    """Read one numeric result field that will be used in a compare-and-set restoration."""
+    value = result.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise ToolExecutionError("original tool result lacks required compensation provenance")
+    try:
+        return Decimal(value)
+    except InvalidOperation as error:
+        raise ToolExecutionError(
+            "original tool result lacks required compensation provenance"
+        ) from error
+
+
+def _optional_result_decimal(result: Mapping[str, object], name: str) -> Decimal | None:
+    """Read an explicitly nullable numeric result field for an optional source allocation."""
+    value = result.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ToolExecutionError("original tool result lacks required compensation provenance")
+    try:
+        return Decimal(value)
+    except InvalidOperation as error:
+        raise ToolExecutionError(
+            "original tool result lacks required compensation provenance"
+        ) from error
+
+
+def _optional_result_int(result: Mapping[str, object], name: str) -> int | None:
+    """Read an explicitly nullable source-allocation version from the original result."""
+    value = result.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ToolExecutionError("original tool result lacks required compensation provenance")
     return value
 

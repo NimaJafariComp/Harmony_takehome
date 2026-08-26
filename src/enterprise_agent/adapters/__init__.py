@@ -19,7 +19,7 @@ from .scheduler import (
     ScheduledTaskClaimLostError,
     ScheduledTaskIdempotencyError,
 )
-from .tools import PostgresScenarioAToolAdapter, ToolExecutionError
+from .tools import PostgresScenarioAToolAdapter, PostgresToolAdapter, ToolExecutionError
 from .workflow_state import PostgresWorkflowStateAdapter
 
 __all__ = [
@@ -38,6 +38,7 @@ __all__ = [
     "PostgresQualityAdapter",
     "PostgresScenarioAToolAdapter",
     "PostgresSchedulerAdapter",
+    "PostgresToolAdapter",
     "PostgresWorkflowStateAdapter",
     "ScheduledTaskClaimLostError",
     "ScheduledTaskIdempotencyError",
