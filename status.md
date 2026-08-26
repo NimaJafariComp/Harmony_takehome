@@ -42,15 +42,16 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Field | Value |
 |---|---|
 | Overall status | `in_progress` |
-| Current milestone | M8 - Documentation, transcript, and final verification |
-| Current task | M8.1 - Write README |
+| Current milestone | M8 - Optional Scenario C: supplier-risk bulletin |
+| Current task | M8.1 - Verify the required control-plane baseline |
 | Required task progress | 53 / 60 complete |
+| Optional task progress | 0 / 18 complete |
 | Acceptance criteria progress | 11 / 14 satisfied; 2 in progress |
 | Last validated commit | `491e0d5` |
 | Last completed-task push | `491e0d5` to `origin/main` |
 | Blocking issue | None |
 
-## Required task register
+## Delivery task register
 
 ### M1 - Foundation
 
@@ -136,27 +137,60 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M7.5 Add profile configuration and selection | `complete` | AC-13 | Test: `tests/test_llm_setup.py`, `tests/test_config.py`, and `tests/test_cli.py` - PASS (30 focused tests; setup and CLI modules each 85% direct coverage).<br>Validation: `make verify` - PASS (376 tests, 91.87% coverage, clean migration).<br>Evidence: `enterprise-agent run` loads local `.env`; in an interactive terminal with no valid profile it selects OpenAI/Claude/OpenRouter, hides the key, offers only an explicit no-generation verification, shows curated models plus a custom ID, and atomically merges the selected profile/key/model into a `0600` `.env` while preserving other provider profiles. Noninteractive runs name the missing setting and `enterprise-agent llm-setup` without prompting. `claude` maps to Anthropic key names; the legacy `anthropic` configuration alias remains accepted.<br>Commit: `23e41ef` pushed to `origin/main`. |
 | M7.6 Add mocked adapter contract tests | `complete` | AC-13 | Test: `tests/test_provider_contracts.py`, existing adapter tests, and `tests/test_llm_setup.py` - PASS (96 focused tests; shared adapter/setup modules 95.44% direct coverage).<br>Validation: `make verify` - PASS (394 tests, 91.88% coverage, clean migration).<br>Evidence: one shared no-network matrix proves all selected adapters normalize valid structured output, malformed output, timeout, and refusal to the same safe result contract without fallback; each now rejects a blank credential even when a test transport is injected. The matrix also proves each interactive profile exposes only its curated model list plus custom ID, hides its key, creates `0600` `.env`, and preserves another configured provider profile. Existing setup contracts cover rejected verification and noninteractive no-prompt behavior.<br>Commit: `7d41af1` pushed to `origin/main`. |
 | M7.7 Add manual smoke commands | `complete` | AC-13 | Test: `tests/test_llm_smoke.py` and `tests/test_make_targets.py` - PASS (9 focused tests; smoke module 83% direct coverage).<br>Validation: `make test-critical` - PASS (48 tests); `make verify` - PASS (402 tests, 91.79% coverage, clean migration).<br>Evidence: `make llm-smoke LLM_PROFILE=openai|claude|openrouter` selects exactly one configured adapter and sends only a fixed empty-evidence JSON recommendation probe. It has no database, ERP, mail, calendar, knowledge, workflow, or audit-store dependency; it never prints a key, raw output, or raw failure detail, and normalized failure exits nonzero without fallback. Validation used only mocks and a dry-run Make invocation.<br>Commit: `2dcdc9d` pushed to `origin/main`. |
-| M7.8 Verify live provider paths | `complete` | AC-13 | Test: `tests/test_openai_adapter.py`, `tests/test_claude_adapter.py`, and `tests/test_openrouter_adapter.py` - PASS (61 focused contracts).<br>Validation: `make verify` - PASS (403 tests, 91.68% coverage, clean migration).<br>Live evidence: metadata-only credential checks passed without revealing values. `make llm-smoke` succeeded with the selected OpenAI `gpt-5.6-luna`, Claude `claude-sonnet-5`, and OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free` profiles; each sent only the fixed empty-evidence probe and made no fallback. The local Claude model was corrected from uncurated `claude-sonnet-4.8` to the tested curated default in ignored owner-only `.env`; no local configuration or credential was staged. The existing `make demo` placeholder remains intentionally owned by M8.5, so it made no live workflow call during this task.<br>Commits: `271f078`, `661adf7`, `896b194`, `605aefe`, `c1ca37e`, `97a0f7b`, `831cc37`, and `eddb9d5` pushed to `origin/main`. |
+| M7.8 Verify live provider paths | `complete` | AC-13 | Test: `tests/test_openai_adapter.py`, `tests/test_claude_adapter.py`, and `tests/test_openrouter_adapter.py` - PASS (61 focused contracts).<br>Validation: `make verify` - PASS (403 tests, 91.68% coverage, clean migration).<br>Live evidence: metadata-only credential checks passed without revealing values. `make llm-smoke` succeeded with the selected OpenAI `gpt-5.6-luna`, Claude `claude-sonnet-5`, and OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free` profiles; each sent only the fixed empty-evidence probe and made no fallback. The local Claude model was corrected from uncurated `claude-sonnet-4.8` to the tested curated default in ignored owner-only `.env`; no local configuration or credential was staged. The existing `make demo` placeholder was later scheduled for M9.4, so it made no live workflow call during this task.<br>Commits: `271f078`, `661adf7`, `896b194`, `605aefe`, `c1ca37e`, `97a0f7b`, `831cc37`, and `eddb9d5` pushed to `origin/main`. |
 | M7.9 Discover key-visible compatible models | `complete` | AC-13 | Test: `tests/test_llm_setup.py` and `tests/test_provider_contracts.py` - PASS (44 focused tests).<br>Validation: `make verify` - PASS (411 tests, 91.44% coverage, clean migration, Docker build).<br>Evidence: after the user enters a hidden key, setup retrieves the selected authenticated provider model list and displays only the intersection with the adapter-reviewed catalog. It refuses to save when no safe candidate exists; an account-visible but unreviewed model can never be suggested. Claude additionally requires the advertised structured-output capability. The recommended curated model is retained when visible, or the first safe visible alternative becomes recommended. Every catalog entry runs through its mocked adapter contract, and no key, provider payload, or model-list response is persisted or printed.<br>Commits: `0e22a73` RED and `a1ac9db` GREEN pushed to `origin/main`. |
 | M7.10 Track normalized LLM token usage and cost | `complete` | AC-13 | Test: `tests/test_llm_usage.py`, adapter tests, `tests/test_audit.py`, and `tests/test_cli.py` - PASS (16 focused tests).<br>Validation: `make verify` - PASS (427 tests, 91.16% coverage, clean migration, Docker build).<br>Evidence: each adapter now extracts only normalized scalar usage from successful and charged failed responses. OpenRouter requests usage details and retains a provider-reported cost when supplied; reviewed OpenAI/Claude/OpenRouter catalog models have a versioned public-rate estimate, while custom/unknown model rates are explicitly unavailable rather than invented. The immutable `llm.completed` ledger records only provider/model/status, token counts, cost, and cost source; `enterprise-agent llm-usage` reads and groups only those events. Estimates and provider-reported subtotals remain distinct, and neither credentials, prompts, outputs, nor raw provider payloads are retained.<br>Commits: `529b5c7` RED and `491e0d5` GREEN pushed to `origin/main`. |
 
-### M8 - Documentation, transcript, and final verification
+### M8 - Optional Scenario C: supplier-risk bulletin
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M8.1 Write README | `not_started` | AC-14 | - |
-| M8.2 Write `MODEL.md` | `not_started` | AC-02, AC-14 | - |
-| M8.3 Write `DESIGN.md` | `not_started` | AC-14 | - |
-| M8.4 Create recorded Scenario A transcript | `not_started` | AC-11, AC-14 | - |
-| M8.5 Finalize deterministic demo command | `not_started` | AC-14 | - |
-| M8.6 Run final validation suite | `not_started` | AC-01, AC-13, AC-14 | - |
-| M8.7 Review requirements coverage | `not_started` | AC-01 through AC-14 | - |
+| M8.1 Prove required control-plane baseline | `not_started` | Optional prerequisite | Must pass `make verify`, Scenario A/B, recovery, scheduler, audit-only, and critical regressions before Scenario C starts. |
+| M8.2 Add bulletin model and deterministic seed | `not_started` | Optional Scenario C | - |
+| M8.3 Add scoped knowledge provider, detector, and context | `not_started` | Optional Scenario C | - |
+| M8.4 Define constrained recommendation and hold tool | `not_started` | Optional Scenario C | - |
+| M8.5 Execute through existing durable control plane | `not_started` | Optional Scenario C | - |
+| M8.6 Prove Scenario C safety, recovery, and explanation | `not_started` | Optional Scenario C | - |
+
+### M9 - CLI HCI and deterministic demo
+
+| Task | Status | Acceptance criteria | Evidence / commit |
+|---|---|---|---|
+| M9.1 Define terminal interaction contract | `not_started` | Optional CLI HCI | - |
+| M9.2 Build reusable terminal presentation components | `not_started` | Optional CLI HCI | - |
+| M9.3 Improve high-value interactive flows | `not_started` | Optional CLI HCI | - |
+| M9.4 Add guided deterministic demo mode | `not_started` | Optional CLI HCI | - |
+| M9.5 Improve command discovery and read paths | `not_started` | Optional CLI HCI | - |
+| M9.6 Test terminal usability | `not_started` | Optional CLI HCI | - |
+
+### M10 - Optional simple local verification UI
+
+| Task | Status | Acceptance criteria | Evidence / commit |
+|---|---|---|---|
+| M10.1 Establish thin local UI boundary | `not_started` | Optional UI | - |
+| M10.2 Add authorized read models and route contracts | `not_started` | Optional UI | - |
+| M10.3 Implement operational evidence-ledger pages | `not_started` | Optional UI | - |
+| M10.4 Submit decisions through approval service | `not_started` | Optional UI | - |
+| M10.5 Add local demo-control and recovery views | `not_started` | Optional UI | - |
+| M10.6 Verify UI parity and safety | `not_started` | Optional UI | - |
+
+### M11 - Documentation, transcript, and final verification
+
+| Task | Status | Acceptance criteria | Evidence / commit |
+|---|---|---|---|
+| M11.1 Write README | `not_started` | AC-14 | - |
+| M11.2 Write `MODEL.md` | `not_started` | AC-02, AC-14 | - |
+| M11.3 Write `DESIGN.md` | `not_started` | AC-14 | - |
+| M11.4 Create recorded final transcript | `not_started` | AC-11, AC-14 | - |
+| M11.5 Finalize deterministic demo command | `not_started` | AC-14 | - |
+| M11.6 Run final validation suite | `not_started` | AC-01, AC-13, AC-14 | - |
+| M11.7 Review requirements coverage | `not_started` | AC-01 through AC-14 | - |
 
 ## Acceptance-criteria status
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, test-harness, and local reset/seed evidence are passing; final delivery verification remains M8. |
+| AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, test-harness, and local reset/seed evidence are passing; final delivery verification remains M11. |
 | AC-02 Seed model and edge cases | `complete` | The deterministic local-only seed is exhaustively asserted to contain both scenarios, roles/scopes, authorized mailboxes, a partial changed delayed PO, superseded/current shipment updates, eligible/too-slow/wrong-part suppliers, backup availability, and quality coverage/no-coverage cases. |
 | AC-03 Provider authorization boundary | `complete` | Real PostgreSQL provider assertions prove Dana's authorized purchasing context is visible while Quinn cannot read purchasing ERP/mail/calendar data and Avery cannot read Dana's mailbox or calendar; providers additionally enforce actor context, scopes, plant visibility, record types, and record IDs. |
 | AC-04 Proactive detection and dedupe | `complete` | Unit and seeded PostgreSQL contracts prove the scoped detector emits only positive, source-version-bound stockout risks; canonical keys atomically deduplicate repeats and retain audit attempts. The M3.8 end-to-end test proves the duplicate Scenario A trigger reaches the same one pending approval. |
@@ -270,3 +304,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | M7.8 | Completed live provider compatibility verification. | Test: 61 focused OpenAI/Claude/OpenRouter contracts - PASS; `make verify` - PASS (403 tests, 91.68% coverage, clean migration). Live metadata-only credential checks and fixed empty-evidence smoke calls succeeded for all three selected provider profiles without fallback, raw response output, or business data. OpenAI/Claude schema conversion and OpenRouter JSON-only compatibility were added after live capability probes. The local ignored `0600` Claude model setting was corrected to the curated tested default; no credential was staged. | `271f078`, `896b194`, `c1ca37e`, `831cc37` RED and `661adf7`, `605aefe`, `97a0f7b`, `eddb9d5` GREEN pushed to `origin/main`; status completion pending this commit. |
 | 2026-08-26 | M7.9 | Completed key-visible adapter-compatible model selection. | Test: `tests/test_llm_setup.py` and `tests/test_provider_contracts.py` - PASS (44 focused tests); `make verify` - PASS (411 tests, 91.44% coverage, clean migration, Docker build, deterministic-demo check). The interactive setup now retrieves only the selected provider's authenticated metadata list after hidden-key entry, intersects it with the reviewed catalog, enforces Claude structured-output capability, and never suggests unreviewed or account-invisible models. Every suggested catalog model has a mocked adapter-contract proof; no live generation or API credit was used. | `0e22a73` RED and `a1ac9db` GREEN pushed to `origin/main`; status recorded in this commit. |
 | 2026-08-26 | M7.10 | Completed normalized token and cost accounting. | Test: `tests/test_llm_usage.py`, three adapter metering tests, audit read test, and CLI summary test - PASS (16 focused); `make verify` - PASS (427 tests, 91.16% coverage, clean migration, Docker build, deterministic-demo check). Direct-provider usage is estimated only from the reviewed catalog rate card; OpenRouter's provider-reported response cost is retained when available. Successful and charged failed responses, cached tokens, missing/malformed telemetry, unknown rates, separated cost sources, audit-only readback, and no secret/raw-response persistence are covered without live calls or API credit use. | `529b5c7` RED and `491e0d5` GREEN pushed to `origin/main`; status recorded in this commit. |
+| 2026-08-26 | Planning | Scheduled optional Scenario C, terminal HCI/demo, and simple local verification UI before final documentation; renumbered documentation and final verification to M11. | Validation: plan/status ordering, task counts, milestone references, and Markdown table structure checked; no application source changed. | Status recorded in this commit. |
