@@ -7,7 +7,14 @@ import pytest
 from typer.testing import CliRunner
 
 from enterprise_agent import cli
-from enterprise_agent.domain import AuditEvent, AuditEventId, RunId
+from enterprise_agent.domain import (
+    ApprovalId,
+    AttentionId,
+    AuditEvent,
+    AuditEventId,
+    RunId,
+    WorkflowId,
+)
 from enterprise_agent.seed import SeedSafetyError
 
 pytestmark = pytest.mark.unit
@@ -168,6 +175,43 @@ def test_audit_explain_command_fails_clearly_without_database_configuration(
 
     assert result.exit_code == 1
     assert "database: audit explain refused (DATABASE_URL is required)" in result.stderr
+
+
+def test_scenario_c_command_stages_a_pending_human_review_without_an_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deterministic optional scenario creates only a reviewed pending plan, never an auto-hold."""
+    staged_urls: list[str] = []
+    expected_run_id = RunId("run-scenario-c-cli")
+
+    class StagedScenarioC:
+        """Return only the safe, operator-visible identifiers from a deterministic pending run."""
+
+        run_id = expected_run_id
+        attention_id = AttentionId("00000000-0000-0000-0000-000000000801")
+        approval_id = ApprovalId("00000000-0000-0000-0000-000000000802")
+        workflow_id = WorkflowId("00000000-0000-0000-0000-000000000803")
+
+    def stage(database_url: str, *, run_id: RunId) -> StagedScenarioC:
+        staged_urls.append(database_url)
+        assert run_id == expected_run_id
+        return StagedScenarioC()
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "stage_scenario_c_pending", stage, raising=False)
+
+    result = CliRunner().invoke(cli.app, ["scenario-c"])
+
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "scenario-c: pending approval\n"
+        "run: run-scenario-c-cli\n"
+        "attention: 00000000-0000-0000-0000-000000000801\n"
+        "approval: 00000000-0000-0000-0000-000000000802\n"
+        "workflow: 00000000-0000-0000-0000-000000000803\n"
+        "next: review and approve this exact plan before it can execute\n"
+    )
+    assert staged_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
 
 
 def test_llm_usage_command_renders_only_grouped_immutable_metering(
