@@ -36,7 +36,10 @@ from enterprise_agent.application.llm_evaluation import (
     evaluation_cases,
     select_evaluation_cases,
 )
-from enterprise_agent.application.operator_status import OperatorStatusSnapshot, operator_status_data
+from enterprise_agent.application.operator_status import (
+    OperatorStatusSnapshot,
+    operator_status_data,
+)
 from enterprise_agent.application.scenario_c_demo import (
     ScenarioCDeterministicRunError,
     stage_scenario_c_pending,
