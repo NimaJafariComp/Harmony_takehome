@@ -59,7 +59,16 @@ def load_settings(environment: Mapping[str, str] | None = None) -> RuntimeConfig
 def load_provider_settings(environment: Mapping[str, str] | None = None) -> ProviderConfiguration:
     """Validate only the selected LLM profile, model, and key for setup and run bootstrap paths."""
     source = environ if environment is None else environment
-    profile = normalize_llm_profile(_required(source, "LLM_PROFILE"))
+    return load_provider_profile(_required(source, "LLM_PROFILE"), source)
+
+
+def load_provider_profile(
+    profile_value: str,
+    environment: Mapping[str, str] | None = None,
+) -> ProviderConfiguration:
+    """Load one explicitly named locally configured provider without changing ``LLM_PROFILE``."""
+    source = environ if environment is None else environment
+    profile = normalize_llm_profile(profile_value)
     prefix = PROFILE_ENVIRONMENT_PREFIXES[profile]
     return ProviderConfiguration(
         profile=profile,

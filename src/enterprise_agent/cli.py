@@ -29,6 +29,13 @@ from enterprise_agent.application.guided_demo import (
     run_guided_demo,
     select_guided_demo_cases,
 )
+from enterprise_agent.application.llm_evaluation import (
+    EvaluationCaseSelectionError,
+    LLMEvaluationReport,
+    evaluate_cases,
+    evaluation_cases,
+    select_evaluation_cases,
+)
 from enterprise_agent.application.operator_status import OperatorStatusSnapshot
 from enterprise_agent.application.scenario_c_demo import (
     ScenarioCDeterministicRunError,
@@ -37,6 +44,7 @@ from enterprise_agent.application.scenario_c_demo import (
 from enterprise_agent.config import (
     ConfigurationError,
     ProviderConfiguration,
+    load_provider_profile,
     load_provider_settings,
     load_settings,
     normalize_llm_profile,
@@ -73,7 +81,7 @@ from enterprise_agent.seed import (
     reset_database,
     seed_database,
 )
-from enterprise_agent.smoke import run_smoke
+from enterprise_agent.smoke import create_no_write_adapter, run_smoke
 
 app = typer.Typer(
     help="Operate the enterprise agent harness.",
@@ -354,6 +362,95 @@ def llm_smoke() -> None:
         typer.echo(message, err=True)
         raise typer.Exit(code=1)
     typer.echo(message)
+
+
+@app.command(name="llm-evaluate")
+def llm_evaluate(
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help="Configured provider profile to evaluate: openai, claude, or openrouter.",
+        ),
+    ] = None,
+    case: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--case", "-c", help="Fixed synthetic evaluation case ID; repeat to choose several."
+        ),
+    ] = None,
+    all_cases: Annotated[
+        bool,
+        typer.Option("--all", help="Evaluate the full fixed ten-case synthetic pack."),
+    ] = False,
+    list_cases: Annotated[
+        bool,
+        typer.Option(
+            "--list",
+            help="List the fixed evaluation cases without loading configuration or calling a provider.",
+        ),
+    ] = False,
+    execute: Annotated[
+        bool,
+        typer.Option(
+            "--execute", help="Explicitly authorize this no-write live-provider evaluation request."
+        ),
+    ] = False,
+) -> None:
+    """Manually score fixed synthetic cases through one named provider without any business-system write."""
+    if list_cases:
+        if profile is not None or case or all_cases or execute:
+            _evaluation_refusal(
+                summary="Evaluation listing cannot be combined with provider selection or execution.",
+                code="invalid_arguments",
+                message="Run enterprise-agent llm-evaluate --list by itself.",
+                exit_code=2,
+            )
+        _emit_evaluation_catalog()
+        return
+    if profile is None:
+        _evaluation_refusal(
+            summary="Manual LLM evaluation requires an explicit provider profile.",
+            code="explicit_profile_required",
+            message="--profile is required; no provider was called.",
+            exit_code=1,
+        )
+    if not execute:
+        _evaluation_refusal(
+            summary="Manual LLM evaluation requires explicit execution.",
+            code="explicit_execution_required",
+            message="--execute is required; no provider was called.",
+            exit_code=1,
+        )
+    try:
+        selected_cases = select_evaluation_cases(tuple(case or ()), include_all=all_cases)
+    except EvaluationCaseSelectionError as error:
+        _evaluation_refusal(
+            summary="Manual LLM evaluation case selection was refused.",
+            code="invalid_evaluation_selection",
+            message="Select one named case or the full fixed pack.",
+            exit_code=2,
+            error=error,
+        )
+    try:
+        configuration = load_provider_profile(profile, _runtime_environment())
+    except (ConfigurationError, ValueError) as error:
+        if _emit_json_result(_configuration_refusal(action="LLM evaluation", error=error)):
+            raise typer.Exit(code=1) from error
+        typer.echo(
+            "configuration: LLM evaluation refused (configured profile is unavailable)", err=True
+        )
+        raise typer.Exit(code=1) from error
+
+    report = evaluate_cases(selected_cases, create_no_write_adapter(configuration))
+    result = _llm_evaluation_result(configuration, report)
+    if _emit_json_result(result):
+        if not report.passed:
+            raise typer.Exit(code=1)
+        return
+    _render_llm_evaluation(configuration, report)
+    if not report.passed:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="llm-usage")
@@ -665,6 +762,10 @@ def _guide_entries() -> tuple[CommandGuideEntry, ...]:
         CommandGuideEntry(
             command="enterprise-agent llm-usage",
             purpose="Read recorded token and cost totals without a provider request.",
+        ),
+        CommandGuideEntry(
+            command="enterprise-agent llm-evaluate --list",
+            purpose="Inspect the optional synthetic no-write live-LLM evaluation pack before opting in.",
         ),
     )
 
@@ -1187,6 +1288,150 @@ def _llm_usage_result(summary: LLMUsageSummary) -> TerminalResult:
             "total_cost_usd": str(summary.total_cost_usd),
         },
         next_actions=("enterprise-agent status",),
+    )
+
+
+def _evaluation_refusal(
+    *,
+    summary: str,
+    code: str,
+    message: str,
+    exit_code: int,
+    error: Exception | None = None,
+) -> NoReturn:
+    """Refuse an evaluation before adapter composition and never serialize configuration or provider errors."""
+    result = TerminalResult(
+        state=TerminalState.REFUSED,
+        summary=summary,
+        data={},
+        next_actions=("Run enterprise-agent llm-evaluate --list to inspect fixed safe cases.",),
+        error=TerminalError(code=code, message=message),
+    )
+    if _emit_json_result(result):
+        raise typer.Exit(code=exit_code) from error
+    typer.echo(f"llm-evaluate: refused ({message})", err=True)
+    raise typer.Exit(code=exit_code) from error
+
+
+def _emit_evaluation_catalog() -> None:
+    """List the fixed synthetic cases without loading profile settings or constructing a live adapter."""
+    cases = evaluation_cases()
+    if _emit_json_result(
+        TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary="Manual no-write LLM evaluation catalogue.",
+            data={
+                "cases": [
+                    {
+                        "case_id": item.case_id,
+                        "scenario": item.scenario,
+                        "title": item.title,
+                        "expected_outcomes": sorted(item.expected_outcomes),
+                    }
+                    for item in cases
+                ]
+            },
+            next_actions=(
+                "Run enterprise-agent llm-evaluate --profile PROFILE --case CASE_ID --execute.",
+            ),
+        )
+    ):
+        return
+    presenter = _terminal_presenter()
+    presenter.render_header(
+        title="Manual live-LLM evaluation",
+        subtitle="Fixed synthetic inputs only · no workflow, ERP, mail, audit, or business-system write",
+    )
+    presenter.render_status(
+        StatusSummary(
+            state=TerminalState.SUCCEEDED,
+            summary="Listing is local and makes no provider request.",
+            next_action="Use --profile PROFILE --case CASE_ID --execute for one deliberate request.",
+        )
+    )
+    for item in cases:
+        expected = ", ".join(sorted(item.expected_outcomes))
+        typer.echo(f"  {item.case_id} [{item.scenario}] — {item.title}; expected: {expected}")
+
+
+def _llm_evaluation_result(
+    configuration: ProviderConfiguration,
+    report: LLMEvaluationReport,
+) -> TerminalResult:
+    """Wrap the scalar-only manual scorecard in the universal command JSON envelope."""
+    data = {
+        "profile": configuration.profile,
+        "model": configuration.model,
+    } | report.to_data()
+    if report.passed:
+        return TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary=(
+                f"Manual LLM evaluation passed {report.passed_case_count}/{len(report.observations)} "
+                "synthetic cases."
+            ),
+            data=data,
+            next_actions=("Review enterprise-agent llm-usage for durable business-call metering.",),
+        )
+    return TerminalResult(
+        state=TerminalState.FAILED,
+        summary=(
+            f"Manual LLM evaluation passed {report.passed_case_count}/{len(report.observations)} "
+            "synthetic cases."
+        ),
+        data=data,
+        next_actions=(
+            "Review the scalar scorecard; no workflow or business-system write was attempted.",
+        ),
+        error=TerminalError(
+            code="evaluation_checks_failed",
+            message="At least one synthetic evaluation criterion did not pass.",
+        ),
+    )
+
+
+def _render_llm_evaluation(
+    configuration: ProviderConfiguration,
+    report: LLMEvaluationReport,
+) -> None:
+    """Render a compact scorecard from only sanitized scalars, never a provider response or rationale."""
+    presenter = _terminal_presenter()
+    presenter.render_header(
+        title="Manual live-LLM evaluation",
+        subtitle=(
+            f"Profile: {configuration.profile} · model: {configuration.model} · fixed synthetic inputs · "
+            "no business-system write"
+        ),
+    )
+    presenter.render_status(
+        StatusSummary(
+            state=TerminalState.SUCCEEDED if report.passed else TerminalState.FAILED,
+            summary=(
+                f"{report.passed_case_count}/{len(report.observations)} cases and "
+                f"{report.passed_check_count}/{report.check_count} checks passed."
+            ),
+            next_action=(
+                "Review the scalar scorecard; no workflow or business-system write was attempted."
+                if not report.passed
+                else "The selected synthetic evaluation pack is complete."
+            ),
+        )
+    )
+    for observation in report.observations:
+        checks = ", ".join(f"{name}={state.value}" for name, state in observation.checks.items())
+        expected = ", ".join(observation.expected_outcomes)
+        observed = observation.observed_outcome or "no structured outcome"
+        typer.echo(
+            f"  {observation.case_id}: expected={expected}; observed={observed}; "
+            f"status={observation.status.value}; {checks}"
+        )
+    usage = report.usage
+    typer.echo(
+        "Usage: "
+        f"requests={usage.request_count}, metered={usage.metered_request_count}, "
+        f"unmetered={usage.unmetered_request_count}, unknown-cost={usage.unknown_cost_request_count}, "
+        f"input={usage.input_tokens}, output={usage.output_tokens}, total={usage.total_tokens}, "
+        f"cost_usd={usage.total_cost_usd}"
     )
 
 

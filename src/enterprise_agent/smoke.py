@@ -86,8 +86,8 @@ def smoke_prompt() -> PromptEnvelope:
     )
 
 
-def create_smoke_adapter(configuration: ProviderConfiguration) -> LLMPort:
-    """Compose exactly one selected live adapter; this is the sole profile-specific smoke branch."""
+def create_no_write_adapter(configuration: ProviderConfiguration) -> LLMPort:
+    """Compose exactly one selected live adapter with an in-memory-only audit sink."""
     audit = _SmokeAudit()
     clock = _SmokeClock()
     match configuration.profile:
@@ -114,6 +114,11 @@ def create_smoke_adapter(configuration: ProviderConfiguration) -> LLMPort:
             )
         case _:
             raise ValueError(f"unsupported LLM profile: {configuration.profile}")
+
+
+def create_smoke_adapter(configuration: ProviderConfiguration) -> LLMPort:
+    """Compose the selected provider for the fixed no-write smoke probe."""
+    return create_no_write_adapter(configuration)
 
 
 def run_smoke(configuration: ProviderConfiguration) -> LLMGenerationResult:

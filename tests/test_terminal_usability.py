@@ -122,6 +122,12 @@ def test_guide_json_is_one_stable_envelope_without_human_decoration() -> None:
                     "command": "enterprise-agent llm-usage",
                     "purpose": "Read recorded token and cost totals without a provider request.",
                 },
+                {
+                    "command": "enterprise-agent llm-evaluate --list",
+                    "purpose": (
+                        "Inspect the optional synthetic no-write live-LLM evaluation pack before opting in."
+                    ),
+                },
             ],
             "shell_completion": "enterprise-agent --install-completion",
         },
