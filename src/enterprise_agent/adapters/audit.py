@@ -30,6 +30,7 @@ REQUIRED_AUDIT_EVENT_TYPES = frozenset(
         "attention.deduplicated",
         "context.gathered",
         "evidence.observed",
+        "llm.completed",
         "planner.recommended",
         "gate.allowed",
         "gate.denied",

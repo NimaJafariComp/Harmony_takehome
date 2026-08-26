@@ -6,6 +6,7 @@ from .attention import PostgresAttentionAdapter
 from .audit import AuditEventError, PostgresAuditAdapter
 from .clock import DemoClockNotInitializedError, PostgresDemoClock
 from .identity import IdentityNotFoundError, PostgresIdentityAdapter
+from .openai import OpenAIResponsesAdapter, OpenAIResponsesTransport, UrllibOpenAIResponsesTransport
 from .plan_approvals import PostgresPlanApprovalAdapter
 from .providers import (
     PostgresCalendarAdapter,
@@ -27,6 +28,8 @@ __all__ = [
     "DemoClockNotInitializedError",
     "IdentityNotFoundError",
     "InvalidAttentionTransitionError",
+    "OpenAIResponsesAdapter",
+    "OpenAIResponsesTransport",
     "PostgresAttentionAdapter",
     "PostgresAuditAdapter",
     "PostgresCalendarAdapter",
@@ -44,4 +47,5 @@ __all__ = [
     "ScheduledTaskIdempotencyError",
     "ToolExecutionError",
     "UnsupportedEvidenceTypeError",
+    "UrllibOpenAIResponsesTransport",
 ]

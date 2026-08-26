@@ -193,6 +193,16 @@ def test_audit_explain_never_renders_sensitive_or_unrecognized_payload_content()
         ),
         ("evidence.observed", {"evidence_count": -1}, "Recorded unknown evidence references."),
         (
+            "llm.completed",
+            {
+                "provider": "openai",
+                "response_schema": "scenario_a_recommendation:v1",
+                "model": "gpt-5.6-luna",
+                "status": "succeeded",
+            },
+            "LLM provider openai completed scenario_a_recommendation:v1 using gpt-5.6-luna with status succeeded.",
+        ),
+        (
             "gate.denied",
             {"reason": "stale evidence"},
             "Gate denied the proposed action: stale evidence.",

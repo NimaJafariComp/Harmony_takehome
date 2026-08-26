@@ -76,6 +76,12 @@ def _describe(event: AuditEvent) -> str:
             return f"Gathered {_count(payload, 'evidence_count')} authorized evidence records for planning."
         case "evidence.observed":
             return f"Recorded {_count(payload, 'evidence_count')} evidence references."
+        case "llm.completed":
+            return (
+                f"LLM provider {_text(payload, 'provider')} completed "
+                f"{_text(payload, 'response_schema')} using {_text(payload, 'model')} "
+                f"with status {_text(payload, 'status')}."
+            )
         case "planner.recommended":
             return (
                 f"Planner recommended {_text(payload, 'outcome')} using "

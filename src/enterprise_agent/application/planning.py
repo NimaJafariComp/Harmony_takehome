@@ -33,6 +33,10 @@ class InvalidScenarioBRecommendationError(ValueError):
     """Raised when a structured model response is outside the bounded Scenario B contract."""
 
 
+class UnsupportedRecommendationSchemaError(ValueError):
+    """Raised when an LLM adapter is asked for a recommendation schema the application does not own."""
+
+
 NonBlankString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 PositiveQuantity = Annotated[Decimal, Field(gt=0)]
 
@@ -131,6 +135,35 @@ def validate_scenario_b_recommendation(
         return _SCENARIO_B_RECOMMENDATION_ADAPTER.validate_python(output)
     except ValidationError as error:
         raise InvalidScenarioBRecommendationError("invalid Scenario B recommendation") from error
+
+
+def json_schema_for_recommendation(response_schema: str) -> dict[str, object]:
+    """Return the JSON schema for one application-owned recommendation contract."""
+    match response_schema:
+        case "scenario_a_recommendation:v1":
+            return _SCENARIO_A_RECOMMENDATION_ADAPTER.json_schema()
+        case "scenario_b_recommendation:v1":
+            return _SCENARIO_B_RECOMMENDATION_ADAPTER.json_schema()
+        case _:
+            raise UnsupportedRecommendationSchemaError(
+                f"unsupported recommendation schema: {response_schema}"
+            )
+
+
+def validate_recommendation(
+    response_schema: str,
+    output: Mapping[str, object],
+) -> AnyScenarioRecommendation:
+    """Validate provider JSON with the exact declared scenario contract and no implicit fallback."""
+    match response_schema:
+        case "scenario_a_recommendation:v1":
+            return validate_scenario_a_recommendation(output)
+        case "scenario_b_recommendation:v1":
+            return validate_scenario_b_recommendation(output)
+        case _:
+            raise UnsupportedRecommendationSchemaError(
+                f"unsupported recommendation schema: {response_schema}"
+            )
 
 
 AnyScenarioRecommendation = (

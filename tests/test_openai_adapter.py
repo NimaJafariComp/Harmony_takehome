@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
+from urllib.request import Request
 
 import pytest
 
@@ -24,8 +25,6 @@ from enterprise_agent.domain import (
     UserId,
 )
 from enterprise_agent.ports import (
-    AuditPort,
-    ClockPort,
     LLMGenerationStatus,
     LLMMessage,
     PromptEnvelope,
@@ -63,7 +62,7 @@ def prompt() -> PromptEnvelope:
         record_id="inventory-x",
         source_version=4,
         observed_at=NOW,
-        payload={"part_id": "part-x", "available_quantity": Decimal("10")},
+        payload={"part_id": "part-x", "available_quantity": Decimal(10)},
     )
     return PromptEnvelope(
         run_id=RunId("run-openai-adapter"),
@@ -97,7 +96,7 @@ def completed_response(output: dict[str, object]) -> dict[str, object]:
 class RecordingTransport:
     """Return a configured raw response or exception and retain only the adapter request."""
 
-    response: MappingOrException
+    response: object
     requests: list[dict[str, object]] = field(default_factory=list)
 
     def create(self, request: dict[str, object]) -> dict[str, object]:
@@ -105,10 +104,7 @@ class RecordingTransport:
         self.requests.append(request)
         if isinstance(self.response, BaseException):
             raise self.response
-        return self.response
-
-
-MappingOrException = dict[str, object] | BaseException
+        return cast(dict[str, object], self.response)
 
 
 @dataclass
@@ -167,15 +163,18 @@ def test_openai_adapter_sends_only_authorized_evidence_requests_strict_json_and_
     request = transport.requests[0]
     assert request["model"] == "gpt-5.6-luna"
     assert request["store"] is False
-    assert request["text"] == {
+    text = cast(dict[str, Any], request["text"])
+    assert text == {
         "format": {
             "type": "json_schema",
             "name": "scenario_a_recommendation_v1",
-            "schema": request["text"]["format"]["schema"],
+            "schema": text["format"]["schema"],
             "strict": True,
         }
     }
-    payload = json.loads(request["input"][0]["content"][0]["text"])
+    input_items = cast(list[dict[str, Any]], request["input"])
+    content_items = cast(list[dict[str, Any]], input_items[0]["content"])
+    payload = json.loads(cast(str, content_items[0]["text"]))
     assert payload == {
         "purpose": "scenario_a_recommendation",
         "response_schema": "scenario_a_recommendation:v1",
@@ -211,6 +210,64 @@ def test_openai_adapter_sends_only_authorized_evidence_requests_strict_json_and_
     assert API_KEY not in repr(event)
 
 
+def test_openai_adapter_uses_the_declared_scenario_b_schema() -> None:
+    """The common adapter selects and validates the other application-owned recommendation contract."""
+    from enterprise_agent.adapters.openai import OpenAIResponsesAdapter
+
+    transport = RecordingTransport(
+        completed_response(
+            {
+                "outcome": "MANUAL_REVIEW",
+                "reason": "Quality evidence needs a human decision.",
+            }
+        )
+    )
+    scenario_b_prompt = replace(prompt(), response_schema="scenario_b_recommendation:v1")
+    result = OpenAIResponsesAdapter(
+        api_key=API_KEY,
+        model="gpt-5.6-luna",
+        transport=transport,
+        audit=RecordingAudit(),
+        clock=FixedClock(),
+    ).generate(scenario_b_prompt)
+
+    text = cast(dict[str, Any], transport.requests[0]["text"])
+    request_format = cast(dict[str, Any], text["format"])
+    schema = cast(dict[str, Any], request_format["schema"])
+    assert result.status is LLMGenerationStatus.SUCCEEDED
+    assert request_format["name"] == "scenario_b_recommendation_v1"
+    assert schema["discriminator"]["propertyName"] == "outcome"
+    assert {"ManualReviewRecommendation", "ReallocateAndNotifyRecommendation"} <= schema[
+        "$defs"
+    ].keys()
+    reallocate_lot = schema["$defs"]["ReallocateLotInput"]
+    assert set(reallocate_lot["required"]) == set(reallocate_lot["properties"])
+    assert {"type": "null"} in reallocate_lot["properties"]["from_production_order_id"]["anyOf"]
+
+
+def test_openai_adapter_rejects_an_undeclared_response_schema_without_calling_the_provider() -> (
+    None
+):
+    """An unowned schema cannot silently reach the provider or become a fallback recommendation."""
+    from enterprise_agent.adapters.openai import OpenAIResponsesAdapter
+
+    transport = RecordingTransport(
+        completed_response({"outcome": "NO_ACTION", "rationale": "ignored"})
+    )
+    audit = RecordingAudit()
+    result = OpenAIResponsesAdapter(
+        api_key=API_KEY,
+        model="gpt-5.6-luna",
+        transport=transport,
+        audit=audit,
+        clock=FixedClock(),
+    ).generate(replace(prompt(), response_schema="unowned:v1"))
+
+    assert result.status is LLMGenerationStatus.INVALID_RESPONSE
+    assert transport.requests == []
+    assert audit.events[0].failure_category == "invalid_response"
+
+
 @pytest.mark.parametrize(
     ("response", "expected_status"),
     (
@@ -230,12 +287,70 @@ def test_openai_adapter_sends_only_authorized_evidence_requests_strict_json_and_
             },
             LLMGenerationStatus.REFUSAL,
         ),
+        (["not a response object"], LLMGenerationStatus.INVALID_RESPONSE),
+        ({"status": "completed"}, LLMGenerationStatus.INVALID_RESPONSE),
+        (
+            {"status": "completed", "output": [None]},
+            LLMGenerationStatus.INVALID_RESPONSE,
+        ),
+        (
+            {
+                "status": "completed",
+                "output": [{"type": "message", "content": "not a content list"}],
+            },
+            LLMGenerationStatus.INVALID_RESPONSE,
+        ),
+        (
+            {
+                "status": "completed",
+                "output": [{"type": "message", "content": [None]}],
+            },
+            LLMGenerationStatus.INVALID_RESPONSE,
+        ),
+        (
+            {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text"}],
+                    }
+                ],
+            },
+            LLMGenerationStatus.INVALID_RESPONSE,
+        ),
+        ({"status": "completed", "output": []}, LLMGenerationStatus.INVALID_RESPONSE),
+        (
+            {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "not-json"}],
+                    }
+                ],
+            },
+            LLMGenerationStatus.INVALID_RESPONSE,
+        ),
+        (
+            {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "[]"}],
+                    }
+                ],
+            },
+            LLMGenerationStatus.INVALID_RESPONSE,
+        ),
+        ({"status": "in_progress", "output": []}, LLMGenerationStatus.PROVIDER_FAILURE),
         (TimeoutError("provider timed out"), LLMGenerationStatus.TIMEOUT),
         (OSError("provider unavailable"), LLMGenerationStatus.PROVIDER_FAILURE),
     ),
 )
 def test_openai_adapter_normalizes_invalid_refused_timeout_and_provider_failures(
-    response: MappingOrException,
+    response: object,
     expected_status: LLMGenerationStatus,
 ) -> None:
     """Provider-specific failure details do not become structured output, errors, or audit payload."""
@@ -283,10 +398,36 @@ def test_urllib_transport_posts_json_to_the_responses_endpoint_with_the_configur
 
     raw_response = transport.create({"model": "gpt-5.6-luna", "store": False})
 
-    request = captured["request"]
+    request = cast(Request, captured["request"])
     assert raw_response == {"status": "completed", "output": []}
     assert request.full_url == "https://api.openai.com/v1/responses"
     assert request.get_method() == "POST"
     assert request.get_header("Authorization") == f"Bearer {API_KEY}"
-    assert json.loads(request.data) == {"model": "gpt-5.6-luna", "store": False}
+    assert json.loads(cast(bytes, request.data)) == {"model": "gpt-5.6-luna", "store": False}
     assert captured["timeout"] == 12.5
+
+
+def test_openai_adapter_and_transport_reject_invalid_local_configuration_or_response_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid local settings and non-object provider JSON fail before producing a recommendation."""
+    from enterprise_agent.adapters import openai
+
+    with pytest.raises(ValueError, match="API key is required"):
+        openai.UrllibOpenAIResponsesTransport(api_key=" ")
+    with pytest.raises(ValueError, match="timeout must be positive"):
+        openai.UrllibOpenAIResponsesTransport(api_key=API_KEY, timeout_seconds=0)
+    with pytest.raises(ValueError, match="model is required"):
+        openai.OpenAIResponsesAdapter(
+            api_key=API_KEY,
+            model=" ",
+            audit=RecordingAudit(),
+            clock=FixedClock(),
+        )
+
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b"[]"
+    monkeypatch.setattr(openai, "urlopen", lambda *_args, **_kwargs: response)
+
+    with pytest.raises(TypeError, match="JSON object"):
+        openai.UrllibOpenAIResponsesTransport(api_key=API_KEY).create({"model": "gpt-5.6-luna"})
