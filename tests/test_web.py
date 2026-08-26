@@ -3,10 +3,115 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import dataclass, field
 
 import pytest
 
 pytestmark = [pytest.mark.unit, pytest.mark.contract]
+
+
+@dataclass
+class RecordingLocalReviewService:
+    """Return fixed safe read models while proving each HTTP path uses the presentation service."""
+
+    requests: list[tuple[str, str | None]] = field(default_factory=list)
+
+    def status(self) -> dict[str, object]:
+        self.requests.append(("status", None))
+        return {
+            "pending_approvals": [
+                {
+                    "approval_id": "approval-a",
+                    "plan_id": "plan-a",
+                    "requester": "Dana Buyer",
+                    "approver": "Avery Backup",
+                    "decision_state": "rerouted",
+                    "expires_at": "2026-08-24T13:00:00+00:00",
+                    "audit_run_id": "run-a",
+                }
+            ],
+            "workflows": [
+                {
+                    "workflow_id": "workflow-a",
+                    "status": "running",
+                    "current_step": "create_replacement_po",
+                    "idempotency_key_prefix": "po-reroute:workflow-a",
+                    "recovery_state": "in_progress",
+                }
+            ],
+        }
+
+    def attention(self, attention_id: str) -> dict[str, object]:
+        self.requests.append(("attention", attention_id))
+        return {
+            "attention_id": attention_id,
+            "scenario": "scenario_a",
+            "cause": "projected_stockout",
+            "status": "pending_approval",
+            "created_at": "2026-08-24T09:00:00+00:00",
+            "resolved_at": None,
+            "evidence": [
+                {
+                    "evidence_id": "inventory:PART-X",
+                    "source_version": 4,
+                }
+            ],
+        }
+
+    def approval(self, approval_id: str) -> dict[str, object]:
+        self.requests.append(("approval", approval_id))
+        return {
+            "approval_id": approval_id,
+            "plan_id": "plan-a",
+            "attention_id": "attention-a",
+            "requester_id": "dana",
+            "approver_id": "avery",
+            "decision_state": "rerouted",
+            "requested_at": "2026-08-24T09:00:00+00:00",
+            "expires_at": "2026-08-24T13:00:00+00:00",
+            "decided_at": None,
+            "intent": "enter_workflow",
+            "workflow_name": "po_reroute",
+            "workflow_version": 1,
+            "policy_version": "scenario_a_policy:v1",
+            "source_versions": {"inventory:PART-X": 4},
+        }
+
+    def workflow(self, workflow_id: str) -> dict[str, object]:
+        self.requests.append(("workflow", workflow_id))
+        return {
+            "workflow_id": workflow_id,
+            "plan_id": "plan-a",
+            "definition_name": "po_reroute",
+            "definition_version": 1,
+            "status": "running",
+            "current_step": 2,
+            "recovery_state": "in_progress",
+            "created_at": "2026-08-24T09:00:00+00:00",
+            "updated_at": "2026-08-24T09:01:00+00:00",
+            "steps": [
+                {
+                    "step_index": 1,
+                    "step_name": "verify_freshness",
+                    "tool_name": None,
+                    "status": "succeeded",
+                    "attempt_count": 1,
+                    "idempotency_key_prefix": "not started",
+                }
+            ],
+        }
+
+    def audit(self, run_id: str) -> dict[str, object]:
+        self.requests.append(("audit", run_id))
+        return {
+            "run_id": run_id,
+            "event_count": 2,
+            "explanation": "Audit explanation for run run-a (2 events)",
+        }
+
+    def demo_clock(self) -> dict[str, object]:
+        self.requests.append(("demo_clock", None))
+        return {"current_at": "2026-08-24T09:00:00+00:00"}
 
 
 @pytest.mark.critical
@@ -52,6 +157,118 @@ async def test_local_ui_health_is_database_free_and_says_what_is_safe_to_expect(
         "database_access": False,
         "provider_access": False,
     }
+
+
+@pytest.mark.critical
+async def test_local_ui_exposes_only_selected_actor_read_models_through_the_service_boundary() -> None:
+    """Every operational API path is a safe GET projection; the route never owns business data."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    service = RecordingLocalReviewService()
+    expected_status = {
+        "pending_approvals": [
+            {
+                "approval_id": "approval-a",
+                "plan_id": "plan-a",
+                "requester": "Dana Buyer",
+                "approver": "Avery Backup",
+                "decision_state": "rerouted",
+                "expires_at": "2026-08-24T13:00:00+00:00",
+                "audit_run_id": "run-a",
+            }
+        ],
+        "workflows": [
+            {
+                "workflow_id": "workflow-a",
+                "status": "running",
+                "current_step": "create_replacement_po",
+                "idempotency_key_prefix": "po-reroute:workflow-a",
+                "recovery_state": "in_progress",
+            }
+        ],
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(read_service=service)),
+        base_url="http://testserver",
+    ) as client:
+        status = await client.get("/api/status")
+        attention = await client.get("/api/attention/attention-a")
+        approval = await client.get("/api/approval/approval-a")
+        workflow = await client.get("/api/workflow/workflow-a")
+        audit = await client.get("/api/audit/run-a")
+        demo_clock = await client.get("/api/demo-clock")
+
+    assert status.status_code == 200
+    assert status.json() == expected_status
+    assert attention.json()["evidence"] == [
+        {"evidence_id": "inventory:PART-X", "source_version": 4}
+    ]
+    assert approval.json()["source_versions"] == {"inventory:PART-X": 4}
+    assert workflow.json()["steps"][0]["idempotency_key_prefix"] == "not started"
+    assert audit.json() == {
+        "run_id": "run-a",
+        "event_count": 2,
+        "explanation": "Audit explanation for run run-a (2 events)",
+    }
+    assert demo_clock.json() == {"current_at": "2026-08-24T09:00:00+00:00"}
+    assert service.requests == [
+        ("status", None),
+        ("attention", "attention-a"),
+        ("approval", "approval-a"),
+        ("workflow", "workflow-a"),
+        ("audit", "run-a"),
+        ("demo_clock", None),
+    ]
+
+    application = create_app(read_service=service)
+    mutable_routes = {
+        method
+        for route in application.routes
+        for method in getattr(route, "methods", set())
+        if method not in {"GET", "HEAD"}
+    }
+    assert mutable_routes == set()
+
+
+async def test_local_ui_rejects_unknown_cross_actor_and_unconfigured_read_resources() -> None:
+    """A route reveals neither the existence nor the contents of resources outside its selected actor."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.application.local_review import (
+        LocalReviewAccessDeniedError,
+        LocalReviewResourceNotFoundError,
+    )
+    from enterprise_agent.web import create_app
+
+    class RefusingReviewService(RecordingLocalReviewService):
+        def attention(self, attention_id: str) -> dict[str, object]:
+            raise LocalReviewAccessDeniedError("cross-actor resource")
+
+        def approval(self, approval_id: str) -> dict[str, object]:
+            raise LocalReviewResourceNotFoundError("unknown resource")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(read_service=RefusingReviewService())),
+        base_url="http://testserver",
+    ) as client:
+        forbidden = await client.get("/api/attention/other-actor-attention")
+        missing = await client.get("/api/approval/not-a-real-approval")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://testserver"
+    ) as client:
+        unconfigured = await client.get("/api/status")
+
+    assert forbidden.status_code == 403
+    assert forbidden.json() == {"detail": "The selected demo actor cannot view this resource."}
+    assert "other-actor-attention" not in forbidden.text
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "The requested review resource is unavailable."}
+    assert "not-a-real-approval" not in missing.text
+    assert unconfigured.status_code == 503
+    assert unconfigured.json() == {"detail": "Local review data is not configured."}
 
 
 def test_local_ui_module_has_no_direct_database_provider_or_configuration_dependency() -> None:
