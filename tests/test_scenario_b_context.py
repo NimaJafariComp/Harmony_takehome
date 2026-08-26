@@ -387,6 +387,93 @@ def test_quality_control_reuses_pending_approval_and_dynamic_tool_workflow_bound
 
 
 @pytest.mark.critical
+@pytest.mark.scenario
+@pytest.mark.parametrize(
+    ("alternatives", "selected_lot_id", "quantity", "error_match"),
+    [
+        (
+            (released_lot(available_quantity="20"),),
+            "lot-good",
+            Decimal(20),
+            "does not fully cover",
+        ),
+        (
+            (
+                released_lot(record_id="lot-a", available_quantity="80"),
+                released_lot(record_id="lot-b", available_quantity="80"),
+            ),
+            "lot-a",
+            Decimal(80),
+            "ambiguous",
+        ),
+    ],
+    ids=("partial_or_committed_capacity", "multiple_unranked_lots"),
+)
+def test_quality_control_refuses_reallocation_that_is_not_one_unambiguous_full_cover(
+    alternatives: tuple[Evidence, ...],
+    selected_lot_id: str,
+    quantity: Decimal,
+    error_match: str,
+) -> None:
+    """A planner cannot mislabel partial capacity or an arbitrary lot choice as full coverage."""
+    from enterprise_agent.application.approvals import ScenarioAApprovalService
+    from enterprise_agent.application.planning import ReallocateAndNotifyRecommendation
+    from enterprise_agent.application.quality_context import ScenarioBContextAssembler
+    from enterprise_agent.application.scenario_b_control import (
+        ScenarioBControlRejectedError,
+        ScenarioBControlService,
+    )
+    from enterprise_agent.application.tools import NotifyProductionInput, ReallocateLotInput
+    from enterprise_agent.application.workflow_state import WorkflowStateService
+
+    signal = trigger()
+    context = ScenarioBContextAssembler(
+        RecordingIdentity(),
+        RecordingQualityProvider((held_lot(), *alternatives, allocation(), production_impact())),
+    ).assemble(user_id=QUINN.user_id, attention=attention(signal), trigger=signal)
+    writable_context = replace(
+        context,
+        actor=replace(
+            context.actor,
+            scopes=context.actor.scopes
+            | frozenset({Scope("erp:lot:write"), Scope("production:notify")}),
+        ),
+    )
+    approval_store = MagicMock()
+    workflow_store = MagicMock()
+    control = ScenarioBControlService(
+        approvals=ScenarioAApprovalService(approval_store),
+        workflow_state=WorkflowStateService(workflow_store),
+    )
+    recommendation = ReallocateAndNotifyRecommendation(
+        outcome="REALLOCATE_AND_NOTIFY",
+        reallocate_lot=ReallocateLotInput(
+            quality_lot_id=selected_lot_id,
+            to_production_order_id="production-q7001",
+            quantity=quantity,
+        ),
+        notify_production=NotifyProductionInput(
+            production_order_id="production-q7001",
+            message="Replacement lot covers the held allocation.",
+        ),
+        rationale="A released alternate appears available.",
+    )
+
+    with pytest.raises(ScenarioBControlRejectedError, match=error_match):
+        control.request_pending(
+            context=writable_context,
+            recommendation=recommendation,
+            current_source_versions=writable_context.source_versions,
+            policy_version="scenario_b_policy:v1",
+            requested_at=NOW,
+            expires_at=NOW.replace(hour=13),
+        )
+
+    approval_store.create_pending.assert_not_called()
+    workflow_store.create.assert_not_called()
+
+
+@pytest.mark.critical
 def test_quality_control_denies_stale_context_without_creating_an_approval_or_workflow() -> None:
     """A stale evidence version must stop Scenario B before it can enter the shared write path."""
     from enterprise_agent.application.approvals import ScenarioAApprovalService

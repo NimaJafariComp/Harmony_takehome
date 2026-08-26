@@ -202,6 +202,13 @@ def _with_supplier_payload(
     return replace(context, suppliers=suppliers)
 
 
+def _with_shipment_update_payload(
+    context: AuthorizedContextBundle, payload: dict[str, object]
+) -> AuthorizedContextBundle:
+    """Return the same context with one controlled current supplier-update payload."""
+    return replace(context, shipment_update=replace(context.shipment_update, payload=payload))
+
+
 @pytest.mark.critical
 def test_gate_holds_a_valid_reroute_for_human_approval_without_executing_it() -> None:
     """A fully compliant proposal is only made approval-pending and binds its $1,080 value."""
@@ -222,6 +229,33 @@ def test_gate_holds_a_valid_reroute_for_human_approval_without_executing_it() ->
     assert decision.estimated_value.currency == "USD"
     assert decision.candidate is not None
     assert decision.candidate.supplier_id == "supplier-z"
+
+
+@pytest.mark.critical
+@pytest.mark.scenario
+def test_newer_on_schedule_supplier_update_prevents_a_reroute() -> None:
+    """A stale delayed recommendation cannot override newer evidence that the PO will arrive in time."""
+    from enterprise_agent.application.gate import GateStatus, ScenarioAGate
+
+    context = _with_shipment_update_payload(
+        _context(),
+        {
+            "payload": {
+                "shipment_status": "on_schedule",
+                "expected_receipt_date": "2026-08-27",
+            }
+        },
+    )
+
+    decision = ScenarioAGate().evaluate(
+        context,
+        _recommendation(),
+        current_source_versions=context.source_versions,
+    )
+
+    assert decision.status is GateStatus.NO_ACTION
+    assert decision.approval_required is False
+    assert decision.candidate is None
 
 
 @pytest.mark.parametrize(

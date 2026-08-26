@@ -386,6 +386,33 @@ def test_scenario_a_seed_timeline_is_causally_consistent() -> None:
     assert required_quantity + safety_stock - available_quantity > 0
 
 
+@pytest.mark.scenario
+def test_scenario_a_seed_contains_a_cheaper_faster_but_unapproved_supplier_bait() -> None:
+    """The interview demo can visibly reject a supplier whose only disqualifier is approval."""
+    from enterprise_agent.seed import ID_PART_X, PLANT_CHICAGO, SEED_ROWS
+
+    bait = next(
+        row.values
+        for row in SEED_ROWS
+        if row.table == "suppliers" and row.values["supplier_code"] == "SUP-BAIT"
+    )
+
+    assert bait == {
+        "id": bait["id"],
+        "supplier_code": "SUP-BAIT",
+        "name": "Supplier Bait",
+        "part_id": ID_PART_X,
+        "plant_id": PLANT_CHICAGO,
+        "approved": False,
+        "lead_time_days": 1,
+        "unit_price": Decimal("4.00"),
+        "currency": "USD",
+        "source_version": 1,
+        "created_at": bait["created_at"],
+        "updated_at": bait["updated_at"],
+    }
+
+
 def test_reset_and_seed_execute_one_safe_transaction_each(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

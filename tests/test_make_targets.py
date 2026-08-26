@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-pytestmark = pytest.mark.contract
+pytestmark = [pytest.mark.contract, pytest.mark.integration]
 
 
 def run_make(*arguments: str) -> subprocess.CompletedProcess[str]:

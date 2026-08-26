@@ -38,6 +38,7 @@ markers = [
   "contract: external-command or configuration contract",
   "critical: focused safety regression required after behavior-changing tasks",
   "integration: integration test requiring a real service boundary",
+  "scenario: deterministic business-story regression using fixed-time fixtures",
   "unit: fast isolated behavior test",
 ]
 testpaths = ["tests"]
