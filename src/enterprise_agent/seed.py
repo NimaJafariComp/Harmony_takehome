@@ -190,6 +190,8 @@ SEED_ROWS = (
         _scope_row(ID_QUINN, scope)
         for scope in (
             "erp:lot:reallocate",
+            "production:notify",
+            "purchasing:shortage:notify",
             "quality:lot:read",
             "quality:read",
         )
@@ -306,6 +308,7 @@ SEED_ROWS = (
             "order_number": "4812",
             "part_id": ID_PART_X,
             "plant_id": PLANT_CHICAGO,
+            "supervisor_id": ID_PRIYA,
             "required_quantity": Decimal("100.000"),
             "start_date": DEMO_TUESDAY.date().replace(day=27),
             "status": "scheduled",
@@ -320,6 +323,7 @@ SEED_ROWS = (
             "order_number": "Q-7001",
             "part_id": ID_PART_QUALITY,
             "plant_id": PLANT_CHICAGO,
+            "supervisor_id": ID_PRIYA,
             "required_quantity": Decimal("80.000"),
             "start_date": DEMO_TUESDAY.date().replace(day=27),
             "status": "scheduled",
@@ -334,6 +338,7 @@ SEED_ROWS = (
             "order_number": "Q-7002",
             "part_id": ID_PART_QUALITY,
             "plant_id": PLANT_CHICAGO,
+            "supervisor_id": ID_PRIYA,
             "required_quantity": Decimal("200.000"),
             "start_date": DEMO_TUESDAY.date().replace(day=27),
             "status": "scheduled",
