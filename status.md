@@ -43,12 +43,12 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M8 - Optional Scenario C |
-| Current task | M8.1 - Prove required control-plane baseline |
+| Current task | M8.2 - Add bulletin model and deterministic seed |
 | Required task progress | 55 / 62 complete |
-| Optional task progress | 0 / 19 complete |
+| Optional task progress | 1 / 19 complete |
 | Acceptance criteria progress | 11 / 14 satisfied; 2 in progress |
 | Last validated commit | `6f793ad` |
-| Last completed-task push | `6f793ad` to `origin/main` |
+| Last completed-task push | M8.1 status completion recorded in this commit |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -147,7 +147,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M8.1 Prove required control-plane baseline | `not_started` | Optional prerequisite | Must pass `make verify`, the M7.11/M7.12 named Scenario A/B catalogue, recovery, scheduler, audit-only, and critical regressions before Scenario C starts. |
+| M8.1 Prove required control-plane baseline | `complete` | Optional prerequisite | Test: `tests/test_seed.py::test_scenario_a_seed_timeline_is_causally_consistent` - PASS; `uv run pytest -m scenario` - PASS (38 selected); `test_seeded_scenario_a_survives_to_tuesday_and_reconstructs_its_complete_audit_run`, durable scheduler-reclaim, audit-only, and PostgreSQL crash/restart regressions - PASS (4 focused).<br>Validation: `make test-critical` - PASS (51 selected) and `make verify` - PASS (454 tests, 91% coverage) from a clean worktree.<br>Evidence: the complete required control plane—fixed seed timing, current evidence, scoped planning/gates, approval routing, audit-only explanation, scheduler recovery, idempotent crash/restart, and critical safety suite—is green before Scenario C extension work.<br>Commit: status completion recorded in this commit and pushed to `origin/main`. |
 | M8.2 Add bulletin model and deterministic seed | `not_started` | Optional Scenario C | - |
 | M8.3 Add scoped knowledge provider, detector, and context | `not_started` | Optional Scenario C | - |
 | M8.4 Define constrained recommendation and hold tool | `not_started` | Optional Scenario C | - |
@@ -311,3 +311,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | Test-audit planning | Audited the required tests and planned the remaining semantic seed, messy-company scenario, deterministic-demo, and manual live-LLM evaluation work. | Validation: `make test-critical` - PASS (48 selected, 92.28s); four read-only test audits found strong existing safety coverage and the scoped M7.11/M7.12/M9.7 gaps. No application source or credentials changed. | Status recorded in this commit. |
 | 2026-08-26 | M7.11 | Corrected and semantically tested Scenario A's causal seed timeline. | Test: the new focused semantic timeline regression and repeatable PostgreSQL seed integration - PASS; `make verify` - PASS (428 tests, 91.16% coverage, clean migration, deterministic-demo target). | `cc3d550` RED, `9d88fac` seed correction, and `a976f01` final typed GREEN pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-26 | M7.12 | Completed deterministic messy-company story hardening. | Test: `uv run pytest -m scenario` - PASS (38 selected); `uv run pytest -m 'not integration'` - PASS (426 selected); `make verify` - PASS (454 tests, 91% coverage, clean migration). The named test-only catalogue links 15 fixed Scenario A/B stories to real behavior tests; it covers the unapproved bait supplier, current on-schedule update/no-write path, untrusted email, authority/approval routing, stale PO, crash/restart, Tuesday outcomes, full-only Quality cover, scoped purchasing denial, and released-hold freshness. | `4ab9b46` RED, `736fc8b` policy GREEN, and `6f793ad` regression coverage pushed to `origin/main`; status completion recorded in this commit. |
+| 2026-08-26 | M8.1 | Proved the required control-plane baseline before Scenario C. | Clean worktree: M7.11 causal timeline - PASS; M7.12 catalogue - PASS (38 selected); Scenario A audit-to-Tuesday, durable scheduler reclaim, audit-only ledger reconstruction, and PostgreSQL crash/restart - PASS (4 focused); `make test-critical` - PASS (51 selected); `make verify` - PASS (454 tests, 91% coverage). No source behavior or credentials changed. | Status completion recorded in this commit and pushed to `origin/main`. |
