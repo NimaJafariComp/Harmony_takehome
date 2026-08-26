@@ -93,6 +93,7 @@ class ScenarioBControlService:
             requested_at=requested_at,
             expires_at=expires_at,
             evidence_ids=tuple(item.evidence_id for item in context.evidence),
+            planner_outcome=recommendation.outcome,
             run_id=run_id,
         )
         workflow = self._workflow_state.stage_bounded_tool_plan(

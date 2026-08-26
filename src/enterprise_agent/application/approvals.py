@@ -172,6 +172,7 @@ class PlanApprovalService:
         requested_at: datetime,
         expires_at: datetime,
         evidence_ids: Sequence[EvidenceId] = (),
+        planner_outcome: str | None = None,
         run_id: RunId | None = None,
     ) -> PendingPlanApproval:
         """Persist any fresh gate-approved immutable plan through the shared approval boundary."""
@@ -185,6 +186,8 @@ class PlanApprovalService:
             raise PlanNotApprovableError(
                 "persisted plan hash does not match immutable plan content"
             )
+        if planner_outcome is not None and not planner_outcome.strip():
+            raise PlanNotApprovableError("planner outcome must be non-empty when provided")
 
         approval = Approval(
             approval_id=ApprovalId(str(uuid4())),
@@ -204,6 +207,7 @@ class PlanApprovalService:
                 approval=approval,
                 decision=decision,
                 evidence_ids=evidence_ids,
+                planner_outcome=planner_outcome,
                 run_id=run_id,
             )
         return PendingPlanApproval(plan=plan, approval=approval, gate_decision=decision)
@@ -373,6 +377,7 @@ def _record_pending_immutable_plan_audit(
     approval: Approval,
     decision: GateDecision,
     evidence_ids: Sequence[EvidenceId],
+    planner_outcome: str | None,
     run_id: RunId,
 ) -> None:
     """Record scenario-neutral planning, gate, and approval facts for one immutable plan."""
@@ -385,7 +390,10 @@ def _record_pending_immutable_plan_audit(
         attention_id=plan.attention_id,
         plan_id=plan.plan_id,
         evidence_ids=evidence_ids,
-        payload={"intent": plan.intent, "workflow_name": plan.workflow_name or "unknown"},
+        payload={
+            "outcome": planner_outcome or plan.intent,
+            "workflow_name": plan.workflow_name or "unknown",
+        },
         policy_version=plan.policy_version,
         plan_hash=plan.plan_hash,
     )
