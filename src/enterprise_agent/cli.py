@@ -52,7 +52,7 @@ from enterprise_agent.llm_setup import (
     save_llm_profile,
     verify_credential,
 )
-from enterprise_agent.llm_usage import render_llm_usage, summarize_llm_usage
+from enterprise_agent.llm_usage import LLMUsageSummary, render_llm_usage, summarize_llm_usage
 from enterprise_agent.presentation import (
     ApprovalSummary,
     CommandGuideEntry,
@@ -136,6 +136,14 @@ def harness(
 @app.command()
 def version() -> None:
     """Print the installed harness version."""
+    if _emit_json_result(
+        TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary="Installed harness version.",
+            data={"version": __version__},
+        )
+    ):
+        return
     typer.echo(f"enterprise-agent {__version__}")
 
 
@@ -145,9 +153,24 @@ def config_check() -> None:
     try:
         configuration = load_settings(_runtime_environment())
     except (ConfigurationError, ValueError) as error:
+        if _emit_json_result(_configuration_refusal(action="config check", error=error)):
+            raise typer.Exit(code=1) from error
         typer.echo(f"configuration: invalid ({error})", err=True)
         raise typer.Exit(code=1) from error
 
+    if _emit_json_result(
+        TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary="Runtime configuration is valid.",
+            data={
+                "profile": configuration.provider.profile,
+                "model": configuration.provider.model,
+                "database_configured": True,
+            },
+            next_actions=("enterprise-agent guide",),
+        )
+    ):
+        return
     typer.echo(configuration.safe_summary())
 
 
@@ -238,6 +261,21 @@ def llm_setup() -> None:
 @app.command()
 def run() -> None:
     """Bootstrap one configured LLM profile and direct the operator to explicit safe next steps."""
+    if _uses_json_output():
+        try:
+            configuration = load_provider_settings(_runtime_environment())
+        except (ConfigurationError, ValueError) as error:
+            _emit_json_result(_configuration_refusal(action="run", error=error))
+            raise typer.Exit(code=1) from error
+        _emit_json_result(
+            TerminalResult(
+                state=TerminalState.SUCCEEDED,
+                summary="LLM profile is ready.",
+                data={"profile": configuration.profile, "model": configuration.model},
+                next_actions=("enterprise-agent demo --list", "enterprise-agent llm-smoke"),
+            )
+        )
+        return
     try:
         configuration = _provider_configuration_or_setup(action="run")
     except InteractiveFlowCancelled:
@@ -256,12 +294,28 @@ def llm_smoke() -> None:
     try:
         configuration = load_provider_settings(_runtime_environment())
     except (ConfigurationError, ValueError) as error:
+        if _emit_json_result(_configuration_refusal(action="llm smoke", error=error)):
+            raise typer.Exit(code=1) from error
         typer.echo(f"configuration: llm smoke refused ({error})", err=True)
         raise typer.Exit(code=1) from error
 
     try:
         result = run_smoke(configuration)
     except ValueError as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="LLM smoke probe was refused.",
+                data={"profile": configuration.profile, "model": configuration.model},
+                next_actions=(
+                    "Review the configured profile, then retry enterprise-agent llm-smoke.",
+                ),
+                error=TerminalError(
+                    code="smoke_refused", message="The fixed probe could not start safely."
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
         typer.echo(f"llm-smoke: refused ({error})", err=True)
         raise typer.Exit(code=1) from error
 
@@ -269,6 +323,33 @@ def llm_smoke() -> None:
         f"llm-smoke: {result.status.value} "
         f"(profile: {configuration.profile}, model: {configuration.model}; no business data was sent)"
     )
+    if _uses_json_output():
+        _emit_json_result(
+            TerminalResult(
+                state=(TerminalState.SUCCEEDED if result.is_success else TerminalState.FAILED),
+                summary="LLM smoke probe completed."
+                if result.is_success
+                else "LLM smoke probe failed.",
+                data={
+                    "profile": configuration.profile,
+                    "model": configuration.model,
+                    "status": result.status.value,
+                    "business_data_sent": False,
+                },
+                next_actions=("enterprise-agent llm-setup",) if not result.is_success else (),
+                error=(
+                    None
+                    if result.is_success
+                    else TerminalError(
+                        code="smoke_failed",
+                        message="The fixed no-business-data probe did not complete successfully.",
+                    )
+                ),
+            )
+        )
+        if not result.is_success:
+            raise typer.Exit(code=1)
+        return
     if not result.is_success:
         typer.echo(message, err=True)
         raise typer.Exit(code=1)
@@ -278,13 +359,35 @@ def llm_smoke() -> None:
 @app.command(name="llm-usage")
 def llm_usage() -> None:
     """Summarize safe provider token and cost facts from the append-only audit ledger."""
-    events = PostgresAuditAdapter(_database_url(action="llm usage")).llm_usage_events()
-    typer.echo(render_llm_usage(summarize_llm_usage(events)))
+    try:
+        events = PostgresAuditAdapter(_database_url(action="llm usage")).llm_usage_events()
+    except SQLAlchemyError as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.FAILED,
+                summary="LLM usage ledger is unavailable.",
+                data={},
+                next_actions=("Run make demo first, then retry enterprise-agent llm-usage.",),
+                error=TerminalError(
+                    code="database_unavailable",
+                    message="The local database is unavailable.",
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
+        raise
+    summary = summarize_llm_usage(events)
+    if _uses_json_output():
+        _emit_json_result(_llm_usage_result(summary))
+        return
+    typer.echo(render_llm_usage(summary))
 
 
 @app.command()
 def reset() -> None:
     """Remove data from the strictly limited local demo database."""
+    if _uses_json_output():
+        _refuse_json_write(command="reset", summary="Reset requires interactive text confirmation.")
     database_url = _database_url()
     try:
         _confirm_local_write(
@@ -302,6 +405,18 @@ def reset() -> None:
     try:
         reset_database(database_url)
     except SeedSafetyError as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="Reset was refused by the local-demo safety guard.",
+                data={},
+                next_actions=("Check DATABASE_URL, then retry enterprise-agent reset.",),
+                error=TerminalError(
+                    code="local_demo_guard", message="The requested database is not allowed."
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
         typer.echo(f"database: reset refused ({error})", err=True)
         raise typer.Exit(code=1) from error
 
@@ -311,6 +426,8 @@ def reset() -> None:
 @app.command()
 def seed() -> None:
     """Insert the fixed dataset into the strictly limited local demo database."""
+    if _uses_json_output():
+        _refuse_json_write(command="seed", summary="Seed requires interactive text confirmation.")
     database_url = _database_url()
     try:
         _confirm_local_write(
@@ -328,6 +445,18 @@ def seed() -> None:
     try:
         seed_database(database_url)
     except SeedSafetyError as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="Seed was refused by the local-demo safety guard.",
+                data={},
+                next_actions=("Check DATABASE_URL, then retry enterprise-agent seed.",),
+                error=TerminalError(
+                    code="local_demo_guard", message="The requested database is not allowed."
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
         typer.echo(f"database: seed refused ({error})", err=True)
         raise typer.Exit(code=1) from error
 
@@ -337,6 +466,11 @@ def seed() -> None:
 @app.command(name="scenario-c")
 def scenario_c() -> None:
     """Stage the fixed local supplier-risk scenario for human review without any automatic write."""
+    if _uses_json_output():
+        _refuse_json_write(
+            command="scenario-c",
+            summary="Scenario C staging requires interactive text confirmation.",
+        )
     database_url = _database_url(action="scenario-c")
     try:
         _require_local_demo_database(database_url, allow_test_database=False)
@@ -400,6 +534,19 @@ def demo(
     """Reset, seed, and present selected local-only safety stories without a live LLM call."""
     if list_cases:
         if case or all_cases or unattended:
+            if _emit_json_result(
+                TerminalResult(
+                    state=TerminalState.REFUSED,
+                    summary="Guided demo list cannot be combined with selection or unattended mode.",
+                    data={},
+                    next_actions=("Run enterprise-agent demo --list by itself.",),
+                    error=TerminalError(
+                        code="invalid_arguments",
+                        message="The requested demo options cannot be combined.",
+                    ),
+                )
+            ):
+                raise typer.Exit(code=2)
             typer.echo("demo: --list cannot be combined with selection or --unattended", err=True)
             raise typer.Exit(code=2)
         if _emit_json_result(
@@ -416,6 +563,19 @@ def demo(
     try:
         selected = select_guided_demo_cases(tuple(case or ()), include_all=all_cases)
     except DemoCaseSelectionError as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="Guided demo selection was refused.",
+                data={},
+                next_actions=("Run enterprise-agent demo --list to choose a valid case.",),
+                error=TerminalError(
+                    code="invalid_demo_selection",
+                    message="The requested guided-demo case selection is not valid.",
+                ),
+            )
+        ):
+            raise typer.Exit(code=2) from error
         typer.echo(f"demo: refused ({error})", err=True)
         raise typer.Exit(code=2) from error
 
@@ -462,6 +622,19 @@ def demo(
     try:
         result = run_guided_demo(database_url, case_ids=tuple(item.case_id for item in selected))
     except (SeedSafetyError, ValueError) as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="Guided demo was refused by the local-demo safety guard.",
+                data={},
+                next_actions=("Check DATABASE_URL, then retry enterprise-agent demo.",),
+                error=TerminalError(
+                    code="local_demo_guard",
+                    message="The requested local demo operation cannot run against this database.",
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
         typer.echo(f"demo: refused ({error})", err=True)
         raise typer.Exit(code=1) from error
     if _uses_json_output():
@@ -761,9 +934,31 @@ def clock_advance(
         _require_local_demo_database(database_url, allow_test_database=False)
         advanced_to = PostgresDemoClock(database_url).advance(timedelta(hours=hours))
     except (DemoClockNotInitializedError, SeedSafetyError, ValueError) as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="Demo-clock advance was refused.",
+                data={"hours": hours},
+                next_actions=("Run make demo first, then retry the clock advance.",),
+                error=TerminalError(
+                    code="local_demo_guard",
+                    message="The requested clock operation cannot run against this local state.",
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
         typer.echo(f"clock: advance refused ({error})", err=True)
         raise typer.Exit(code=1) from error
 
+    if _emit_json_result(
+        TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary="Deterministic demo clock advanced.",
+            data={"hours": hours, "current_at": advanced_to.isoformat()},
+            next_actions=("enterprise-agent status",),
+        )
+    ):
+        return
     typer.echo(f"clock: advanced to {advanced_to.isoformat()}")
 
 
@@ -777,8 +972,30 @@ def audit_explain(
             PostgresAuditAdapter(_database_url(action="audit explain"))
         ).explain(RunId(run_id))
     except AuditExplanationError as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="Audit explanation was refused.",
+                data={"run_id": run_id},
+                next_actions=("Use enterprise-agent status to find a recorded audit run ID.",),
+                error=TerminalError(
+                    code="audit_run_unavailable",
+                    message="The requested audit run could not be reconstructed.",
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
         typer.echo(f"audit: explain refused ({error})", err=True)
         raise typer.Exit(code=1) from error
+    if _emit_json_result(
+        TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary="Audit explanation reconstructed from the immutable ledger.",
+            data={"run_id": run_id, "explanation": explanation.render()},
+            next_actions=("enterprise-agent status",),
+        )
+    ):
+        return
     typer.echo(explanation.render())
 
 
@@ -925,6 +1142,69 @@ def _output_options() -> OutputOptions:
 def _uses_json_output() -> bool:
     """Keep command semantics separate from the decision to serialize the final result."""
     return _output_options().mode is OutputMode.JSON
+
+
+def _configuration_refusal(*, action: str, error: Exception) -> TerminalResult:
+    """Return safe configuration guidance without serializing an exception or a credential value."""
+    del error
+    return TerminalResult(
+        state=TerminalState.REFUSED,
+        summary=f"{action.capitalize()} requires a valid local LLM configuration.",
+        data={},
+        next_actions=("Run enterprise-agent llm-setup in an interactive terminal.",),
+        error=TerminalError(
+            code="missing_configuration",
+            message="A required local profile setting is missing or invalid.",
+        ),
+    )
+
+
+def _llm_usage_result(summary: LLMUsageSummary) -> TerminalResult:
+    """Expose only normalized, immutable scalar metering in the standard result envelope."""
+    return TerminalResult(
+        state=TerminalState.SUCCEEDED,
+        summary="LLM usage reconstructed from the immutable audit ledger.",
+        data={
+            "lines": [
+                {
+                    "provider": line.provider,
+                    "model": line.model,
+                    "request_count": line.request_count,
+                    "input_tokens": line.input_tokens,
+                    "cached_input_tokens": line.cached_input_tokens,
+                    "output_tokens": line.output_tokens,
+                    "total_tokens": line.total_tokens,
+                    "cost_usd": str(line.cost_usd),
+                    "estimated_cost_usd": str(line.estimated_cost_usd),
+                    "provider_reported_cost_usd": str(line.provider_reported_cost_usd),
+                    "estimated_request_count": line.estimated_request_count,
+                    "provider_reported_request_count": line.provider_reported_request_count,
+                    "unknown_cost_request_count": line.unknown_cost_request_count,
+                    "unmetered_request_count": line.unmetered_request_count,
+                }
+                for line in summary.lines
+            ],
+            "total_cost_usd": str(summary.total_cost_usd),
+        },
+        next_actions=("enterprise-agent status",),
+    )
+
+
+def _refuse_json_write(*, command: str, summary: str) -> NoReturn:
+    """Keep confirmation-protected local writes explicit instead of silently skipping their receipt."""
+    _emit_json_result(
+        TerminalResult(
+            state=TerminalState.REFUSED,
+            summary=summary,
+            data={},
+            next_actions=(f"Run enterprise-agent {command} in an interactive terminal.",),
+            error=TerminalError(
+                code="interactive_confirmation_required",
+                message="No local data was written.",
+            ),
+        )
+    )
+    raise typer.Exit(code=1)
 
 
 def _emit_json_result(result: TerminalResult) -> bool:

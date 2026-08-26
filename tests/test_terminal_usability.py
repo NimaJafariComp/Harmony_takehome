@@ -304,3 +304,40 @@ def test_json_mode_envelopes_static_and_configured_read_commands(
         "next_actions": ["enterprise-agent guide"],
         "error": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("command", "summary"),
+    (
+        ("reset", "Reset requires interactive text confirmation."),
+        ("seed", "Seed requires interactive text confirmation."),
+        ("scenario-c", "Scenario C staging requires interactive text confirmation."),
+    ),
+)
+def test_json_confirmation_protected_writes_refuse_without_prompting(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    summary: str,
+) -> None:
+    """A serialized response never skips the interactive receipt required for a local write."""
+    monkeypatch.setattr(
+        "typer.prompt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("JSON write must not prompt")
+        ),
+    )
+
+    result = CliRunner().invoke(cli.app, ["--output", "json", command])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "status": "refused",
+        "summary": summary,
+        "data": {},
+        "next_actions": [f"Run enterprise-agent {command} in an interactive terminal."],
+        "error": {
+            "code": "interactive_confirmation_required",
+            "message": "No local data was written.",
+        },
+    }
