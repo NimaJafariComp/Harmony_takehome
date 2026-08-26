@@ -10,15 +10,17 @@ pytestmark = [pytest.mark.unit, pytest.mark.contract]
 
 
 @pytest.mark.critical
-def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local_assets() -> None:
+async def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local_assets() -> None:
     """A reviewer gets a useful local entry point without credentials, provider setup, or write controls."""
+    from httpx import ASGITransport, AsyncClient
+
     from enterprise_agent.web import create_app
-    from fastapi.testclient import TestClient
 
-    client = TestClient(create_app())
-
-    response = client.get("/")
-    stylesheet = client.get("/static/app.css")
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/")
+        stylesheet = await client.get("/static/app.css")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
@@ -32,12 +34,16 @@ def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local_asset
     assert "prefers-reduced-motion" in stylesheet.text
 
 
-def test_local_ui_health_is_database_free_and_says_what_is_safe_to_expect() -> None:
+async def test_local_ui_health_is_database_free_and_says_what_is_safe_to_expect() -> None:
     """Health checks prove only that the local presentation process is ready, never that business state exists."""
-    from enterprise_agent.web import create_app
-    from fastapi.testclient import TestClient
+    from httpx import ASGITransport, AsyncClient
 
-    response = TestClient(create_app()).get("/health")
+    from enterprise_agent.web import create_app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app()), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -75,7 +81,7 @@ def test_local_ui_main_binds_to_loopback_by_default(monkeypatch: pytest.MonkeyPa
     def fake_run(app: object, *, host: str, port: int) -> None:
         observed.update(app=app, host=host, port=port)
 
-    monkeypatch.setattr(web.uvicorn, "run", fake_run)
+    monkeypatch.setattr("enterprise_agent.web.uvicorn.run", fake_run)
 
     web.main()
 
