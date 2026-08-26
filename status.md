@@ -42,13 +42,13 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Field | Value |
 |---|---|
 | Overall status | `in_progress` |
-| Current milestone | M11 - Documentation, transcript, and final verification |
-| Current task | M11.1 - Write README |
+| Current milestone | M12 - Documentation, transcript, and final verification |
+| Current task | M12.1 - Write README |
 | Required task progress | 55 / 62 complete |
-| Optional task progress | 23 / 23 complete |
+| Optional task progress | 27 / 27 complete |
 | Acceptance criteria progress | 11 / 14 satisfied; 3 in progress |
-| Last validated commit | `e3e3179` |
-| Last completed-task push | M10.8-M10.10 interactive Demo lanes (`e3e3179`) |
+| Last validated commit | `b86595d` |
+| Last completed-task push | M11.1-M11.4 bounded terminal app shell (`b86595d`) |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -181,23 +181,32 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M10.9 Add live LLM evaluation lane | `complete` | Optional UI | Test: `tests/test_local_llm_evaluation.py` and `tests/test_web.py` - PASS (32 focused).<br>Validation: `make verify` - PASS (572 tests, 86.85% coverage); manual OpenAI fixed-synthetic no-write form evaluation - PASS (completion page with token and cost totals).<br>Evidence: Demo mode lists only complete locally configured profile/model labels and ten reviewed synthetic cases. One explicit profile/case confirmation constructs an in-memory-audit adapter, produces only scalar scorecard and usage facts, and cannot read or write database, ERP, mail, workflow, or audit state; credentials, prompts, and raw model text are never rendered or persisted. OpenRouter's free model was safely slow during a manual trial, so it remains available but is not the recommended live-demo choice.<br>Commit: `e3e3179` pushed to `origin/main`; status completion recorded in this commit. |
 | M10.10 Verify interactive demo safety and usability | `complete` | Optional UI | Test: `tests/test_local_guided_demo.py`, `tests/test_local_llm_evaluation.py`, and `tests/test_web.py` - PASS (32 focused), including strict-target refusal, persona/case validation, configured-profile filtering, exact four-POST route inventory, action-bound/cross-origin/replay CSRF rejection, and no-write scorecards.<br>Validation: `make verify` - PASS (572 tests, 86.85% coverage, clean migration, rebuilt container, and unattended `make demo`); manual rendered Demo-page inspection plus real local guided-form and OpenAI evaluation-form receipts - PASS.<br>Evidence: the keyboard-visible card/form layout explains each action, shows neither keys nor raw provider output, clears an action token after a successful reset or paid/free request, and keeps ordinary review navigation intact. No committed browser automation was added.<br>Commit: `e3e3179` pushed to `origin/main`; status completion recorded in this commit. |
 
-### M11 - Documentation, transcript, and final verification
+### M11 - Terminal app shell and bounded CLI interaction
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M11.1 Write README | `not_started` | AC-14 | - |
-| M11.2 Write `MODEL.md` | `not_started` | AC-02, AC-14 | - |
-| M11.3 Write `DESIGN.md` | `not_started` | AC-14 | - |
-| M11.4 Create recorded final transcript | `not_started` | AC-11, AC-14 | - |
-| M11.5 Finalize deterministic demo command | `not_started` | AC-14 | - |
-| M11.6 Run final validation suite | `not_started` | AC-01, AC-13, AC-14 | - |
-| M11.7 Review requirements coverage | `not_started` | AC-01 through AC-14 | - |
+| M11.1 Establish terminal app-shell contract | `complete` | Optional CLI HCI | Test: `tests/test_terminal_usability.py::test_default_tty_entry_starts_the_operator_shell` and `::test_default_noninteractive_entry_is_a_compact_guide_without_a_prompt` - PASS.<br>Evidence: the installed `enterprise-agent` executable opens a keyboard-only Home surface only in a TTY; JSON and piped invocations receive the stable non-prompt command directory, and all existing subcommands remain valid.<br>Commit: `b86595d` pushed to `origin/main`. |
+| M11.2 Render bounded operator views | `complete` | Optional CLI HCI | Test: `tests/test_terminal_presentation.py::test_presenter_renders_a_bounded_home_and_demo_catalogue`, `tests/test_cli.py::test_demo_list_is_read_only_and_discovers_the_guided_cases`, and `tests/test_llm_evaluation.py` terminal contracts - PASS.<br>Evidence: typed Panels and width-aware Tables/Cards replace the long demo/evaluation/usage prose while retaining case purpose, safety mode, full IDs, semantic states, and next actions without color dependence.<br>Commit: `b86595d` pushed to `origin/main`. |
+| M11.3 Add normal-operator shell routes | `complete` | Optional CLI HCI, AC-13 | Test: `tests/test_terminal_usability.py::test_application_shell_routes_keyboard_choices_to_demo_and_operator_modes` and `tests/test_llm_setup.py` - PASS.<br>Evidence: Home and Operator menus delegate only to existing demo, status, audit, usage, setup, smoke, and no-write-evaluation-list commands; no new provider, business-write, or confirmation bypass exists.<br>Commit: `b86595d` pushed to `origin/main`. |
+| M11.4 Verify shell compatibility and safety | `complete` | Optional CLI HCI, AC-14 | Test: focused terminal/CLI/LLM suite - PASS (75 tests).<br>Validation: `make verify` - PASS (577 tests, 86% total coverage, migrations, and unattended demo); `make demo` - PASS after container rebuild.<br>Evidence: no-color, JSON, piped output, keyboard navigation, hidden-key model selection, local-demo confirmation, and direct-command contracts remain covered without rendering raw credentials or provider payloads.<br>Commit: `b86595d` pushed to `origin/main`. |
+
+### M12 - Documentation, transcript, and final verification
+
+| Task | Status | Acceptance criteria | Evidence / commit |
+|---|---|---|---|
+| M12.1 Write README | `not_started` | AC-14 | - |
+| M12.2 Write `MODEL.md` | `not_started` | AC-02, AC-14 | - |
+| M12.3 Write `DESIGN.md` | `not_started` | AC-14 | - |
+| M12.4 Create recorded final transcript | `not_started` | AC-11, AC-14 | - |
+| M12.5 Finalize deterministic demo command | `not_started` | AC-14 | - |
+| M12.6 Run final validation suite | `not_started` | AC-01, AC-13, AC-14 | - |
+| M12.7 Review requirements coverage | `not_started` | AC-01 through AC-14 | - |
 
 ## Acceptance-criteria status
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, test-harness, and local reset/seed evidence are passing; final delivery verification remains M11. |
+| AC-01 Environment and validation | `in_progress` | Compose health, clean migration, command-target, test-harness, and local reset/seed evidence are passing; final delivery verification remains M12. |
 | AC-02 Seed model and edge cases | `complete` | The deterministic local-only seed contains both scenarios, roles/scopes, authorized mailboxes, a partial changed delayed PO, superseded/current shipment updates, eligibility traps, backup availability, quality coverage/no-coverage facts, and a cheaper/faster same-part/plant supplier that is explicitly unapproved. M7.11 semantically proves Scenario A's causal timeline; M7.12's fixed story catalogue proves the seed and controlled mutations behave safely under current evidence, hostile email content, capacity, scope, freshness, recovery, and Tuesday outcomes. |
 | AC-03 Provider authorization boundary | `complete` | Real PostgreSQL provider assertions prove Dana's authorized purchasing context is visible while Quinn cannot read purchasing ERP/mail/calendar data and Avery cannot read Dana's mailbox or calendar; providers additionally enforce actor context, scopes, plant visibility, record types, and record IDs. |
 | AC-04 Proactive detection and dedupe | `complete` | Unit and seeded PostgreSQL contracts prove the scoped detector emits only positive, source-version-bound stockout risks; canonical keys atomically deduplicate repeats and retain audit attempts. The M3.8 end-to-end test proves the duplicate Scenario A trigger reaches the same one pending approval. |
@@ -210,7 +219,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-11 Append-only audit reconstruction | `complete` | The PostgreSQL ledger enforces append-only controlled, sanitized, provenance-bound events and deterministic chronological reads. A strict `audit explain` uses only that ledger. M5.7 proves one fully correlated Scenario A run records authorized evidence, planner/gate/approval decisions, EOD routing, workflow and tool execution, durable task scheduling/firing, and Tuesday follow-up re-entry; the audit-only explanation reconstructs the result without live-system reads. |
 | AC-12 Scenario B free-form path | `complete` | M6.1-M6.6 prove the distinct quality actor can see only quality evidence, detects both imminent held-lot paths, and emits only typed bounded recommendations. The shared freshness/scope gate, immutable approval, dynamic catalog workflow, idempotent executor, compensation interface, and audit ledger control all Scenario B writes. The seeded M6.6 run proves Q-7002's 80-unit shortage path, Q-7001's approved reallocation/notification path, no ERP leakage, approval-before-write, crash/replay safety, and a ledger-only explanation that names each selected outcome. |
 | AC-13 Three-provider contract | `complete` | M7.1-M7.8 establish a five-state provider-neutral result contract, canonical shared-schema validation, secret/raw-response suppression, sanitized audit metadata, no profile fallback, secure local profile setup, mocked contracts, and no-business-data smoke commands. M7.8 updated OpenAI and Claude to send provider-compatible object-root structured schemas while retaining canonical validation, and it gives the selected OpenRouter free model its application-owned schema in a JSON-only prompt because no no-fallback endpoint currently honors response formats. M7.9 intersects each key's authenticated model list with the adapter-reviewed catalog before suggesting a model; no arbitrary visible provider model can become a suggestion. M7.10 tracks normalized token totals from successful and charged failed responses, preserves provider-reported cost when supplied, labels reviewed public-rate calculations as estimates, records only scalar metering in the append-only ledger, and gives operators a read-only grouped `enterprise-agent llm-usage` report. |
-| AC-14 Demo, documentation, and transcript | `in_progress` | M9.4 provides a local-only deterministic `enterprise-agent demo` and unattended Make target that visibly separates real pending-plan staging from fixed acceptance-case walkthroughs; final transcript and delivery documentation remain M11. |
+| AC-14 Demo, documentation, and transcript | `in_progress` | M9.4 provides a local-only deterministic `enterprise-agent demo` and unattended Make target that visibly separates real pending-plan staging from fixed acceptance-case walkthroughs; M11 adds a first-class interactive terminal Home/Demo flow, while final transcript and delivery documentation remain M12. |
 
 ## Activity log
 
@@ -338,3 +347,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | M10.8 | Added the explicit guided company-demo launcher. | Test: local guided-demo, local clock-control, and FastAPI contracts - PASS (32 focused); `make verify` - PASS (572 tests, 86.85% coverage, clean migration, rebuilt container, and unattended `make demo`); manual strict-target loopback form run - PASS. The Demo tab accepts only Dana's purchasing stories or Quinn's quality story, requires an explicit reset acknowledgement, rechecks the exact synthetic target immediately before invoking the shared deterministic runner, and returns only safe durable review links with no provider call or workflow effect. | `e3e3179` pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-26 | M10.9 | Added the explicit live LLM evaluation lane. | Test: local no-write-evaluation service and FastAPI contracts - PASS (32 focused); `make verify` - PASS (572 tests, 86.85% coverage); manual OpenAI synthetic no-write form evaluation - PASS with completion, token, and cost fields. The UI lists only complete configured profile/model labels and fixed synthetic cases, never a credential; it uses an in-memory-audit adapter and returns scalar checks only, with no database/ERP/mail/workflow/audit write. An OpenRouter free-model trial eventually returned safely but was slow, so it is available but not the recommended live demo profile. | `e3e3179` pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-26 | M10.10 | Verified interactive Demo safety and usability. | Test: guided, LLM-evaluation, and web contracts - PASS (32 focused), including strict-target/persona/profile validation, exact POST inventory, CSRF action binding, cross-origin denial, and one-time live-evaluation token behavior; `make verify` - PASS (572 tests, 86.85% coverage). The rendered Demo page exposed keyboard-visible scenario/persona and profile/case choices, and real loopback guided plus OpenAI evaluation submissions returned their constrained receipts without exposing credentials, prompts, raw responses, or business-system effects. | `e3e3179` pushed to `origin/main`; status completion recorded in this commit. |
+| 2026-08-26 | M11.1-M11.4 | Reworked the terminal into a bounded keyboard-first operator shell. | Test: 75 focused terminal, CLI, LLM-evaluation, and hidden-key setup contracts - PASS; format, lint, and strict MyPy - PASS; `make verify` - PASS (577 tests, 86% total coverage, migration, and unattended demo); container `make demo` - PASS after rebuild. The installed command now opens Home → Guided demo / Normal operator / LLM setup in a TTY, while non-TTY and JSON requests retain the safe command directory. Demo, evaluation, usage, and status output use typed bounded panels/tables or readable narrow cards; every menu action delegates to the pre-existing guarded command boundary. | `6e19e16` RED and `b86595d` GREEN pushed to `origin/main`; status completion recorded in the next status commit. |
