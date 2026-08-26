@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+from collections.abc import Mapping
+from os import environ
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -62,6 +64,8 @@ from enterprise_agent.local_review_composition import (
 
 LOCAL_UI_HOST = "127.0.0.1"
 LOCAL_UI_PORT = 8080
+_CONTAINER_UI_HOST = "0.0.0.0"
+_UI_BIND_HOST_SETTING = "ENTERPRISE_AGENT_UI_BIND_HOST"
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 _TEMPLATES = Jinja2Templates(directory=_PACKAGE_ROOT / "templates")
 _CSRF_COOKIE_NAME = "enterprise_agent_local_csrf"
@@ -650,9 +654,18 @@ def main() -> None:
             guided_demo_service=create_local_guided_demo_service(),
             llm_evaluation_service=create_local_llm_evaluation_service(),
         ),
-        host=LOCAL_UI_HOST,
+        host=_ui_bind_host(),
         port=LOCAL_UI_PORT,
     )
+
+
+def _ui_bind_host(environment: Mapping[str, str] | None = None) -> str:
+    """Allow only the Compose bridge bind override; local launches stay loopback-only."""
+    values = environ if environment is None else environment
+    requested_host = values.get(_UI_BIND_HOST_SETTING, LOCAL_UI_HOST).strip()
+    if requested_host == _CONTAINER_UI_HOST:
+        return _CONTAINER_UI_HOST
+    return LOCAL_UI_HOST
 
 
 def _csrf_token(

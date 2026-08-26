@@ -13,6 +13,24 @@ services:
     profiles:
       - tools
 
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: enterprise-agent-ui
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent
+      ENTERPRISE_AGENT_UI_BIND_HOST: 0.0.0.0
+    networks:
+      - agent_backend
+    ports:
+      - 127.0.0.1:8080:8080
+    profiles:
+      - tools
+
   db:
     image: postgres:16-alpine
     environment:

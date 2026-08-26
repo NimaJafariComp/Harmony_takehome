@@ -1109,3 +1109,12 @@ def test_local_ui_main_binds_to_loopback_by_default(monkeypatch: pytest.MonkeyPa
     assert observed["app"] is not web.app
     assert observed["host"] == "127.0.0.1"
     assert observed["port"] == 8080
+
+
+def test_local_ui_accepts_only_the_compose_bridge_bind_override() -> None:
+    """The container may bridge to a loopback-published host port, but no other bind is accepted."""
+    from enterprise_agent.web import _ui_bind_host
+
+    assert _ui_bind_host({}) == "127.0.0.1"
+    assert _ui_bind_host({"ENTERPRISE_AGENT_UI_BIND_HOST": "0.0.0.0"}) == "0.0.0.0"
+    assert _ui_bind_host({"ENTERPRISE_AGENT_UI_BIND_HOST": "203.0.113.8"}) == "127.0.0.1"
