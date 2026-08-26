@@ -43,12 +43,12 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M8 - Optional Scenario C |
-| Current task | M8.2 - Add bulletin model and deterministic seed |
+| Current task | M8.3 - Add scoped knowledge provider, detector, and context |
 | Required task progress | 55 / 62 complete |
-| Optional task progress | 1 / 19 complete |
+| Optional task progress | 2 / 19 complete |
 | Acceptance criteria progress | 11 / 14 satisfied; 2 in progress |
-| Last validated commit | `6f793ad` |
-| Last completed-task push | M8.1 status completion recorded in this commit |
+| Last validated commit | `54e3b4f` |
+| Last completed-task push | M8.2 status completion recorded in this commit |
 | Blocking issue | None |
 
 ## Delivery task register
@@ -148,7 +148,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
 | M8.1 Prove required control-plane baseline | `complete` | Optional prerequisite | Test: `tests/test_seed.py::test_scenario_a_seed_timeline_is_causally_consistent` - PASS; `uv run pytest -m scenario` - PASS (38 selected); `test_seeded_scenario_a_survives_to_tuesday_and_reconstructs_its_complete_audit_run`, durable scheduler-reclaim, audit-only, and PostgreSQL crash/restart regressions - PASS (4 focused).<br>Validation: `make test-critical` - PASS (51 selected) and `make verify` - PASS (454 tests, 91% coverage) from a clean worktree.<br>Evidence: the complete required control plane—fixed seed timing, current evidence, scoped planning/gates, approval routing, audit-only explanation, scheduler recovery, idempotent crash/restart, and critical safety suite—is green before Scenario C extension work.<br>Commit: status completion recorded in this commit and pushed to `origin/main`. |
-| M8.2 Add bulletin model and deterministic seed | `not_started` | Optional Scenario C | - |
+| M8.2 Add bulletin model and deterministic seed | `complete` | Optional Scenario C | Test: `tests/test_seed.py`, `tests/test_schema_migration.py`, `tests/test_ports.py`, and `tests/test_safe_planning.py` - PASS (11 focused).<br>Validation: `make verify` - PASS (455 tests, 91% coverage).<br>Evidence: migration `20260826_0011` adds a versioned supplier/plant-scoped bulletin table with active/superseded/inactive status, positive source version, stable unique source identity, and explicit successor lineage. The deterministic seed adds a current Supplier W bulletin, its superseded version, an inactive unrelated bulletin, one correlated open PO and production demand, and the Dana-only knowledge-read scope; the new `KnowledgePort` preserves the existing scoped-evidence boundary. No provider, detector, planner, workflow, or write tool exists yet.<br>Commits: `9ddde0a` RED and `54e3b4f` GREEN pushed to `origin/main`. |
 | M8.3 Add scoped knowledge provider, detector, and context | `not_started` | Optional Scenario C | - |
 | M8.4 Define constrained recommendation and hold tool | `not_started` | Optional Scenario C | - |
 | M8.5 Execute through existing durable control plane | `not_started` | Optional Scenario C | - |
@@ -312,3 +312,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-26 | M7.11 | Corrected and semantically tested Scenario A's causal seed timeline. | Test: the new focused semantic timeline regression and repeatable PostgreSQL seed integration - PASS; `make verify` - PASS (428 tests, 91.16% coverage, clean migration, deterministic-demo target). | `cc3d550` RED, `9d88fac` seed correction, and `a976f01` final typed GREEN pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-26 | M7.12 | Completed deterministic messy-company story hardening. | Test: `uv run pytest -m scenario` - PASS (38 selected); `uv run pytest -m 'not integration'` - PASS (426 selected); `make verify` - PASS (454 tests, 91% coverage, clean migration). The named test-only catalogue links 15 fixed Scenario A/B stories to real behavior tests; it covers the unapproved bait supplier, current on-schedule update/no-write path, untrusted email, authority/approval routing, stale PO, crash/restart, Tuesday outcomes, full-only Quality cover, scoped purchasing denial, and released-hold freshness. | `4ab9b46` RED, `736fc8b` policy GREEN, and `6f793ad` regression coverage pushed to `origin/main`; status completion recorded in this commit. |
 | 2026-08-26 | M8.1 | Proved the required control-plane baseline before Scenario C. | Clean worktree: M7.11 causal timeline - PASS; M7.12 catalogue - PASS (38 selected); Scenario A audit-to-Tuesday, durable scheduler reclaim, audit-only ledger reconstruction, and PostgreSQL crash/restart - PASS (4 focused); `make test-critical` - PASS (51 selected); `make verify` - PASS (454 tests, 91% coverage). No source behavior or credentials changed. | Status completion recorded in this commit and pushed to `origin/main`. |
+| 2026-08-26 | M8.2 | Added the minimal versioned Scenario C bulletin model and deterministic seed. | Test: migration, seed, port, and seeded Scenario A contracts - PASS (11 focused); `make verify` - PASS (455 tests, 91% coverage, clean migration). One Supplier W active bulletin correlates through existing supplier/plant facts to its own open PO and future production order; one version is superseded, one unrelated bulletin is inactive, Dana alone has the knowledge-read scope, and no Scenario C runtime behavior was introduced. | `9ddde0a` RED and `54e3b4f` GREEN pushed to `origin/main`; status completion recorded in this commit. |
