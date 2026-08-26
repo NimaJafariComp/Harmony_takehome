@@ -40,8 +40,8 @@ def test_curated_model_catalog_has_only_supported_profiles_and_recommended_defau
 
     assert set(CURATED_MODEL_CATALOG) == {"claude", "openai", "openrouter"}
     assert [model.model_id for model in curated_models_for("openai")] == [
-        "gpt-5.6-luna",
         "gpt-5.6-terra",
+        "gpt-5.6-luna",
     ]
     assert curated_models_for("openai")[0].recommended is True
     assert curated_models_for("claude")[0].model_id == "claude-sonnet-5"
@@ -54,7 +54,7 @@ def test_curated_model_catalog_has_only_supported_profiles_and_recommended_defau
         (
             "openai",
             {"data": [{"id": "gpt-5.6-luna"}, {"id": "gpt-5.6-terra"}, {"id": "other"}]},
-            ("gpt-5.6-luna", "gpt-5.6-terra"),
+            ("gpt-5.6-terra", "gpt-5.6-luna"),
             "https://api.openai.com/v1/models",
         ),
         (
@@ -340,7 +340,7 @@ def test_run_interactively_creates_a_hidden_key_profile_with_the_recommended_mod
     assert prompt_calls[1] == ("Openai API key", True)
     assert "interactive-openai-key" not in result.output
     assert "LLM_PROFILE=openai" in env_path.read_text(encoding="utf-8")
-    assert "OPENAI_MODEL=gpt-5.6-luna" in env_path.read_text(encoding="utf-8")
+    assert "OPENAI_MODEL=gpt-5.6-terra" in env_path.read_text(encoding="utf-8")
     assert env_path.stat().st_mode & 0o777 == 0o600
     assert "enterprise-agent demo --list" in result.stdout
     assert "not available until M8" not in result.stdout
@@ -365,7 +365,7 @@ def test_interactive_setup_displays_only_key_accessible_adapter_reviewed_models(
         lambda profile, api_key: (
             CuratedModel(
                 model_id="gpt-5.6-terra",
-                label="GPT-5.6 Terra — more capable",
+                label="GPT-5.6 Terra — balanced production default",
                 recommended=True,
             ),
         ),
@@ -375,7 +375,7 @@ def test_interactive_setup_displays_only_key_accessible_adapter_reviewed_models(
 
     assert result.exit_code == 0
     assert "Adapter-compatible models visible to this key" in result.stdout
-    assert "GPT-5.6 Terra — more capable: gpt-5.6-terra" in result.stdout
+    assert "GPT-5.6 Terra — balanced production default: gpt-5.6-terra" in result.stdout
     assert "Recommendation: Recommended" in result.stdout
     assert "gpt-5.6-luna" not in result.stdout
     assert "interactive-openai-key" not in result.output

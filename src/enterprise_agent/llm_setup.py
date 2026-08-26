@@ -46,13 +46,13 @@ CURATED_MODEL_CATALOG: Mapping[str, tuple[CuratedModel, ...]] = MappingProxyType
     {
         "openai": (
             CuratedModel(
-                model_id="gpt-5.6-luna",
-                label="GPT-5.6 Luna — cost-efficient",
+                model_id="gpt-5.6-terra",
+                label="GPT-5.6 Terra — balanced production default",
                 recommended=True,
             ),
             CuratedModel(
-                model_id="gpt-5.6-terra",
-                label="GPT-5.6 Terra — more capable",
+                model_id="gpt-5.6-luna",
+                label="GPT-5.6 Luna — cost-efficient",
             ),
         ),
         "claude": (

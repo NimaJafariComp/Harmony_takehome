@@ -112,7 +112,7 @@ The reviewed default models are:
 
 | Profile | Environment names | Reviewed default |
 |---|---|---|
-| OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL` | `gpt-5.6-luna` |
+| OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL` | `gpt-5.6-terra` |
 | Claude | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | `claude-sonnet-5` |
 | OpenRouter | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | `nvidia/nemotron-3-ultra-550b-a55b:free` |
 

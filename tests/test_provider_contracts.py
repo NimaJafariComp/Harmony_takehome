@@ -194,7 +194,7 @@ PROVIDER_CONTRACTS = (
     ProviderContract(
         profile="openai",
         provider="openai",
-        model="gpt-5.6-luna",
+        model="gpt-5.6-terra",
         create_adapter=_openai_adapter,
         completed_response=_openai_response,
         malformed_response={"status": "completed", "output": []},
