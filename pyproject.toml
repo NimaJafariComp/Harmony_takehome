@@ -15,6 +15,7 @@ dependencies = [
   "alembic>=1.14,<2",
   "pydantic>=2.10,<3",
   "psycopg[binary]>=3.2,<4",
+  "rich>=15,<16",
   "sqlalchemy>=2.0,<3",
   "typer>=0.15,<1",
 ]
