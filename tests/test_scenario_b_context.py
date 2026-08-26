@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -295,6 +296,146 @@ def test_context_fails_closed_when_the_quality_provider_cannot_name_a_supervisor
             attention=attention(signal),
             trigger=signal,
         )
+
+
+@pytest.mark.critical
+def test_quality_control_reuses_pending_approval_and_dynamic_tool_workflow_bound_to_context() -> None:
+    """A covered quality proposal becomes a reviewed two-tool plan before either effect can run."""
+    from enterprise_agent.application.approvals import ScenarioAApprovalService
+    from enterprise_agent.application.planning import ReallocateAndNotifyRecommendation
+    from enterprise_agent.application.scenario_b_control import ScenarioBControlService
+    from enterprise_agent.application.workflow_state import WorkflowStateService
+    from enterprise_agent.application.tools import NotifyProductionInput, ReallocateLotInput
+    from enterprise_agent.domain import WorkflowId
+
+    signal = trigger()
+    quality = RecordingQualityProvider(
+        (held_lot(), released_lot(), allocation(), production_impact())
+    )
+    context = ScenarioBContextAssembler(RecordingIdentity(), quality).assemble(
+        user_id=QUINN.user_id,
+        attention=attention(signal),
+        trigger=signal,
+    )
+    writable_context = replace(
+        context,
+        actor=replace(
+            context.actor,
+            scopes=context.actor.scopes
+            | frozenset({Scope("erp:lot:write"), Scope("production:notify")}),
+        ),
+    )
+    recommendation = ReallocateAndNotifyRecommendation(
+        outcome="REALLOCATE_AND_NOTIFY",
+        reallocate_lot=ReallocateLotInput(
+            quality_lot_id="lot-good",
+            to_production_order_id="production-q7001",
+            quantity=Decimal(80),
+        ),
+        notify_production=NotifyProductionInput(
+            production_order_id="production-q7001",
+            message="Released replacement lot will cover the held allocation.",
+        ),
+        rationale="The released lot can cover all affected material.",
+    )
+    approval_store = MagicMock()
+    workflow_store = MagicMock()
+    audit = RecordingAudit()
+    control = ScenarioBControlService(
+        approvals=ScenarioAApprovalService(approval_store, audit=audit),
+        workflow_state=WorkflowStateService(workflow_store),
+    )
+
+    result = control.request_pending(
+        context=writable_context,
+        recommendation=recommendation,
+        current_source_versions=writable_context.source_versions,
+        policy_version="scenario_b_policy:v1",
+        requested_at=NOW,
+        expires_at=NOW.replace(hour=13),
+        run_id=RunId("run-quality-control"),
+        workflow_id=WorkflowId("00000000-0000-0000-0000-000000000951"),
+    )
+
+    plan, approval = approval_store.create_pending.call_args.args
+    staged = workflow_store.create.call_args.args[0]
+    assert result.pending.plan == plan
+    assert result.pending.approval == approval
+    assert plan.actor_id == writable_context.actor.user_id
+    assert plan.approver_id == writable_context.production_supervisor_id
+    assert plan.intent == "bounded_tool_plan"
+    assert plan.workflow_name == "bounded_tool_plan"
+    assert plan.workflow_version == 1
+    assert approval.plan_hash == plan.plan_hash
+    assert staged.workflow.workflow_id == WorkflowId("00000000-0000-0000-0000-000000000951")
+    assert [step.tool_name for step in staged.steps] == ["reallocate_lot", "notify_production"]
+    assert staged.steps[0].input["tool_input"] == {
+        "quality_lot_id": "lot-good",
+        "from_production_order_id": None,
+        "to_production_order_id": "production-q7001",
+        "quantity": "80",
+    }
+    assert [event.event_type for event in audit.events] == [
+        "planner.recommended",
+        "gate.allowed",
+        "approval.requested",
+    ]
+
+
+@pytest.mark.critical
+def test_quality_control_denies_stale_context_without_creating_an_approval_or_workflow() -> None:
+    """A stale evidence version must stop Scenario B before it can enter the shared write path."""
+    from enterprise_agent.application.approvals import ScenarioAApprovalService
+    from enterprise_agent.application.planning import FlagShortageToPurchasingRecommendation
+    from enterprise_agent.application.scenario_b_control import (
+        ScenarioBControlRejectedError,
+        ScenarioBControlService,
+    )
+    from enterprise_agent.application.tools import FlagShortageToPurchasingInput
+    from enterprise_agent.application.workflow_state import WorkflowStateService
+
+    signal = trigger()
+    context = ScenarioBContextAssembler(
+        RecordingIdentity(),
+        RecordingQualityProvider((held_lot(), released_lot(), allocation(), production_impact())),
+    ).assemble(user_id=QUINN.user_id, attention=attention(signal), trigger=signal)
+    writable_context = replace(
+        context,
+        actor=replace(
+            context.actor,
+            scopes=context.actor.scopes | frozenset({Scope("production:notify")}),
+        ),
+    )
+    approval_store = MagicMock()
+    workflow_store = MagicMock()
+    control = ScenarioBControlService(
+        approvals=ScenarioAApprovalService(approval_store),
+        workflow_state=WorkflowStateService(workflow_store),
+    )
+
+    with pytest.raises(ScenarioBControlRejectedError, match="stale"):
+        control.request_pending(
+            context=writable_context,
+            recommendation=FlagShortageToPurchasingRecommendation(
+                outcome="FLAG_SHORTAGE_TO_PURCHASING",
+                shortage=FlagShortageToPurchasingInput(
+                    production_order_id="production-q7001",
+                    part_id="part-quality",
+                    shortage_quantity=Decimal(80),
+                ),
+                rationale="No released lot can cover the requirement.",
+            ),
+            current_source_versions={
+                **writable_context.source_versions,
+                "quality:quality_lot:lot-held": 4,
+            },
+            policy_version="scenario_b_policy:v1",
+            requested_at=NOW,
+            expires_at=NOW.replace(hour=13),
+        )
+
+    approval_store.create_pending.assert_not_called()
+    workflow_store.create.assert_not_called()
 
 
 def compose(*arguments: str) -> subprocess.CompletedProcess[str]:
