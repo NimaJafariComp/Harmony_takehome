@@ -47,6 +47,102 @@ def test_curated_model_catalog_has_only_supported_profiles_and_recommended_defau
     assert curated_models_for("openrouter")[0].model_id == "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 
+@pytest.mark.parametrize(
+    ("profile", "response_data", "expected_models", "expected_url"),
+    (
+        (
+            "openai",
+            {"data": [{"id": "gpt-5.6-luna"}, {"id": "gpt-5.6-terra"}, {"id": "other"}]},
+            ("gpt-5.6-luna", "gpt-5.6-terra"),
+            "https://api.openai.com/v1/models",
+        ),
+        (
+            "claude",
+            {
+                "data": [
+                    {
+                        "id": "claude-sonnet-5",
+                        "capabilities": {"structured_outputs": {"supported": True}},
+                    },
+                    {"id": "other"},
+                ]
+            },
+            ("claude-sonnet-5",),
+            "https://api.anthropic.com/v1/models?limit=1000",
+        ),
+        (
+            "openrouter",
+            {
+                "data": [
+                    {"id": "nvidia/nemotron-3-ultra-550b-a55b:free"},
+                    {"id": "other"},
+                ]
+            },
+            ("nvidia/nemotron-3-ultra-550b-a55b:free",),
+            "https://openrouter.ai/api/v1/models",
+        ),
+    ),
+)
+def test_live_model_discovery_intersects_account_visible_models_with_adapter_reviewed_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    profile: str,
+    response_data: dict[str, object],
+    expected_models: tuple[str, ...],
+    expected_url: str,
+) -> None:
+    """The setup menu can suggest only models both listed for the key and covered by an adapter contract."""
+    import json
+
+    from enterprise_agent import llm_setup
+
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = json.dumps(response_data).encode("utf-8")
+    captured: dict[str, Request] = {}
+
+    def fake_urlopen(request: Request, *, timeout: float) -> MagicMock:
+        captured["request"] = request
+        assert timeout == 3.5
+        return response
+
+    monkeypatch.setattr(llm_setup, "urlopen", fake_urlopen)
+
+    models = llm_setup.discover_compatible_models(profile, "discovery-key", timeout_seconds=3.5)
+
+    assert [model.model_id for model in models] == list(expected_models)
+    assert models[0].recommended is True
+    assert captured["request"].full_url == expected_url
+    assert captured["request"].get_method() == "GET"
+    assert captured["request"].get_header("Authorization") == "Bearer discovery-key"
+
+
+def test_live_model_discovery_refuses_to_suggest_unreviewed_or_unsupported_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No provider-list entry becomes a suggestion merely because a key can see it."""
+    import json
+
+    from enterprise_agent import llm_setup
+
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = json.dumps(
+        {
+            "data": [
+                {
+                    "id": "claude-sonnet-5",
+                    "capabilities": {"structured_outputs": {"supported": False}},
+                },
+                {"id": "unreviewed-model"},
+            ]
+        }
+    ).encode("utf-8")
+    monkeypatch.setattr(llm_setup, "urlopen", lambda *_args, **_kwargs: response)
+
+    with pytest.raises(llm_setup.ModelDiscoveryError, match="no adapter-reviewed models"):
+        llm_setup.discover_compatible_models("claude", "discovery-key")
+
+
 def test_save_llm_profile_merges_existing_provider_profiles_atomically_and_owner_only(
     tmp_path: Path,
 ) -> None:
@@ -237,6 +333,41 @@ def test_run_interactively_creates_a_hidden_key_profile_with_the_recommended_mod
     assert "LLM_PROFILE=openai" in env_path.read_text(encoding="utf-8")
     assert "OPENAI_MODEL=gpt-5.6-luna" in env_path.read_text(encoding="utf-8")
     assert env_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_interactive_setup_displays_only_key_accessible_adapter_reviewed_models(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The menu displays a recommendation only after the selected key's metadata list confirms access."""
+    from enterprise_agent.llm_setup import CuratedModel
+
+    clear_llm_environment(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    prompts = iter(("openai", "interactive-openai-key", "1"))
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(typer, "prompt", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(typer, "confirm", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        cli,
+        "discover_compatible_models",
+        lambda profile, api_key: (
+            CuratedModel(
+                model_id="gpt-5.6-terra",
+                label="GPT-5.6 Terra — more capable",
+                recommended=True,
+            ),
+        ),
+    )
+
+    result = CliRunner().invoke(cli.app, ["llm-setup"])
+
+    assert result.exit_code == 0
+    assert "Available adapter-compatible models for this key:" in result.stdout
+    assert "gpt-5.6-terra (recommended)" in result.stdout
+    assert "gpt-5.6-luna" not in result.stdout
+    assert "interactive-openai-key" not in result.output
+    assert "OPENAI_MODEL=gpt-5.6-terra" in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
 def test_explicit_setup_verifies_only_the_selected_provider_and_allows_a_custom_model(
