@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M6 - Scenario B and bounded free-form execution |
-| Current task | M6.1 - Add quality-lot data and quality actor |
-| Required task progress | 37 / 58 complete |
+| Current task | M6.2 - Implement quality detector and context |
+| Required task progress | 38 / 58 complete |
 | Acceptance criteria progress | 9 / 14 satisfied; 3 in progress |
-| Last validated commit | `e5922a6` |
-| Last completed-task push | `e5922a6` to `origin/main` |
+| Last validated commit | `9c39e23` |
+| Last completed-task push | `9c39e23` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -118,7 +118,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 
 | Task | Status | Acceptance criteria | Evidence / commit |
 |---|---|---|---|
-| M6.1 Add quality-lot data and quality actor | `in_progress` | AC-02, AC-12 | TDD contract for held/allocated and released/no-coverage lots, three-day production impact, production-supervisor ownership, and quality-only actor scopes is being added. |
+| M6.1 Add quality-lot data and quality actor | `complete` | AC-02, AC-12 | Test: `tests/test_schema_migration.py`, `tests/test_seed.py`, and `tests/test_migrations.py` - PASS (7 focused integration tests).<br>Validation: `make verify` - PASS (261 tests, 93.62% coverage, clean migration).<br>Evidence: seeded Q-7001/Q-7002 each begin in three days and are bound to Priya; their held allocations exercise both 80-unit released-lot coverage and 200-unit no-coverage. Quinn has only quality action/notification scopes, explicitly excluding purchasing reads and PO writes.<br>Commit: `9c39e23` pushed to `origin/main`. |
 | M6.2 Implement quality detector and context | `not_started` | AC-12 | - |
 | M6.3 Define Scenario B proposal schemas | `not_started` | AC-12 | - |
 | M6.4 Implement Scenario B tools | `not_started` | AC-06, AC-09, AC-12 | - |
@@ -165,7 +165,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | AC-09 Idempotency, compensation, and recovery | `complete` | The closed catalog derives opaque stable effect and compensation keys. PostgreSQL journals independently committed effects for replay; M4.7 proves an injected post-replacement crash resumes its started step with exactly one replacement PO, while M4.6 proves only completed effects compensate in reverse order. |
 | AC-10 Durable scheduler and Tuesday loop | `complete` | M4.5 creates an idempotent Tuesday 09:00 `arrival_check` task bound to replacement PO, original attention, and actor. M5.1 persists business time; M5.2 atomically leases due work, reclaims expired claims, and fences stale completion. M5.4 proves a live lease reads only scoped current PO receipt evidence: full receipt resolves the original attention, while partial/missing receipt creates exactly one source-version-specific causal follow-up and re-enters the loop. |
 | AC-11 Append-only audit reconstruction | `complete` | The PostgreSQL ledger enforces append-only controlled, sanitized, provenance-bound events and deterministic chronological reads. A strict `audit explain` uses only that ledger. M5.7 proves one fully correlated Scenario A run records authorized evidence, planner/gate/approval decisions, EOD routing, workflow and tool execution, durable task scheduling/firing, and Tuesday follow-up re-entry; the audit-only explanation reconstructs the result without live-system reads. |
-| AC-12 Scenario B free-form path | `in_progress` | The reusable scoped-provider, planner, audit, and scheduler boundaries are established; Scenario B behavior remains M6. |
+| AC-12 Scenario B free-form path | `in_progress` | The reusable scoped-provider, planner, audit, and scheduler boundaries are established. M6.1 now supplies a quality manager with isolated scopes, explicitly supervised held allocations, an 80-unit released alternative, and a 200-unit no-coverage path; detector, proposal, tool, and control-plane execution remain M6. |
 | AC-13 Three-provider contract | `not_started` | - |
 | AC-14 Demo, documentation, and transcript | `not_started` | - |
 
@@ -249,3 +249,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M5.7 | Started timing and audit-completeness implementation. | Test: the seeded path must retain one run ID through EOD routing, workflow effects, the durable Tuesday task, re-entry, and `audit explain`; existing critical contracts retain backup-routing conditions, task reclaim, and Tuesday resolution proof. | Pending RED checkpoint. |
 | 2026-08-25 | M5.7 | Completed timing and audit-completeness behavior. | Test: one seeded cross-boundary Scenario A ledger plus direct context/approval/routing/arrival/executor/state/tool contracts - PASS (110 focused); `make verify` - PASS (261 tests, 93.62% coverage, clean migration). | `e5922a6` pushed to `origin/main`; status completion pending this commit. |
 | 2026-08-25 | M6.1 | Started quality-lot data and quality-actor implementation. | Test: held/allocated and released/no-coverage data, three-day production impact, supervisor ownership, and quality-only scope isolation are being added before the migration and seed changes. | Pending RED checkpoint. |
+| 2026-08-25 | M6.1 | Completed quality-lot data and quality-actor implementation. | Test: schema/seed/migration contracts - PASS (7 focused); `make verify` - PASS (261 tests, 93.62% coverage, clean migration). | `30cbfb5` RED and `9c39e23` GREEN pushed to `origin/main`; status completion pending this commit. |
