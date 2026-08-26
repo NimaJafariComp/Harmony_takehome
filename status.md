@@ -43,11 +43,11 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 |---|---|
 | Overall status | `in_progress` |
 | Current milestone | M4 - Declared workflow, idempotent tools, and crash recovery |
-| Current task | M4.7 - Add crash injection |
-| Required task progress | 28 / 58 complete |
+| Current task | M4.8 - Test workflow invariants |
+| Required task progress | 29 / 58 complete |
 | Acceptance criteria progress | 4 / 14 satisfied; 8 in progress |
-| Last validated commit | `6a0ae64` |
-| Last completed-task push | `6a0ae64` to `origin/main` |
+| Last validated commit | `98546f1` |
+| Last completed-task push | `98546f1` to `origin/main` |
 | Blocking issue | None |
 
 ## Required task register
@@ -99,7 +99,7 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | M4.4 Implement workflow executor | `complete` | AC-06, AC-08, AC-09 | Test: `tests/test_workflow_executor.py` - PASS (16; executor 100% direct branch coverage), plus workflow-state and approval-adapter contracts - PASS.<br>Validation: `make test-critical` - PASS (19 selected); `make verify` - PASS (129 tests, 96.78% coverage, clean migration).<br>Evidence: before a durable claim, the executor revalidates the exact approved immutable plan/hash, expiry, current actor write scopes, source versions, persisted declaration, and step snapshot. PostgreSQL atomically leases one pending/expired workflow (or renews its owner lease) and completes only the next declared read-only guard; no ERP write occurs in M4.4.<br>Commit: `ae7e132` pushed to `origin/main`. |
 | M4.5 Implement external-style tool boundaries | `complete` | AC-09, AC-11 | Test: focused executor/state/tool-adapter contracts - PASS (37), including durable started-before-effect ordering, all four declared effects, replay, stale/lost-lease rejection, and an approved-but-too-slow supplier; seeded PostgreSQL flow - PASS.<br>Validation: `make verify` - PASS (144 tests, 94.29% coverage, clean migration).<br>Evidence: a workflow step commits `running` plus its opaque stable key before the concrete tool boundary; the tool independently enforces its scope, commits its ERP/mail/scheduler effect plus an idempotency-journal result, and a later transaction records result/cursor progression. The final transition marks the workflow succeeded; replay returns the original external result without duplicating the replacement PO.<br>Commit: `774636d` pushed to `origin/main`. |
 | M4.6 Implement compensation | `complete` | AC-09 | Test: focused executor, workflow-state, and tool-adapter compensation contracts - PASS (43), plus seeded PostgreSQL compensation flow - PASS.<br>Validation: `make verify` - PASS (150 tests, 92.06% coverage, clean migration).<br>Evidence: a terminal tool failure persists the failed step and retains its lease; only completed effects are reversed in LIFO order using new stable compensation keys. PostgreSQL cancels the replacement PO and Tuesday task, restores the original PO only when its version/state still match, sends a correction notification, and marks both original provider journals and workflow steps compensated without re-running an effect.<br>Commit: `6a0ae64` pushed to `origin/main`. |
-| M4.7 Add crash injection | `in_progress` | AC-09 | TDD crash/restart contract is being added before implementation. |
+| M4.7 Add crash injection | `complete` | AC-09 | Test: `tests/test_workflow_executor.py::test_crash_after_replacement_effect_restarts_with_the_same_started_key` and seeded PostgreSQL crash/restart flow - PASS.<br>Validation: `make verify` - PASS (151 tests, 91.98% coverage, clean migration).<br>Evidence: an explicit injector raises only after replacement-PO provider success and before local cursor completion. After the lease expires, a new worker reclaims the exact `running` step, reconstructs its original stable key, replays the provider journal, and advances without a second local start or replacement PO.<br>Commit: `98546f1` pushed to `origin/main`. |
 | M4.8 Test workflow invariants | `not_started` | AC-08, AC-09 | - |
 
 ### M5 - Approval routing, durable scheduling, and audit explanation
@@ -231,3 +231,4 @@ For a documentation-only task, replace `Test:` with `Validation:` and name the c
 | 2026-08-25 | M4.6 | Started reverse-compensation coverage. | Test: `tests/test_workflow_executor.py` contract is being added before implementation. | Pending RED checkpoint. |
 | 2026-08-25 | M4.6 | Completed terminal-failure compensation. | Test: focused executor/workflow-state/tool-adapter compensation contracts - PASS (43); seeded PostgreSQL compensation flow - PASS; `make verify` - PASS (150 tests, 92.06% coverage, clean migration). | `6a0ae64` pushed to `origin/main`; status completion record pending this commit. |
 | 2026-08-25 | M4.7 | Started deterministic crash/restart coverage. | Test: `tests/test_workflow_executor.py` contract is being added before implementation. | Pending RED checkpoint. |
+| 2026-08-25 | M4.7 | Completed deterministic replacement-PO crash/restart recovery. | Test: focused crash/restart unit plus seeded PostgreSQL journal replay - PASS; `make verify` - PASS (151 tests, 91.98% coverage, clean migration). | `98546f1` pushed to `origin/main`; status completion record pending this commit. |
