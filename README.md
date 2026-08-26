@@ -161,8 +161,6 @@ enterprise-agent --install-completion
 
 For interactive demos and all database-backed commands, return to `make tui`. `make demo` uses the intentional unattended form for continuous integration (CI) and repeatable reviewer runs. The guided stories clearly label whether they stage a pending plan or are a fixed acceptance-case walkthrough; neither route calls a live provider or executes business effects automatically.
 
-See [the terminal interaction contract](docs/terminal-interaction-contract.md) for output, keyboard, JSON, cancellation, and error-handling guarantees.
-
 ## Scenario walkthroughs
 
 | Scenario | Demonstration | Safety proof |
