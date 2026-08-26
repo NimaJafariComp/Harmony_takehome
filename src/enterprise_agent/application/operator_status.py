@@ -57,6 +57,36 @@ class OperatorStatusSnapshot:
     workflows: tuple[WorkflowStatusSummary, ...]
 
 
+def operator_status_data(
+    snapshot: OperatorStatusSnapshot,
+) -> dict[str, list[dict[str, str | None]]]:
+    """Project the read model to the CLI's stable, safe scalar response shape without another query."""
+    return {
+        "pending_approvals": [
+            {
+                "approval_id": item.approval_id,
+                "plan_id": item.plan_id,
+                "requester": item.requester,
+                "approver": item.approver,
+                "decision_state": item.decision_state,
+                "expires_at": item.expires_at,
+                "audit_run_id": item.audit_run_id,
+            }
+            for item in snapshot.pending_approvals
+        ],
+        "workflows": [
+            {
+                "workflow_id": item.workflow_id,
+                "status": item.status,
+                "current_step": item.current_step,
+                "idempotency_key_prefix": item.idempotency_key_prefix,
+                "recovery_state": item.recovery_state.value,
+            }
+            for item in snapshot.workflows
+        ],
+    }
+
+
 def recovery_state_for(
     status: WorkflowStatus,
     *,

@@ -9,7 +9,7 @@ from typing import Self
 import pytest
 
 from enterprise_agent.application.operator_status import RecoveryState, recovery_state_for
-from enterprise_agent.domain import WorkflowStatus
+from enterprise_agent.domain import UserId, WorkflowStatus
 
 pytestmark = pytest.mark.unit
 
@@ -147,6 +147,76 @@ def test_postgres_status_projection_maps_only_safe_fields_from_reader_rows(
     assert snapshot.workflows[0].current_step == "create replacement purchase order"
     assert snapshot.workflows[0].idempotency_key_prefix == "replacement-po-idempoten"
     assert snapshot.workflows[0].recovery_state is RecoveryState.RECLAIMABLE
+
+
+def test_postgres_status_projection_scopes_every_query_to_the_selected_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optional UI receives no approval or workflow row until PostgreSQL applies its actor filter."""
+    from enterprise_agent.adapters import operator_status
+
+    actor_id = UserId("00000000-0000-0000-0000-000000000001")
+    now = datetime(2026, 8, 26, 12, tzinfo=UTC)
+
+    class Result:
+        """Provide a scalar or row collection from one expected safe projection query."""
+
+        def scalar_one_or_none(self) -> datetime:
+            return now
+
+        def mappings(self) -> Result:
+            return self
+
+        def all(self) -> tuple[object, ...]:
+            return ()
+
+    class Connection:
+        """Record actor parameters and reject accidental use of the global status queries."""
+
+        def __init__(self) -> None:
+            self.executed: list[tuple[object, dict[str, str] | None]] = []
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, statement: object, parameters: dict[str, str] | None = None) -> Result:
+            self.executed.append((statement, parameters))
+            if statement is operator_status._SELECT_DEMO_CLOCK:
+                return Result()
+            if statement in {
+                operator_status._SELECT_PENDING_APPROVALS_FOR_ACTOR,
+                operator_status._SELECT_WORKFLOWS_FOR_ACTOR,
+            }:
+                assert parameters == {"actor_id": str(actor_id)}
+                return Result()
+            raise AssertionError("actor-scoped status may not use a global query")
+
+    class Engine:
+        """Expose the one read connection expected by the projection adapter."""
+
+        def __init__(self) -> None:
+            self.connection = Connection()
+
+        def connect(self) -> Connection:
+            return self.connection
+
+    engine = Engine()
+    monkeypatch.setattr(operator_status, "create_engine", lambda _url: engine)
+
+    snapshot = operator_status.PostgresOperatorStatusAdapter(
+        "postgresql://read-only"
+    ).read_status_for_actor(actor_id)
+
+    assert snapshot.pending_approvals == ()
+    assert snapshot.workflows == ()
+    assert [statement for statement, _parameters in engine.connection.executed] == [
+        operator_status._SELECT_DEMO_CLOCK,
+        operator_status._SELECT_PENDING_APPROVALS_FOR_ACTOR,
+        operator_status._SELECT_WORKFLOWS_FOR_ACTOR,
+    ]
 
 
 def _compose(*arguments: str) -> subprocess.CompletedProcess[str]:

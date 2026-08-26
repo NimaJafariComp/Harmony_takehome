@@ -14,7 +14,7 @@ from enterprise_agent.application.operator_status import (
     WorkflowStatusSummary,
     recovery_state_for,
 )
-from enterprise_agent.domain import WorkflowStatus
+from enterprise_agent.domain import UserId, WorkflowStatus
 
 _SELECT_PENDING_APPROVALS = text("""
     SELECT
@@ -61,6 +61,31 @@ _SELECT_WORKFLOWS = text("""
 
 _SELECT_DEMO_CLOCK = text("SELECT current_at FROM demo_clock WHERE id = 1")
 
+_SELECT_PENDING_APPROVALS_FOR_ACTOR = text(
+    str(_SELECT_PENDING_APPROVALS).replace(
+        "WHERE approvals.status IN ('pending', 'rerouted')",
+        """WHERE approvals.status IN ('pending', 'rerouted')
+          AND (
+              approvals.requester_id = CAST(:actor_id AS UUID)
+              OR approvals.approver_id = CAST(:actor_id AS UUID)
+          )""",
+    )
+)
+_SELECT_WORKFLOWS_FOR_ACTOR = text(
+    str(_SELECT_WORKFLOWS)
+    .replace(
+        "FROM workflow_instances",
+        """FROM workflow_instances
+    JOIN plans ON plans.id = workflow_instances.plan_id""",
+    )
+    .replace(
+        "ORDER BY workflow_instances.updated_at DESC, workflow_instances.id ASC",
+        """WHERE plans.actor_id = CAST(:actor_id AS UUID)
+       OR plans.approver_id = CAST(:actor_id AS UUID)
+    ORDER BY workflow_instances.updated_at DESC, workflow_instances.id ASC""",
+    )
+)
+
 
 class PostgresOperatorStatusAdapter:
     """Project narrowly selected, safe state from the local durable control plane."""
@@ -71,11 +96,30 @@ class PostgresOperatorStatusAdapter:
 
     def read_status(self) -> OperatorStatusSnapshot:
         """Return pending approvals and durable workflow/recovery facts in stable display order."""
+        return self._read_status(actor_id=None)
+
+    def read_status_for_actor(self, actor_id: UserId) -> OperatorStatusSnapshot:
+        """Return only pending approvals and workflows visible to one selected local demo actor."""
+        return self._read_status(actor_id=actor_id)
+
+    def _read_status(self, *, actor_id: UserId | None) -> OperatorStatusSnapshot:
+        """Use the same safe projection for global CLI status and actor-scoped local UI status."""
         with self._engine.connect() as connection:
             clock_value = connection.execute(_SELECT_DEMO_CLOCK).scalar_one_or_none()
             now = cast(datetime | None, clock_value)
-            approval_rows = connection.execute(_SELECT_PENDING_APPROVALS).mappings().all()
-            workflow_rows = connection.execute(_SELECT_WORKFLOWS).mappings().all()
+            if actor_id is None:
+                approval_rows = connection.execute(_SELECT_PENDING_APPROVALS).mappings().all()
+                workflow_rows = connection.execute(_SELECT_WORKFLOWS).mappings().all()
+            else:
+                parameters = {"actor_id": str(actor_id)}
+                approval_rows = (
+                    connection.execute(_SELECT_PENDING_APPROVALS_FOR_ACTOR, parameters)
+                    .mappings()
+                    .all()
+                )
+                workflow_rows = (
+                    connection.execute(_SELECT_WORKFLOWS_FOR_ACTOR, parameters).mappings().all()
+                )
         return OperatorStatusSnapshot(
             pending_approvals=tuple(_approval_from_row(row) for row in approval_rows),
             workflows=tuple(_workflow_from_row(row, now=now) for row in workflow_rows),

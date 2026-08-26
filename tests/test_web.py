@@ -160,7 +160,9 @@ async def test_local_ui_health_is_database_free_and_says_what_is_safe_to_expect(
 
 
 @pytest.mark.critical
-async def test_local_ui_exposes_only_selected_actor_read_models_through_the_service_boundary() -> None:
+async def test_local_ui_exposes_only_selected_actor_read_models_through_the_service_boundary() -> (
+    None
+):
     """Every operational API path is a safe GET projection; the route never owns business data."""
     from httpx import ASGITransport, AsyncClient
 
@@ -290,18 +292,20 @@ def test_local_ui_module_has_no_direct_database_provider_or_configuration_depend
 
 
 def test_local_ui_main_binds_to_loopback_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Starting the optional review server never exposes it on a network interface by default."""
+    """Starting the optional review server uses its configured local reader and stays loopback-only."""
     from enterprise_agent import web
 
     observed: dict[str, object] = {}
+    service = RecordingLocalReviewService()
 
     def fake_run(app: object, *, host: str, port: int) -> None:
         observed.update(app=app, host=host, port=port)
 
+    monkeypatch.setattr("enterprise_agent.web.create_local_review_service", lambda: service)
     monkeypatch.setattr("enterprise_agent.web.uvicorn.run", fake_run)
 
     web.main()
 
-    assert observed["app"] is web.app
+    assert observed["app"] is not web.app
     assert observed["host"] == "127.0.0.1"
     assert observed["port"] == 8080

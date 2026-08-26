@@ -7,6 +7,7 @@ from .audit import AuditEventError, PostgresAuditAdapter
 from .claude import ClaudeMessagesAdapter, ClaudeMessagesTransport, UrllibClaudeMessagesTransport
 from .clock import DemoClockNotInitializedError, PostgresDemoClock
 from .identity import IdentityNotFoundError, PostgresIdentityAdapter
+from .local_review import PostgresLocalReviewAccessAdapter
 from .openai import OpenAIResponsesAdapter, OpenAIResponsesTransport, UrllibOpenAIResponsesTransport
 from .openrouter import (
     OpenRouterChatCompletionsAdapter,
@@ -49,6 +50,7 @@ __all__ = [
     "PostgresErpAdapter",
     "PostgresIdentityAdapter",
     "PostgresKnowledgeAdapter",
+    "PostgresLocalReviewAccessAdapter",
     "PostgresMailAdapter",
     "PostgresOperatorStatusAdapter",
     "PostgresPlanApprovalAdapter",

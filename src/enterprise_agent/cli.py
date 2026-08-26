@@ -36,7 +36,7 @@ from enterprise_agent.application.llm_evaluation import (
     evaluation_cases,
     select_evaluation_cases,
 )
-from enterprise_agent.application.operator_status import OperatorStatusSnapshot
+from enterprise_agent.application.operator_status import OperatorStatusSnapshot, operator_status_data
 from enterprise_agent.application.scenario_c_demo import (
     ScenarioCDeterministicRunError,
     stage_scenario_c_pending,
@@ -978,28 +978,9 @@ def _render_operator_status(snapshot: OperatorStatusSnapshot) -> None:
 
 def _operator_status_result(snapshot: OperatorStatusSnapshot) -> TerminalResult:
     """Project the read model to stable, safe scalar JSON without a second database query."""
-    approvals = [
-        {
-            "approval_id": item.approval_id,
-            "plan_id": item.plan_id,
-            "requester": item.requester,
-            "approver": item.approver,
-            "decision_state": item.decision_state,
-            "expires_at": item.expires_at,
-            "audit_run_id": item.audit_run_id,
-        }
-        for item in snapshot.pending_approvals
-    ]
-    workflows = [
-        {
-            "workflow_id": item.workflow_id,
-            "status": item.status,
-            "current_step": item.current_step,
-            "idempotency_key_prefix": item.idempotency_key_prefix,
-            "recovery_state": item.recovery_state.value,
-        }
-        for item in snapshot.workflows
-    ]
+    data = operator_status_data(snapshot)
+    approvals = data["pending_approvals"]
+    workflows = data["workflows"]
     audit_actions = tuple(
         dict.fromkeys(
             f"enterprise-agent audit explain {item.audit_run_id}"
@@ -1011,13 +992,13 @@ def _operator_status_result(snapshot: OperatorStatusSnapshot) -> TerminalResult:
         return TerminalResult(
             state=TerminalState.SUCCEEDED,
             summary="No pending approvals or workflow instances are recorded.",
-            data={"pending_approvals": approvals, "workflows": workflows},
+            data=data,
             next_actions=("enterprise-agent demo --list",),
         )
     return TerminalResult(
         state=(TerminalState.PENDING_APPROVAL if approvals else TerminalState.IN_PROGRESS),
         summary=f"{len(approvals)} pending approval(s), {len(workflows)} workflow instance(s).",
-        data={"pending_approvals": approvals, "workflows": workflows},
+        data=data,
         next_actions=(*audit_actions, "enterprise-agent llm-usage"),
     )
 
