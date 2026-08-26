@@ -491,6 +491,7 @@ def executor_setup(
     actor: ActorContext | None = None,
     snapshot: WorkflowStateSnapshot | None = None,
     tool_executor: Any | None = None,
+    crash_injector: Any | None = None,
 ) -> tuple[Any, MemoryWorkflowStore, Plan, Approval]:
     """Stage a workflow and construct its executor with only controlled dependencies."""
     from enterprise_agent.application.workflow_executor import ScenarioAWorkflowExecutor
@@ -514,6 +515,8 @@ def executor_setup(
     }
     if tool_executor is not None:
         executor_arguments["tool_executor"] = tool_executor
+    if crash_injector is not None:
+        executor_arguments["crash_injector"] = crash_injector
     executor = ScenarioAWorkflowExecutor(**executor_arguments)
     return executor, store, plan, stored_approval
 
@@ -1075,6 +1078,72 @@ def test_executor_leaves_a_durable_started_tool_for_safe_retry_when_the_effect_f
     assert retained.steps[2].status is WorkflowStepStatus.RUNNING
     assert retained.steps[2].idempotency_key == started.invocation.idempotency_key
     assert store.complete_tool_calls == []
+
+
+@pytest.mark.critical
+def test_crash_after_replacement_effect_restarts_with_the_same_started_key() -> None:
+    """A process crash before local completion replays one started provider action without a second start."""
+    from enterprise_agent.application.tools import ToolName
+    from enterprise_agent.application.workflow_executor import (
+        DeterministicCrashInjector,
+        ScenarioAWorkflowExecutor,
+        WorkflowCrashInjectedError,
+    )
+
+    tools = ScenarioAToolExecutor()
+    executor, store, plan, approval = executor_setup(
+        tool_executor=tools,
+        crash_injector=DeterministicCrashInjector(target_tool_name=ToolName.CREATE_REPLACEMENT_PO),
+    )
+    _advance_to_first_tool(executor, plan)
+    started = executor.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="crashed-worker",
+        now=NOW + timedelta(minutes=5),
+        lease_expires_at=NOW + timedelta(minutes=7),
+        current_source_versions=plan.source_versions,
+    )
+
+    with pytest.raises(WorkflowCrashInjectedError, match="after external effect"):
+        executor.execute_started_tool(
+            started,
+            worker_id="crashed-worker",
+            completed_at=NOW + timedelta(minutes=6),
+        )
+
+    crashed = store.load(WORKFLOW_ID)
+    assert crashed is not None
+    assert crashed.workflow.status is WorkflowStatus.RUNNING
+    assert crashed.workflow.current_step == 2
+    assert crashed.steps[2].status is WorkflowStepStatus.RUNNING
+    assert crashed.steps[2].idempotency_key == started.invocation.idempotency_key
+    assert len(store.start_tool_calls) == 1
+    assert store.complete_tool_calls == []
+
+    restarted = ScenarioAWorkflowExecutor(
+        workflow_store=store,
+        approvals=MemoryApprovals((plan, approval)),
+        identity=MemoryIdentity(actor_with(ALL_SCENARIO_A_WRITE_SCOPES)),
+        tool_executor=tools,
+    )
+    resumed = restarted.begin_next_tool(
+        WORKFLOW_ID,
+        worker_id="restart-worker",
+        now=NOW + timedelta(minutes=8),
+        lease_expires_at=NOW + timedelta(minutes=20),
+        current_source_versions=plan.source_versions,
+    )
+    completed = restarted.execute_started_tool(
+        resumed,
+        worker_id="restart-worker",
+        completed_at=NOW + timedelta(minutes=9),
+    )
+
+    assert resumed.invocation.idempotency_key == started.invocation.idempotency_key
+    assert len(store.start_tool_calls) == 1
+    assert len(store.complete_tool_calls) == 1
+    assert completed.workflow.current_step == 3
+    assert completed.steps[2].status is WorkflowStepStatus.SUCCEEDED
 
 
 @pytest.mark.critical
