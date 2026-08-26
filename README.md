@@ -88,6 +88,16 @@ Run `make tui`, then choose one of these modes:
 
 The guarded live local demo is intentionally separate from the deterministic guided demo. The former makes one real provider request; the latter is the repeatable acceptance proof and requires no provider configuration.
 
+### Which LLM path should I use?
+
+| Path | TUI route | Data and writes | What a result means |
+|---|---|---|---|
+| Guided company demo | Home → 1 | Resets/seeds fixed local data; deterministic fake planner; no provider call and no business effect. | Proves the application control plane deterministically. |
+| Guarded live local demo | Home → 2 | Resets/seeds the fuller local Scenario A, B, or C data; one real provider proposal; may stage only local review records. | Shows whether a provider response can survive schema validation and the deterministic gate before human approval. |
+| Live-evaluation pack | Home → 3 → 6 | Compact fixed synthetic briefs; one real provider request per selected case; no database, workflow, audit, or business-system write. | Scores a model against known safe outcomes and grounding checks. It is a model-quality probe, not an execution demo. |
+
+A passing live-evaluation case does **not** guarantee that the guarded live demo will pass. The guarded demo has a richer, scenario-specific context and must produce the exact schema shape needed to stage a local plan. Conversely, a guarded-demo schema rejection does not mean the deterministic application controls failed: it means the provider response was safely rejected before the gate. Use the live-evaluation pack to compare provider behavior; use the guarded live demo to demonstrate the full approval-gated control path.
+
 ### Guided company demo cases
 
 Choose Home option 1, then select a case:
