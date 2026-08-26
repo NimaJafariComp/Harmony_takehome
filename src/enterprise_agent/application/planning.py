@@ -1,4 +1,4 @@
-"""Bounded Scenario A recommendations and a deterministic LLM port for tests."""
+"""Bounded Scenario A/B recommendations and a deterministic LLM port for tests."""
 
 from __future__ import annotations
 
@@ -7,13 +7,30 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
+from enterprise_agent.application.tools import (
+    FlagShortageToPurchasingInput,
+    NotifyProductionInput,
+    ReallocateLotInput,
+)
 from enterprise_agent.ports import PromptEnvelope, StructuredLLMResponse
 
 
 class InvalidScenarioARecommendationError(ValueError):
     """Raised when a structured model response is outside the fixed Scenario A contract."""
+
+
+class InvalidScenarioBRecommendationError(ValueError):
+    """Raised when a structured model response is outside the bounded Scenario B contract."""
 
 
 NonBlankString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -72,12 +89,65 @@ def validate_scenario_a_recommendation(
         raise InvalidScenarioARecommendationError("invalid Scenario A recommendation") from error
 
 
+class ReallocateAndNotifyRecommendation(_RecommendationModel):
+    """Propose the only two registered effects that can resolve a covered quality hold."""
+
+    outcome: Literal["REALLOCATE_AND_NOTIFY"]
+    reallocate_lot: ReallocateLotInput
+    notify_production: NotifyProductionInput
+    rationale: NonBlankString
+
+    @model_validator(mode="after")
+    def _require_single_production_target(self) -> ReallocateAndNotifyRecommendation:
+        if self.reallocate_lot.to_production_order_id != self.notify_production.production_order_id:
+            raise ValueError("reallocation and notification must target the same production order")
+        return self
+
+
+class FlagShortageToPurchasingRecommendation(_RecommendationModel):
+    """Propose the registered purchasing escalation when no released lot can cover demand."""
+
+    outcome: Literal["FLAG_SHORTAGE_TO_PURCHASING"]
+    shortage: FlagShortageToPurchasingInput
+    rationale: NonBlankString
+
+
+ScenarioBRecommendation = Annotated[
+    ManualReviewRecommendation
+    | ReallocateAndNotifyRecommendation
+    | FlagShortageToPurchasingRecommendation,
+    Field(discriminator="outcome"),
+]
+_SCENARIO_B_RECOMMENDATION_ADAPTER: TypeAdapter[ScenarioBRecommendation] = TypeAdapter(
+    ScenarioBRecommendation
+)
+
+
+def validate_scenario_b_recommendation(
+    output: Mapping[str, object],
+) -> ScenarioBRecommendation:
+    """Accept only registered Scenario B tool parameters or a safe manual-review handoff."""
+    try:
+        return _SCENARIO_B_RECOMMENDATION_ADAPTER.validate_python(output)
+    except ValidationError as error:
+        raise InvalidScenarioBRecommendationError("invalid Scenario B recommendation") from error
+
+
+AnyScenarioRecommendation = (
+    NoActionRecommendation
+    | ManualReviewRecommendation
+    | EnterWorkflowRecommendation
+    | ReallocateAndNotifyRecommendation
+    | FlagShortageToPurchasingRecommendation
+)
+
+
 class FakeLLMPort:
     """Return deterministic, scenario-keyed structured recommendations without a network dependency."""
 
-    def __init__(self, recommendations: Mapping[str, ScenarioARecommendation]) -> None:
+    def __init__(self, recommendations: Mapping[str, AnyScenarioRecommendation]) -> None:
         """Copy immutable test configuration so later caller mutation cannot change fake behavior."""
-        self._recommendations: Mapping[str, ScenarioARecommendation] = MappingProxyType(
+        self._recommendations: Mapping[str, AnyScenarioRecommendation] = MappingProxyType(
             dict(recommendations)
         )
 

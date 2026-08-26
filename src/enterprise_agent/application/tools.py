@@ -92,16 +92,19 @@ class ScheduleArrivalCheckInput(ToolInputModel):
 
 
 class ReallocateLotInput(ToolInputModel):
-    """Move a good quality lot between distinct production-order allocations."""
+    """Allocate a released good lot or move one between distinct production-order allocations."""
 
     quality_lot_id: NonBlankText
-    from_production_order_id: NonBlankText
+    from_production_order_id: NonBlankText | None = None
     to_production_order_id: NonBlankText
     quantity: PositiveQuantity
 
     @model_validator(mode="after")
     def _require_distinct_orders(self) -> Self:
-        if self.from_production_order_id == self.to_production_order_id:
+        if (
+            self.from_production_order_id is not None
+            and self.from_production_order_id == self.to_production_order_id
+        ):
             raise ValueError("source and destination production orders must differ")
         return self
 

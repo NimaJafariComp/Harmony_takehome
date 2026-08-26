@@ -36,13 +36,19 @@ from .context import (
 )
 from .gate import GateDecision, GateDenialReason, GateStatus, ScenarioAGate
 from .planning import (
+    AnyScenarioRecommendation,
     EnterWorkflowRecommendation,
     FakeLLMPort,
+    FlagShortageToPurchasingRecommendation,
     InvalidScenarioARecommendationError,
+    InvalidScenarioBRecommendationError,
     ManualReviewRecommendation,
     NoActionRecommendation,
+    ReallocateAndNotifyRecommendation,
     ScenarioARecommendation,
+    ScenarioBRecommendation,
     validate_scenario_a_recommendation,
+    validate_scenario_b_recommendation,
 )
 from .quality_context import (
     MissingScenarioBContextEvidenceError,
@@ -98,6 +104,7 @@ __all__ = [
     "DECLARED_WORKFLOWS",
     "PO_REROUTE_V1",
     "TOOL_CATALOG",
+    "AnyScenarioRecommendation",
     "ApprovalRoutingError",
     "ApprovalRoutingOutcome",
     "ApprovalRoutingResult",
@@ -114,10 +121,12 @@ __all__ = [
     "EnterWorkflowRecommendation",
     "FakeLLMPort",
     "FlagShortageToPurchasingInput",
+    "FlagShortageToPurchasingRecommendation",
     "GateDecision",
     "GateDenialReason",
     "GateStatus",
     "InvalidScenarioARecommendationError",
+    "InvalidScenarioBRecommendationError",
     "ManualReviewRecommendation",
     "MissingScenarioAContextEvidenceError",
     "MissingScenarioBContextEvidenceError",
@@ -129,6 +138,7 @@ __all__ = [
     "QualityHoldDetector",
     "QualityHoldEvidenceError",
     "QualityHoldRisk",
+    "ReallocateAndNotifyRecommendation",
     "ReallocateLotInput",
     "ReduceOrCancelPOInput",
     "ScenarioAApprovalService",
@@ -138,6 +148,7 @@ __all__ = [
     "ScenarioAWorkflowExecutor",
     "ScenarioBContextAssembler",
     "ScenarioBContextBundle",
+    "ScenarioBRecommendation",
     "ScheduleArrivalCheckInput",
     "StaleAttentionEvidenceError",
     "StaleScenarioBContextEvidenceError",
@@ -169,5 +180,6 @@ __all__ = [
     "recompute_plan_hash",
     "tool_definition",
     "validate_scenario_a_recommendation",
+    "validate_scenario_b_recommendation",
     "workflow_for_recommendation",
 ]
