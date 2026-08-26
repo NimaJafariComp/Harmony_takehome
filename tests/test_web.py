@@ -282,10 +282,11 @@ async def test_local_ui_exposes_only_selected_actor_read_models_through_the_serv
 
     application = create_app(read_service=service)
     mutable_routes = {
-        (route.path, method)
+        (path, method)
         for route in application.routes
+        for path in (getattr(route, "path", None),)
         for method in getattr(route, "methods", set())
-        if method not in {"GET", "HEAD"}
+        if isinstance(path, str) and method not in {"GET", "HEAD"}
     }
     assert mutable_routes == {
         ("/approval/{approval_id}/decision", "POST"),
