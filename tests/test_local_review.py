@@ -412,7 +412,9 @@ def test_local_review_workflow_projects_the_durable_compensation_lifecycle(
     assert isinstance(workflow_store, MemoryWorkflowStore)
     snapshot = workflow_store.snapshot
     assert snapshot is not None
-    workflow_store.snapshot = replace(snapshot, workflow=replace(snapshot.workflow, status=workflow_status))
+    workflow_store.snapshot = replace(
+        snapshot, workflow=replace(snapshot.workflow, status=workflow_status)
+    )
 
     workflow = service.workflow(str(WORKFLOW_ID))
 

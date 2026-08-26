@@ -76,7 +76,9 @@ def create_app(
         else UnconfiguredLocalDemoClockControlService()
     )
     demo_catalogue = (
-        demo_catalogue_service if demo_catalogue_service is not None else LocalDemoCatalogueService()
+        demo_catalogue_service
+        if demo_catalogue_service is not None
+        else LocalDemoCatalogueService()
     )
     csrf_signing_key = secrets.token_bytes(32)
     application = FastAPI(
@@ -476,7 +478,9 @@ def _csrf_token(
 
 def _demo_clock_csrf_token(signing_key: bytes, *, session: str) -> str:
     """Sign a token that applies only to the one-day local-demo clock operation."""
-    return hmac.new(signing_key, f"{session}\x1fdemo-clock.advance-one-day".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(
+        signing_key, f"{session}\x1fdemo-clock.advance-one-day".encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def _one_form_value(values: dict[str, list[str]], name: str) -> str:

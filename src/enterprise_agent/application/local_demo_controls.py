@@ -67,7 +67,9 @@ class LocalDemoClockControlService:
         try:
             current_at = self.clock.advance(timedelta(days=1))
         except RuntimeError as error:
-            raise LocalDemoClockControlUnavailableError("local demo clock is unavailable") from error
+            raise LocalDemoClockControlUnavailableError(
+                "local demo clock is unavailable"
+            ) from error
         return DemoClockAdvanceResult(current_at=current_at.isoformat())
 
 
