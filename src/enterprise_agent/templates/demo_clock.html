@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Demo time{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Review queue</a><span aria-hidden="true">/</span><span>Demo time</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Deterministic local time</p>
+    <h1>Demo clock</h1>
+    <p class="lede">This changes only the local seeded demo clock. It never resets data, reruns a case, executes a workflow, or writes to a business system.</p>
+  </header>
+
+  <section class="decision-result" aria-labelledby="clock-title">
+    <div class="trace" aria-hidden="true"></div>
+    <div>
+      <p class="section-label">Current local time</p>
+      <h2 id="clock-title"><time datetime="{{ demo_clock.current_at }}">{{ demo_clock.current_at }}</time></h2>
+      {% if can_advance and csrf_token %}
+        <p class="lede">Demo mode is explicitly enabled. Advance one deterministic day to inspect time-bound recovery behavior.</p>
+        <form class="demo-clock-form" action="/demo-clock/advance" method="post">
+          <input name="csrf_token" value="{{ csrf_token }}" type="hidden">
+          <button class="decision-button approve" type="submit">Advance demo clock one day</button>
+        </form>
+      {% else %}
+        <p class="empty-copy">Demo clock controls are locked. Set <code>DEMO_MODE=true</code> locally and restart this loopback UI to enable the one-day demo advance.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="ledger-section" aria-labelledby="case-title">
+    <div class="section-heading">
+      <div>
+        <p class="section-label">Shared guided-demo catalogue</p>
+        <h2 id="case-title">Scenario A, B, and C review cases</h2>
+      </div>
+      <p>These are the same deterministic cases the CLI presents. This page does not run or reset the shared demo.</p>
+    </div>
+    <div class="ledger-table-wrap" tabindex="0">
+      <table>
+        <caption class="sr-only">Shared deterministic demo cases</caption>
+        <thead><tr><th scope="col">Case</th><th scope="col">Mode</th><th scope="col">Phase</th><th scope="col">Safe outcome</th></tr></thead>
+        <tbody>
+          {% for case in demo_cases %}
+            <tr>
+              <th scope="row">{{ case.title }}</th>
+              <td>{% if case.execution_mode == 'fixture' %}fixed acceptance-case walkthrough{% else %}staged local review{% endif %}</td>
+              <td>{{ case.phase }}</td>
+              <td>{{ case.outcome }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

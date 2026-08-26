@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Self
@@ -392,6 +392,31 @@ def test_local_review_service_denies_cross_actor_and_mixed_audit_run_before_rend
         spoofed_relation_service.audit(str(RUN_ID))
     with pytest.raises(LocalReviewResourceNotFoundError):
         mixed_run_service.workflow("not-a-uuid")
+
+
+@pytest.mark.parametrize(
+    ("workflow_status", "expected_compensation_state"),
+    (
+        (WorkflowStatus.FAILED, "available"),
+        (WorkflowStatus.COMPENSATING, "in_progress"),
+        (WorkflowStatus.COMPENSATED, "completed"),
+    ),
+)
+def test_local_review_workflow_projects_the_durable_compensation_lifecycle(
+    workflow_status: WorkflowStatus,
+    expected_compensation_state: str,
+) -> None:
+    """Recovery views name compensation from durable workflow state without rendering error payloads."""
+    service, _ = _service()
+    workflow_store = service.workflows
+    assert isinstance(workflow_store, MemoryWorkflowStore)
+    snapshot = workflow_store.snapshot
+    assert snapshot is not None
+    workflow_store.snapshot = replace(snapshot, workflow=replace(snapshot.workflow, status=workflow_status))
+
+    workflow = service.workflow(str(WORKFLOW_ID))
+
+    assert workflow["compensation_state"] == expected_compensation_state
 
 
 def test_postgres_attention_access_adapter_runs_only_the_bound_actor_authorization_query(

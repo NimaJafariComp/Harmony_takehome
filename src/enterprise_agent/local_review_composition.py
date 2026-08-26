@@ -26,6 +26,11 @@ from enterprise_agent.application.local_decisions import (
     LocalApprovalDecisionService,
     UnconfiguredLocalApprovalDecisionService,
 )
+from enterprise_agent.application.local_demo_controls import (
+    LocalDemoClockControlPort,
+    LocalDemoClockControlService,
+    UnconfiguredLocalDemoClockControlService,
+)
 from enterprise_agent.application.local_review import (
     LocalReviewReadPort,
     LocalReviewReadService,
@@ -33,7 +38,7 @@ from enterprise_agent.application.local_review import (
 )
 from enterprise_agent.domain import UserId
 from enterprise_agent.llm_setup import default_env_path, load_local_environment
-from enterprise_agent.seed import ID_DANA
+from enterprise_agent.seed import ID_DANA, SeedSafetyError, _require_local_demo_database
 
 LOCAL_REVIEW_ACTOR_SETTING = "LOCAL_REVIEW_ACTOR_ID"
 _DEFAULT_LOCAL_REVIEW_ACTOR = UserId(str(ID_DANA))
@@ -91,6 +96,26 @@ def create_local_approval_decision_service() -> LocalApprovalDecisionPort:
         clock=PostgresDemoClock(database_url),
         audit=audit,
         audit_runs=audit,
+    )
+
+
+def create_local_demo_clock_control_service() -> LocalDemoClockControlPort:
+    """Build the one mutable local-demo control only for an explicit true local setting."""
+    try:
+        environment = load_local_environment(default_env_path())
+    except ValueError:
+        return UnconfiguredLocalDemoClockControlService()
+    database_url = environment.get("DATABASE_URL", "").strip()
+    demo_mode_enabled = environment.get("DEMO_MODE", "").strip().lower() == "true"
+    if not database_url or not demo_mode_enabled:
+        return UnconfiguredLocalDemoClockControlService()
+    try:
+        _require_local_demo_database(database_url, allow_test_database=False)
+    except SeedSafetyError:
+        return UnconfiguredLocalDemoClockControlService()
+    return LocalDemoClockControlService(
+        clock=PostgresDemoClock(database_url),
+        demo_mode_enabled=True,
     )
 
 

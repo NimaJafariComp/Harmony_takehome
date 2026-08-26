@@ -37,7 +37,7 @@ def test_demo_clock_control_advances_exactly_one_day_only_when_explicitly_enable
     result = control.advance_one_day()
 
     assert control.availability().can_advance
-    assert result.current_at == NOW + timedelta(days=1)
+    assert result.current_at == (NOW + timedelta(days=1)).isoformat()
     assert clock.advances == [timedelta(days=1)]
 
 
@@ -57,6 +57,27 @@ def test_demo_clock_control_fails_closed_when_demo_mode_is_not_explicitly_enable
     assert clock.advances is None
 
 
+def test_demo_clock_control_reports_an_unavailable_local_clock_without_falling_back() -> None:
+    """An enabled setting never substitutes wall-clock time or a successful-looking receipt on failure."""
+    from enterprise_agent.application.local_demo_controls import (
+        LocalDemoClockControlService,
+        LocalDemoClockControlUnavailableError,
+    )
+
+    class UnavailableClock:
+        """Model a local database that has not been reset and seeded."""
+
+        def advance(self, duration: timedelta) -> datetime:
+            del duration
+            raise RuntimeError("clock is not initialized")
+
+    with pytest.raises(LocalDemoClockControlUnavailableError):
+        LocalDemoClockControlService(
+            clock=UnavailableClock(),
+            demo_mode_enabled=True,
+        ).advance_one_day()
+
+
 def test_demo_clock_control_composition_requires_true_setting_and_uses_only_the_local_clock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -67,7 +88,7 @@ def test_demo_clock_control_composition_requires_true_setting_and_uses_only_the_
         UnconfiguredLocalDemoClockControlService,
     )
 
-    database_url = "postgresql+psycopg://local/demo"
+    database_url = "postgresql+psycopg://enterprise_agent:enterprise_agent@db:5432/enterprise_agent"
     constructed_urls: list[str] = []
 
     class StubClock:
@@ -91,6 +112,17 @@ def test_demo_clock_control_composition_requires_true_setting_and_uses_only_the_
     )
     enabled = local_review_composition.create_local_demo_clock_control_service()
 
+    monkeypatch.setattr(
+        local_review_composition,
+        "load_local_environment",
+        lambda _path: {
+            "DATABASE_URL": "postgresql+psycopg://operator:operator@remote:5432/production",
+            "DEMO_MODE": "true",
+        },
+    )
+    unsafe_target = local_review_composition.create_local_demo_clock_control_service()
+
     assert isinstance(disabled, UnconfiguredLocalDemoClockControlService)
     assert isinstance(enabled, LocalDemoClockControlService)
+    assert isinstance(unsafe_target, UnconfiguredLocalDemoClockControlService)
     assert constructed_urls == [database_url]

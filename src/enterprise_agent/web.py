@@ -21,6 +21,16 @@ from enterprise_agent.application.local_decisions import (
     LocalApprovalDecisionStaleError,
     UnconfiguredLocalApprovalDecisionService,
 )
+from enterprise_agent.application.local_demo_catalogue import (
+    LocalDemoCataloguePort,
+    LocalDemoCatalogueService,
+)
+from enterprise_agent.application.local_demo_controls import (
+    LocalDemoClockControlDisabledError,
+    LocalDemoClockControlPort,
+    LocalDemoClockControlUnavailableError,
+    UnconfiguredLocalDemoClockControlService,
+)
 from enterprise_agent.application.local_review import (
     LocalReviewAccessDeniedError,
     LocalReviewReadPort,
@@ -31,6 +41,7 @@ from enterprise_agent.application.local_review import (
 )
 from enterprise_agent.local_review_composition import (
     create_local_approval_decision_service,
+    create_local_demo_clock_control_service,
     create_local_review_service,
 )
 
@@ -49,6 +60,8 @@ class _DecisionRequestError(ValueError):
 def create_app(
     read_service: LocalReviewReadPort | None = None,
     decision_service: LocalApprovalDecisionPort | None = None,
+    demo_clock_control_service: LocalDemoClockControlPort | None = None,
+    demo_catalogue_service: LocalDemoCataloguePort | None = None,
 ) -> FastAPI:
     """Create a loopback UI with injected read and approval-decision service boundaries."""
     review_service = read_service if read_service is not None else UnconfiguredLocalReviewService()
@@ -56,6 +69,14 @@ def create_app(
         decision_service
         if decision_service is not None
         else UnconfiguredLocalApprovalDecisionService()
+    )
+    demo_clock_controls = (
+        demo_clock_control_service
+        if demo_clock_control_service is not None
+        else UnconfiguredLocalDemoClockControlService()
+    )
+    demo_catalogue = (
+        demo_catalogue_service if demo_catalogue_service is not None else LocalDemoCatalogueService()
     )
     csrf_signing_key = secrets.token_bytes(32)
     application = FastAPI(
@@ -157,6 +178,42 @@ def create_app(
         if not hmac.compare_digest(csrf_token, expected_token):
             raise _DecisionRequestError("invalid csrf token")
         return decision
+
+    def new_demo_clock_csrf() -> tuple[str, str]:
+        """Create one fresh cookie-bound token for the sole fixed-duration demo-clock action."""
+        session = secrets.token_urlsafe(32)
+        return session, _demo_clock_csrf_token(csrf_signing_key, session=session)
+
+    async def read_demo_clock_form(request: Request) -> None:
+        """Require a same-origin one-field form whose token cannot authorize any other action."""
+        content_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0]
+        if content_type != "application/x-www-form-urlencoded":
+            raise _DecisionRequestError("unsupported demo-clock request")
+        body = await request.body()
+        if not body or len(body) > _MAX_DECISION_FORM_BYTES:
+            raise _DecisionRequestError("invalid demo-clock request")
+        try:
+            values = parse_qs(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=1,
+            )
+        except (UnicodeDecodeError, ValueError) as error:
+            raise _DecisionRequestError("invalid demo-clock request") from error
+        if set(values) != {"csrf_token"}:
+            raise _DecisionRequestError("invalid demo-clock request")
+        csrf_token = _one_form_value(values, "csrf_token")
+        origin = request.headers.get("origin")
+        expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if origin is not None and not hmac.compare_digest(origin, expected_origin):
+            raise _DecisionRequestError("cross-origin demo-clock request")
+        session = request.cookies.get(_CSRF_COOKIE_NAME)
+        if session is None or not hmac.compare_digest(
+            csrf_token,
+            _demo_clock_csrf_token(csrf_signing_key, session=session),
+        ):
+            raise _DecisionRequestError("invalid demo-clock token")
 
     @application.exception_handler(LocalReviewAccessDeniedError)
     async def local_review_access_denied(
@@ -282,6 +339,65 @@ def create_app(
         """Render declared workflow/recovery progress while keeping raw state inputs and errors hidden."""
         return render_page(request, "workflow.html", workflow=review_service.workflow(workflow_id))
 
+    @application.get("/demo-clock", response_class=HTMLResponse)
+    def demo_clock_page(request: Request) -> HTMLResponse:
+        """Render local demo time plus its one visibly gated advance control."""
+        demo_clock = review_service.demo_clock()
+        controls = demo_clock_controls.availability()
+        csrf_session: str | None = None
+        csrf_token: str | None = None
+        if controls.can_advance:
+            csrf_session, csrf_token = new_demo_clock_csrf()
+        response = render_page(
+            request,
+            "demo_clock.html",
+            demo_clock=demo_clock,
+            demo_cases=demo_catalogue.cases(),
+            can_advance=controls.can_advance,
+            csrf_token=csrf_token,
+        )
+        if csrf_session is not None:
+            response.set_cookie(
+                _CSRF_COOKIE_NAME,
+                csrf_session,
+                max_age=600,
+                httponly=True,
+                samesite="strict",
+                secure=False,
+                path="/",
+            )
+        return response
+
+    @application.post("/demo-clock/advance", response_class=HTMLResponse)
+    async def advance_demo_clock_page(request: Request) -> Response:
+        """Advance one persisted local-demo day after an action-specific CSRF check."""
+        try:
+            await read_demo_clock_form(request)
+        except _DecisionRequestError:
+            return review_error(
+                request,
+                status_code=403,
+                title="Demo clock request expired",
+                message="Reload the demo clock before advancing local demo time.",
+            )
+        try:
+            result = demo_clock_controls.advance_one_day()
+        except LocalDemoClockControlDisabledError:
+            return review_error(
+                request,
+                status_code=403,
+                title="Demo clock controls are locked",
+                message="Set DEMO_MODE=true locally, then reload the demo clock.",
+            )
+        except LocalDemoClockControlUnavailableError:
+            return review_error(
+                request,
+                status_code=503,
+                title="Demo clock unavailable",
+                message="Start the local deterministic demo before advancing its clock.",
+            )
+        return render_page(request, "demo_clock_result.html", result=result)
+
     @application.get("/audit/{run_id}", response_class=HTMLResponse)
     def audit_page(request: Request, run_id: str) -> HTMLResponse:
         """Render one already-authorized audit explanation from the injected immutable ledger reader."""
@@ -339,6 +455,7 @@ def main() -> None:
         create_app(
             read_service=create_local_review_service(),
             decision_service=create_local_approval_decision_service(),
+            demo_clock_control_service=create_local_demo_clock_control_service(),
         ),
         host=LOCAL_UI_HOST,
         port=LOCAL_UI_PORT,
@@ -355,6 +472,11 @@ def _csrf_token(
     """Sign a cookie-bound action token without placing a plan hash in the browser response."""
     payload = f"{session}\x1f{approval_id}\x1f{decision.value}".encode()
     return hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
+
+
+def _demo_clock_csrf_token(signing_key: bytes, *, session: str) -> str:
+    """Sign a token that applies only to the one-day local-demo clock operation."""
+    return hmac.new(signing_key, f"{session}\x1fdemo-clock.advance-one-day".encode(), hashlib.sha256).hexdigest()
 
 
 def _one_form_value(values: dict[str, list[str]], name: str) -> str:

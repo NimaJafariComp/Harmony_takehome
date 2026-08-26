@@ -16,6 +16,8 @@
       <div><dt>Status</dt><dd><span class="state-label" data-state="{{ workflow.status }}">{{ workflow.status }}</span></dd></div>
       <div><dt>Current step</dt><dd>{{ workflow.current_step }}</dd></div>
       <div><dt>Recovery state</dt><dd>{{ workflow.recovery_state | replace('_', ' ') }}</dd></div>
+      <div><dt>Compensation</dt><dd><span class="state-label" data-state="{{ workflow.compensation_state }}">{{ workflow.compensation_state | replace('_', ' ') }}</span></dd></div>
+      <div><dt>Audit chronology</dt><dd>{% if workflow.audit_run_id %}<a class="text-link" href="/audit/{{ workflow.audit_run_id }}">Open audit explanation</a>{% else %}Not recorded{% endif %}</dd></div>
       <div><dt>Created</dt><dd><time datetime="{{ workflow.created_at }}">{{ workflow.created_at }}</time></dd></div>
       <div><dt>Updated</dt><dd><time datetime="{{ workflow.updated_at }}">{{ workflow.updated_at }}</time></dd></div>
     </dl>
@@ -24,7 +26,7 @@
   <section class="ledger-section" aria-labelledby="step-title">
     <div class="section-heading">
       <div><p class="section-label">Declared order</p><h2 id="step-title">Workflow steps</h2></div>
-      <p>Step order is durable. A visible prefix correlates an effect without exposing the full key.</p>
+      <p>Step order, retry count, compensation state, and the visible key prefix expose recovery state without exposing inputs or results.</p>
     </div>
     <div class="ledger-table-wrap" tabindex="0">
       <table>

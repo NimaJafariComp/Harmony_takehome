@@ -27,6 +27,7 @@ from enterprise_agent.domain import (
     UserId,
     WorkflowId,
     WorkflowStateSnapshot,
+    WorkflowStatus,
 )
 
 ReviewPayload = Mapping[str, object]
@@ -240,6 +241,8 @@ class LocalReviewReadService:
                 lease_expires_at=workflow.lease_expires_at,
                 now=now,
             ).value,
+            "compensation_state": _compensation_state(workflow.status),
+            "audit_run_id": _workflow_audit_run_id(snapshot),
             "created_at": workflow.created_at.isoformat(),
             "updated_at": workflow.updated_at.isoformat(),
             "steps": [
@@ -393,6 +396,29 @@ def _actor_can_view_plan(actor_id: UserId, plan: Plan, approval: Approval) -> bo
         approval.requester_id,
         approval.approver_id,
     }
+
+
+def _compensation_state(status: WorkflowStatus) -> str:
+    """Render only the durable compensation lifecycle, not failure or provider details."""
+    if status is WorkflowStatus.FAILED:
+        return "available"
+    if status is WorkflowStatus.COMPENSATING:
+        return "in_progress"
+    if status is WorkflowStatus.COMPENSATED:
+        return "completed"
+    return "not_required"
+
+
+def _workflow_audit_run_id(snapshot: WorkflowStateSnapshot) -> str | None:
+    """Expose one staged opaque audit continuation without rendering any workflow input payload."""
+    if not snapshot.steps:
+        return None
+    value = snapshot.steps[0].input.get("audit_run_id")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise LocalReviewUnavailableError("workflow audit correlation is unavailable")
+    return value.strip()
 
 
 def _approval_data(plan: Plan, approval: Approval) -> ReviewPayload:
