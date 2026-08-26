@@ -236,7 +236,8 @@ def test_openai_adapter_uses_the_declared_scenario_b_schema() -> None:
     schema = cast(dict[str, Any], request_format["schema"])
     assert result.status is LLMGenerationStatus.SUCCEEDED
     assert request_format["name"] == "scenario_b_recommendation_v1"
-    assert schema["discriminator"]["propertyName"] == "outcome"
+    assert schema["properties"]["recommendation"]["anyOf"]
+    assert "oneOf" not in json.dumps(schema)
     assert {"ManualReviewRecommendation", "ReallocateAndNotifyRecommendation"} <= schema[
         "$defs"
     ].keys()

@@ -133,7 +133,9 @@ class OpenAIResponsesAdapter:
             return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
 
         try:
-            recommendation = validate_recommendation(prompt.response_schema, output)
+            recommendation = validate_recommendation(
+                prompt.response_schema, _unwrap_recommendation_output(output)
+            )
         except (UnsupportedRecommendationSchemaError, ValueError):
             return _failed(model=self._model, status=LLMGenerationStatus.INVALID_RESPONSE)
         return LLMGenerationResult.succeeded(
@@ -164,7 +166,9 @@ class OpenAIResponsesAdapter:
 
 def _request_for(prompt: PromptEnvelope, *, model: str) -> dict[str, object]:
     """Build the only provider request, containing prepared messages and authorized evidence only."""
-    response_schema = _openai_strict_schema(json_schema_for_recommendation(prompt.response_schema))
+    response_schema = _openai_response_schema(
+        json_schema_for_recommendation(prompt.response_schema)
+    )
     prompt_data = {
         "purpose": prompt.purpose,
         "response_schema": prompt.response_schema,
@@ -244,6 +248,12 @@ def _output_text(
     return (LLMGenerationStatus.SUCCEEDED, output_texts[0])
 
 
+def _unwrap_recommendation_output(output: Mapping[str, object]) -> Mapping[str, object]:
+    """Return the canonical proposal nested inside OpenAI's object-root schema wrapper."""
+    recommendation = output.get("recommendation")
+    return recommendation if isinstance(recommendation, Mapping) else output
+
+
 def _failed(*, model: str, status: LLMGenerationStatus) -> LLMGenerationResult:
     """Create one failure result through the shared invariant-preserving result constructor."""
     return LLMGenerationResult.failed(provider=_PROVIDER_NAME, model=model, status=status)
@@ -263,7 +273,10 @@ def _json_default(value: object) -> object:
 def _openai_strict_schema(value: object) -> object:
     """Require every object property while retaining nullable field types for OpenAI strict output."""
     if isinstance(value, Mapping):
-        normalized = {key: _openai_strict_schema(child) for key, child in value.items()}
+        normalized = {
+            "anyOf" if key == "oneOf" else key: _openai_strict_schema(child)
+            for key, child in value.items()
+        }
         properties = normalized.get("properties")
         if isinstance(properties, Mapping):
             normalized["additionalProperties"] = False
@@ -272,3 +285,21 @@ def _openai_strict_schema(value: object) -> object:
     if isinstance(value, list):
         return [_openai_strict_schema(item) for item in value]
     return value
+
+
+def _openai_response_schema(value: object) -> dict[str, object]:
+    """Wrap the application's discriminated union so OpenAI receives an object-root schema."""
+    schema = _openai_strict_schema(value)
+    if not isinstance(schema, dict):
+        raise TypeError("OpenAI response schema must be a JSON object")
+
+    alternatives = schema.pop("anyOf", None)
+    if not isinstance(alternatives, list):
+        return schema
+
+    schema.pop("discriminator", None)
+    schema["type"] = "object"
+    schema["properties"] = {"recommendation": {"anyOf": alternatives}}
+    schema["additionalProperties"] = False
+    schema["required"] = ["recommendation"]
+    return schema
