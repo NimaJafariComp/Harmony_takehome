@@ -1,5 +1,7 @@
 """Render safe operator-facing summaries without application or provider dependencies."""
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -72,6 +74,43 @@ class StatusSummary:
     state: TerminalState
     summary: str
     next_action: str | None = None
+
+
+@dataclass(frozen=True)
+class TerminalError:
+    """Sanitized failure facts safe for machine-readable command output."""
+
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class TerminalResult:
+    """Stable presentation-owned JSON envelope for an already-sanitized command outcome."""
+
+    state: TerminalState
+    summary: str
+    data: Mapping[str, object]
+    next_actions: tuple[str, ...] = ()
+    error: TerminalError | None = None
+
+    def render_json(self) -> str:
+        """Serialize one compact result object without terminal decoration or progress output."""
+        return json.dumps(
+            {
+                "schema_version": 1,
+                "status": self.state.value,
+                "summary": self.summary,
+                "data": self.data,
+                "next_actions": list(self.next_actions),
+                "error": (
+                    {"code": self.error.code, "message": self.error.message}
+                    if self.error is not None
+                    else None
+                ),
+            },
+            separators=(",", ":"),
+        )
 
 
 @dataclass(frozen=True)

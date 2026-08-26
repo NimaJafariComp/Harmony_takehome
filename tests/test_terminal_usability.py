@@ -64,7 +64,9 @@ def _install_status_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "PostgresOperatorStatusAdapter", Reader)
     monkeypatch.setattr(
         "typer.prompt",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("read path must not prompt")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("read path must not prompt")
+        ),
     )
 
 
@@ -189,3 +191,34 @@ def test_json_missing_database_error_is_actionable_and_has_no_plain_text_leak(
         "error": {"code": "missing_configuration", "message": "DATABASE_URL is required."},
     }
     assert result.stderr == ""
+
+
+def test_json_setup_refuses_sensitive_interaction_without_prompting_or_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """JSON output cannot turn a secret-collecting setup flow into an unattended prompt."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(
+        "typer.prompt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("JSON setup must not prompt")
+        ),
+    )
+
+    result = CliRunner().invoke(cli.app, ["--output", "json", "llm-setup"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "status": "refused",
+        "summary": "LLM setup requires interactive text output.",
+        "data": {},
+        "next_actions": ["Run enterprise-agent llm-setup in an interactive terminal."],
+        "error": {
+            "code": "interactive_input_required",
+            "message": "No API key was requested or saved.",
+        },
+    }
+    assert not (tmp_path / ".env").exists()

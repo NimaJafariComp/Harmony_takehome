@@ -1,13 +1,16 @@
 """Command-line interface for the enterprise agent harness."""
 
 import sys
+from dataclasses import dataclass
 from datetime import timedelta
+from enum import StrEnum
 from os import environ
 from typing import Annotated, NoReturn, cast
 
 import typer
 from rich.console import Console
 from sqlalchemy.exc import SQLAlchemyError
+from typer._click.globals import get_current_context
 
 from enterprise_agent import __version__
 from enterprise_agent.adapters import (
@@ -20,6 +23,7 @@ from enterprise_agent.application import AuditExplainer, AuditExplanationError
 from enterprise_agent.application.guided_demo import (
     DemoCaseSelectionError,
     DemoExecutionMode,
+    GuidedDemoCase,
     GuidedDemoRun,
     guided_demo_cases,
     run_guided_demo,
@@ -56,7 +60,9 @@ from enterprise_agent.presentation import (
     EvidenceDisposition,
     EvidenceSummary,
     StatusSummary,
+    TerminalError,
     TerminalPresenter,
+    TerminalResult,
     TerminalState,
     TerminalTheme,
     WorkflowSummary,
@@ -86,13 +92,45 @@ app.add_typer(audit_app, name="audit")
 _CANCELLATION_WORD = "cancel"
 
 
+class OutputMode(StrEnum):
+    """The additive command-output surfaces supported by the terminal contract."""
+
+    TEXT = "text"
+    JSON = "json"
+
+
+@dataclass(frozen=True)
+class OutputOptions:
+    """Presentation preferences selected once at the Typer root command boundary."""
+
+    mode: OutputMode = OutputMode.TEXT
+    no_color: bool = False
+
+
 class InteractiveFlowCancelled(Exception):
     """Raised when an operator explicitly cancels before a command creates a durable write."""
 
 
 @app.callback()
-def harness() -> None:
+def harness(
+    context: typer.Context,
+    no_color: Annotated[
+        bool,
+        typer.Option("--no-color", help="Render human output without ANSI color or style codes."),
+    ] = False,
+    output: Annotated[
+        str,
+        typer.Option("--output", help="Output format: text (default) or json."),
+    ] = OutputMode.TEXT.value,
+) -> None:
     """Enterprise agent harness commands."""
+    try:
+        mode = OutputMode(output.strip().lower())
+    except ValueError as error:
+        raise typer.BadParameter(
+            "must be either 'text' or 'json'", param_hint="--output"
+        ) from error
+    context.obj = OutputOptions(mode=mode, no_color=no_color)
 
 
 @app.command()
@@ -116,30 +154,24 @@ def config_check() -> None:
 @app.command()
 def guide() -> None:
     """Show the shortest safe path to demo, inspect state, and enable shell completion."""
+    entries = _guide_entries()
+    if _emit_json_result(
+        TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary="Reviewer command guide.",
+            data={
+                "commands": [
+                    {"command": entry.command, "purpose": entry.purpose} for entry in entries
+                ],
+                "shell_completion": "enterprise-agent --install-completion",
+            },
+            next_actions=("enterprise-agent demo --list",),
+        )
+    ):
+        return
     _terminal_presenter().render_command_guide(
         title="Reviewer guide",
-        entries=(
-            CommandGuideEntry(
-                command="enterprise-agent demo --list",
-                purpose="See selectable local deterministic safety cases before resetting demo data.",
-            ),
-            CommandGuideEntry(
-                command="make demo",
-                purpose="Run the unattended local safety tour with no LLM provider call.",
-            ),
-            CommandGuideEntry(
-                command="enterprise-agent status",
-                purpose="Inspect pending approvals plus workflow and recovery state.",
-            ),
-            CommandGuideEntry(
-                command="enterprise-agent audit explain RUN_ID",
-                purpose="Reconstruct one run from the append-only audit ledger.",
-            ),
-            CommandGuideEntry(
-                command="enterprise-agent llm-usage",
-                purpose="Read recorded token and cost totals without a provider request.",
-            ),
-        ),
+        entries=entries,
         completion_command="enterprise-agent --install-completion",
     )
 
@@ -150,17 +182,47 @@ def status() -> None:
     try:
         snapshot = PostgresOperatorStatusAdapter(_database_url(action="status")).read_status()
     except SQLAlchemyError as error:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.FAILED,
+                summary="Local operator status is unavailable.",
+                data={},
+                next_actions=("Run make demo first, then retry enterprise-agent status.",),
+                error=TerminalError(
+                    code="database_unavailable",
+                    message="The local database is unavailable.",
+                ),
+            )
+        ):
+            raise typer.Exit(code=1) from error
         typer.echo(
             "status: unavailable (the local database is unavailable; run make demo first)",
             err=True,
         )
         raise typer.Exit(code=1) from error
+    if _uses_json_output():
+        _emit_json_result(_operator_status_result(snapshot))
+        return
     _render_operator_status(snapshot)
 
 
 @app.command(name="llm-setup")
 def llm_setup() -> None:
     """Interactively save one selected LLM profile locally without displaying its API key."""
+    if _uses_json_output():
+        _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="LLM setup requires interactive text output.",
+                data={},
+                next_actions=("Run enterprise-agent llm-setup in an interactive terminal.",),
+                error=TerminalError(
+                    code="interactive_input_required",
+                    message="No API key was requested or saved.",
+                ),
+            )
+        )
+        raise typer.Exit(code=1)
     if not _is_interactive_terminal():
         typer.echo(
             "configuration: setup refused (an interactive terminal is required; no key was requested)",
@@ -340,6 +402,15 @@ def demo(
         if case or all_cases or unattended:
             typer.echo("demo: --list cannot be combined with selection or --unattended", err=True)
             raise typer.Exit(code=2)
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.SUCCEEDED,
+                summary="Guided deterministic demo catalogue.",
+                data={"cases": [_guided_demo_case_data(item) for item in guided_demo_cases()]},
+                next_actions=("enterprise-agent demo --unattended",),
+            )
+        ):
+            return
         _render_guided_demo_catalog()
         return
     try:
@@ -347,6 +418,21 @@ def demo(
     except DemoCaseSelectionError as error:
         typer.echo(f"demo: refused ({error})", err=True)
         raise typer.Exit(code=2) from error
+
+    if _uses_json_output() and not unattended:
+        _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary="Guided demo requires --unattended when --output json is selected.",
+                data={},
+                next_actions=("Run enterprise-agent demo interactively or add --unattended.",),
+                error=TerminalError(
+                    code="interactive_confirmation_required",
+                    message="No local demo data was reset or staged.",
+                ),
+            )
+        )
+        raise typer.Exit(code=1)
 
     database_url = _database_url(action="guided demo")
     if not unattended:
@@ -378,7 +464,92 @@ def demo(
     except (SeedSafetyError, ValueError) as error:
         typer.echo(f"demo: refused ({error})", err=True)
         raise typer.Exit(code=1) from error
+    if _uses_json_output():
+        _emit_json_result(_guided_demo_result(result))
+        return
     _render_guided_demo(result)
+
+
+def _guide_entries() -> tuple[CommandGuideEntry, ...]:
+    """Keep text and JSON command discovery on one safe, copyable directory."""
+    return (
+        CommandGuideEntry(
+            command="enterprise-agent demo --list",
+            purpose="See selectable local deterministic safety cases before resetting demo data.",
+        ),
+        CommandGuideEntry(
+            command="make demo",
+            purpose="Run the unattended local safety tour with no LLM provider call.",
+        ),
+        CommandGuideEntry(
+            command="enterprise-agent status",
+            purpose="Inspect pending approvals plus workflow and recovery state.",
+        ),
+        CommandGuideEntry(
+            command="enterprise-agent audit explain RUN_ID",
+            purpose="Reconstruct one run from the append-only audit ledger.",
+        ),
+        CommandGuideEntry(
+            command="enterprise-agent llm-usage",
+            purpose="Read recorded token and cost totals without a provider request.",
+        ),
+    )
+
+
+def _guided_demo_case_data(item: GuidedDemoCase) -> dict[str, object]:
+    """Project a guided case to safe scalar fields for the JSON catalogue and result envelope."""
+    return {
+        "case_id": item.case_id,
+        "title": item.title,
+        "execution_mode": item.execution_mode.value,
+        "phase": item.phase,
+        "outcome": item.outcome,
+        "next_action": item.next_safe_action,
+    }
+
+
+def _guided_demo_result(result: GuidedDemoRun) -> TerminalResult:
+    """Serialize only selected demo facts, never a provider payload or tool result."""
+    results: list[dict[str, object]] = []
+    has_pending_approval = False
+    for item in result.results:
+        case_data = _guided_demo_case_data(item.case)
+        case_data["identifiers"] = [
+            {
+                "label": identifier.label,
+                "value": identifier.value,
+                "disposition": (
+                    EvidenceDisposition.INCLUDED.value
+                    if identifier.included
+                    else EvidenceDisposition.EXCLUDED.value
+                ),
+            }
+            for identifier in item.identifiers
+        ]
+        if item.scenario_a_pending is not None:
+            has_pending_approval = True
+            case_data["pending_approval"] = {
+                "run_id": str(item.scenario_a_pending.run_id),
+                "attention_id": str(item.scenario_a_pending.attention_id),
+                "plan_id": str(item.scenario_a_pending.plan_id),
+                "approval_id": str(item.scenario_a_pending.approval_id),
+                "expires_at": item.scenario_a_pending.approval_expires_at,
+            }
+        if item.scenario_c_pending is not None:
+            has_pending_approval = True
+            case_data["pending_approval"] = {
+                "run_id": str(item.scenario_c_pending.run_id),
+                "attention_id": str(item.scenario_c_pending.attention_id),
+                "approval_id": str(item.scenario_c_pending.approval_id),
+                "workflow_id": str(item.scenario_c_pending.workflow_id),
+            }
+        results.append(case_data)
+    return TerminalResult(
+        state=(TerminalState.PENDING_APPROVAL if has_pending_approval else TerminalState.SUCCEEDED),
+        summary="Guided deterministic demo completed with local synthetic data only.",
+        data={"cases": results},
+        next_actions=tuple(item.case.next_safe_action for item in result.results),
+    )
 
 
 def _render_guided_demo_catalog() -> None:
@@ -531,6 +702,52 @@ def _render_operator_status(snapshot: OperatorStatusSnapshot) -> None:
     typer.echo("Usage: enterprise-agent llm-usage")
 
 
+def _operator_status_result(snapshot: OperatorStatusSnapshot) -> TerminalResult:
+    """Project the read model to stable, safe scalar JSON without a second database query."""
+    approvals = [
+        {
+            "approval_id": item.approval_id,
+            "plan_id": item.plan_id,
+            "requester": item.requester,
+            "approver": item.approver,
+            "decision_state": item.decision_state,
+            "expires_at": item.expires_at,
+            "audit_run_id": item.audit_run_id,
+        }
+        for item in snapshot.pending_approvals
+    ]
+    workflows = [
+        {
+            "workflow_id": item.workflow_id,
+            "status": item.status,
+            "current_step": item.current_step,
+            "idempotency_key_prefix": item.idempotency_key_prefix,
+            "recovery_state": item.recovery_state.value,
+        }
+        for item in snapshot.workflows
+    ]
+    audit_actions = tuple(
+        dict.fromkeys(
+            f"enterprise-agent audit explain {item.audit_run_id}"
+            for item in snapshot.pending_approvals
+            if item.audit_run_id is not None
+        )
+    )
+    if not approvals and not workflows:
+        return TerminalResult(
+            state=TerminalState.SUCCEEDED,
+            summary="No pending approvals or workflow instances are recorded.",
+            data={"pending_approvals": approvals, "workflows": workflows},
+            next_actions=("enterprise-agent demo --list",),
+        )
+    return TerminalResult(
+        state=(TerminalState.PENDING_APPROVAL if approvals else TerminalState.IN_PROGRESS),
+        summary=f"{len(approvals)} pending approval(s), {len(workflows)} workflow instance(s).",
+        data={"pending_approvals": approvals, "workflows": workflows},
+        next_actions=(*audit_actions, "enterprise-agent llm-usage"),
+    )
+
+
 _SAFETY_TOUR_LABEL = "safety-tour"
 
 
@@ -569,6 +786,19 @@ def _database_url(*, action: str = "reset") -> str:
     """Read only the database setting needed by local reset and seed commands."""
     database_url = _runtime_environment().get("DATABASE_URL", "").strip()
     if not database_url:
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.REFUSED,
+                summary=f"{action.capitalize()} requires DATABASE_URL.",
+                data={},
+                next_actions=(f"Set DATABASE_URL, then run enterprise-agent {action}.",),
+                error=TerminalError(
+                    code="missing_configuration",
+                    message="DATABASE_URL is required.",
+                ),
+            )
+        ):
+            raise typer.Exit(code=1)
         typer.echo(f"database: {action} refused (DATABASE_URL is required)", err=True)
         raise typer.Exit(code=1)
     return database_url
@@ -678,7 +908,31 @@ def _prompt_model_choice(catalog: tuple[CuratedModel, ...]) -> str:
 
 def _terminal_presenter() -> TerminalPresenter:
     """Create one terminal-bound presentation adapter only after command semantics are known."""
-    return TerminalPresenter(console=Console(file=sys.stdout), theme=TerminalTheme())
+    return TerminalPresenter(
+        console=Console(file=sys.stdout, no_color=_output_options().no_color),
+        theme=TerminalTheme(),
+    )
+
+
+def _output_options() -> OutputOptions:
+    """Read root CLI presentation options without coupling commands to Click context internals."""
+    context = get_current_context(silent=True)
+    if context is not None and isinstance(context.obj, OutputOptions):
+        return context.obj
+    return OutputOptions()
+
+
+def _uses_json_output() -> bool:
+    """Keep command semantics separate from the decision to serialize the final result."""
+    return _output_options().mode is OutputMode.JSON
+
+
+def _emit_json_result(result: TerminalResult) -> bool:
+    """Write exactly one schema-versioned JSON object when the operator selected JSON output."""
+    if not _uses_json_output():
+        return False
+    typer.echo(result.render_json())
+    return True
 
 
 def _confirm_local_write(summary: ConfirmationSummary) -> None:
