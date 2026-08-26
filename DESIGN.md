@@ -77,7 +77,7 @@ Scenario B and optional Scenario C reuse the control plane without giving the mo
 
 ### What I would change in a production workflow engine
 
-No, not exactly. For the take-home, PostgreSQL plus a small persisted runner, deterministic step definitions, idempotency, compensation, and restart recovery make the mechanics visible and keep the system achievable in the time box. In production, I would retain the business flow and safety boundaries but replace the custom orchestration substrate with a mature durable workflow platform, such as Temporal.
+For the take-home, PostgreSQL plus a small persisted runner, deterministic step definitions, idempotency, compensation, and restart recovery make the mechanics visible and keep the system achievable in the time box. In production, I would retain the business flow and safety boundaries but replace the custom orchestration substrate with a mature durable workflow platform, such as Temporal.
 
 The main change is responsibility allocation:
 
@@ -104,7 +104,7 @@ The production platform would not become the authorization system. Before every 
 
 At larger scale, I would use separate worker pools for ERP activities, mail/calendar activities, LLM activities, notification activities, and background detection. That permits independent rate limits and failure isolation: a slow LLM provider should not block ERP writes, and Microsoft Graph throttling should not stop purchase-order execution. I would also combine ERP change events for quick reaction with scheduled reconciliation to recover from missed events.
 
-The tradeoff is deliberate. A durable workflow platform introduces infrastructure, operational expertise, workflow versioning, and a broader test surface that would obscure the required Scenario A proof in a three-day take-home. The custom runner is therefore a transparent bounded implementation, not a claim that it should run unchanged for thousands of employees. Its persisted state, declared steps, idempotency keys, compensation, approval checks, and audit model are the safety properties I would preserve in production.
+and obviously a better ui and user auth and login system.
 
 ## Time, scheduling, and recovery
 
