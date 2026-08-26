@@ -276,6 +276,7 @@ def test_openai_adapter_wraps_discriminated_recommendations_in_a_supported_root_
     assert schema["required"] == ["recommendation"]
     assert schema["properties"]["recommendation"]["anyOf"]
     assert "oneOf" not in json.dumps(schema)
+    assert "pattern" not in json.dumps(schema)
     assert result.status is LLMGenerationStatus.SUCCEEDED
     assert result.require_output() == {
         "outcome": "MANUAL_REVIEW",
