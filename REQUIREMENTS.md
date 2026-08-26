@@ -39,7 +39,7 @@ All required assignment areas are covered by executable evidence and documentati
 | `README.md`: run instructions, extension guidance, and cuts | [README.md](README.md) documents `make demo`, `make verify`, the terminal, provider setup/evaluation, extension rules, and intentional limits. |
 | `MODEL.md` | [MODEL.md](MODEL.md) explains retained sample concepts, changes, noise, scopes, clock, and omitted ERP breadth. |
 | 2-3 page design document | [DESIGN.md](DESIGN.md) answers the required identity/authorization, durable memory, scaling, and deterministic-workflow questions. |
-| Tests for gate, trigger dedupe, and workflow resumption at minimum | The focused test files above cover all three, and `make verify` passed all 579 tests at 85.70% coverage. |
+| Tests for gate, trigger dedupe, and workflow resumption at minimum | The focused test files above cover all three, and the latest `make verify` passed all 620 tests at 83.86% coverage. |
 | Recorded Scenario A run with approval, execution, and audit trail | [TRANSCRIPT.md](TRANSCRIPT.md) contains the reproducible commands and complete deterministic timing/audit trace, separately labeling the no-write live-model scorecard. |
 
 ## Optional additions delivered

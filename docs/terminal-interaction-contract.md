@@ -9,13 +9,13 @@ meta:
   contentPlan:
     - "Define the command, presentation, and safety boundaries"
     - "Specify semantic states, output modes, prompts, errors, and identifiers"
-    - "Set compatibility and test requirements for M9.2 through M9.6"
+    - "Set compatibility and test requirements for the completed M9 through M11 terminal work"
   openQuestions: []
 ---
 
 # Operate the harness from a terminal
 
-This reference defines the terminal contract for M9.2 through M9.6. It preserves Typer as the command grammar and confines Rich to presentation. Until those tasks land, existing commands retain their current output.
+This reference defines the terminal contract implemented through M9 to M11. It preserves Typer as the command grammar and confines Rich to presentation.
 
 ## Keep commands separate from presentation
 
@@ -57,7 +57,7 @@ Each command must preserve the same semantic outcome across these surfaces:
 
 `--no-color` overrides terminal capability detection. `--output json` overrides human presentation and writes only the result object to standard output. Diagnostics for a failed command write to standard error.
 
-With no subcommand, the installed `enterprise-agent` executable is the interactive entry point. In a TTY it opens a keyboard-only Home surface that routes to Guided demo, Normal operator mode, or local LLM setup. JSON and non-TTY invocations never open that menu; they receive the same concise command directory as `enterprise-agent guide`. The Home surface delegates only to existing commands, so their confirmations, local-demo guard, provider opt-in, and exit-code contracts do not change.
+With no subcommand, the installed `enterprise-agent` executable is the interactive entry point. In a TTY it opens a keyboard-only Home surface that routes to Guided company demo, guarded live local demo, Normal operator mode, or local LLM setup. JSON and non-TTY invocations never open that menu; they receive the same concise command directory as `enterprise-agent guide`. The Home surface delegates only to existing commands, so their confirmations, local-demo guard, provider opt-in, and exit-code contracts do not change.
 
 The JSON envelope uses these top-level fields:
 
@@ -125,13 +125,13 @@ Read-only commands must never prompt. A command that accepts sensitive input mus
 
 ## Preserve compatibility while the interface evolves
 
-M9.2 introduces the shared Rich console and theme. M9.3 adds interactive safety flows. M9.4 adds the guided demo. M9.5 adds read-path discovery. M9.6 tests this contract without ANSI snapshots.
+M9 introduced the shared Rich presentation layer, interactive safety flows, guided demo, read-path discovery, and non-snapshot terminal tests. M11 added the Home shell and bounded views. M13 added the guarded live local-demo route while preserving the same confirmation and output rules.
 
 Existing command names and positional arguments remain valid. The no-subcommand TTY surface is additive to the installed command, while non-TTY and JSON no-subcommand invocations retain command discovery rather than prompting. New output options must be additive. A future command may opt out of progress only when it has no long-running local step.
 
 ## Verify each presentation change
 
-Every M9 command change requires tests for these contracts:
+Every terminal command change requires tests for these contracts:
 
 - TTY and piped output produce the same status and identifiers
 - `--no-color` contains no ANSI escape code

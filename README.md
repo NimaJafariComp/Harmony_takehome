@@ -276,7 +276,18 @@ The suite separates deterministic unit, PostgreSQL integration, mocked provider-
 
 ## How to extend safely
 
-1. Add a typed domain contract and a migration before writing an adapter.
+Use the extension path that matches the new capability:
+
+| Add | Update | Prove before merging |
+|---|---|---|
+| Tool | Add a Pydantic input model and `ToolDefinition` to `src/enterprise_agent/application/tools.py`; implement the bounded adapter behavior in `src/enterprise_agent/adapters/tools.py`; add a migration only when the effect needs persisted state. | Tool-schema, authorization, idempotency, compensation, and affected scenario-execution tests. |
+| Provider | Implement the `LLMPort` contract in a new adapter; register its profile/environment prefix in `src/enterprise_agent/config.py`, compose it in `src/enterprise_agent/smoke.py`, and add only adapter-reviewed models in `src/enterprise_agent/llm_setup.py`. | Mocked adapter contracts for structured output, timeout/refusal/failure normalization, secret suppression, no fallback, and metering. Run any real provider check manually and record it separately from CI. |
+| Detector | Add a versioned `AttentionTrigger` in `src/enterprise_agent/domain/attention.py`; implement its calculation in an application service such as `src/enterprise_agent/application/stockout.py`; request input only through a scoped port in `src/enterprise_agent/ports.py`. | Positive/negative detection, durable deduplication, source-version binding, scope isolation, and one named scenario test. |
+| Declared workflow | Define an immutable versioned `WorkflowDefinition` in `src/enterprise_agent/application/workflows.py`; keep model output limited to the workflow name and typed parameters; execute through `src/enterprise_agent/application/workflow_executor.py`. | Fixed-order, rejected added/skipped/reordered steps, approval and freshness rechecks, idempotent replay, compensation, and recovery tests. |
+
+Every extension follows these rules:
+
+1. Add a typed domain contract and a migration before writing an adapter when the capability needs durable data.
 2. Expose data through a scoped port; authorization belongs in the provider query, not after context assembly.
 3. Add a typed recommendation outcome and register every allowed tool. Do not let a model select arbitrary actions or workflow steps.
 4. Bind planned source versions, policy version, and plan hash to human approval; revalidate immediately before execution.

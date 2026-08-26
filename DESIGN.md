@@ -75,6 +75,12 @@ Each effect has a stable idempotency key. The implementation records `tool.start
 
 Scenario B and optional Scenario C reuse the control plane without giving the model a general executor. They use typed, registered bounded tool plans. Scenario B permits reallocate-and-notify, shortage escalation, or manual review. Scenario C permits manual review or one causally bound purchase-order hold plus production notification. The shared gate, approval records, executor, scheduler, and audit service still own all writes.
 
+### What I would change in a production workflow engine
+
+I would not build a larger workflow engine as a growing set of scenario-specific executor branches. This harness keeps the executor compact because it has one declared six-step purchasing workflow and two bounded tool-plan paths. For a broader production engine, I would define an immutable versioned graph with explicit node types for deterministic guards, human approvals, bounded reasoning, connector effects, compensations, and waits. Each running instance would retain the exact graph snapshot it started with, so a later workflow-definition version could not alter in-flight behavior.
+
+The tradeoff is deliberate. A graph runtime needs transition validation, version-migration rules, richer observability, and a larger test surface. That abstraction would obscure the required Scenario A proof in this time-boxed harness. The current declaration, persisted state, idempotency keys, and compensation model preserve the safety properties that a future graph runtime must retain.
+
 ## Time, scheduling, and recovery
 
 The one-row `demo_clock` replaces wall time in deterministic flows. It starts at a fixed instant and persists across adapters. This permits repeatable end-of-day approval routing and a scheduled Tuesday receipt check.
@@ -87,7 +93,7 @@ Approval escalation is also data-driven. At end of day, an unanswered request ro
 
 OpenAI, Claude, and OpenRouter implement one provider-neutral contract. Each selected adapter sends only authorized evidence and requests structured output for the relevant typed schema. The contract normalizes success, malformed output, timeout, refusal, and provider failure. A provider failure becomes a safe planner outcome; there is no automatic cross-provider fallback.
 
-The interactive setup flow stores one chosen profile and adapter-reviewed, account-visible model in the ignored local `.env` file. It uses hidden API-key input, owner-only permissions, and an optional metadata-only credential check. Runtime audit events retain provider, model, status, token counts, cost, and cost source. They do not retain keys, prompts, outputs, or raw provider payloads.
+The host interactive setup flow stores one chosen profile and adapter-reviewed, account-visible model in the ignored local `.env` file. The Docker terminal user interface (TUI) instead writes its ignored `.enterprise-agent/profile.env` host mount. Both paths use hidden API-key input, owner-only permissions, and an optional metadata-only credential check. Runtime audit events retain provider, model, status, token counts, cost, and cost source. They do not retain keys, prompts, outputs, or raw provider payloads.
 
 The manual evaluation pack is intentionally separate from application correctness tests. It sends fixed synthetic cases through one explicitly selected provider and writes no database, workflow, ERP, mail, or audit state. Deterministic fake-planner scenario tests remain the correctness authority. The application gate remains in force even if a model recommendation is poor.
 
