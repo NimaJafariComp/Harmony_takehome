@@ -111,6 +111,13 @@ def test_guide_json_is_one_stable_envelope_without_human_decoration() -> None:
                     "purpose": "Run the unattended local safety tour with no LLM provider call.",
                 },
                 {
+                    "command": "enterprise-agent live-demo --list",
+                    "purpose": (
+                        "Inspect the guarded one-provider local Scenario A, B, and C catalogue "
+                        "before opting in."
+                    ),
+                },
+                {
                     "command": "enterprise-agent status",
                     "purpose": "Inspect pending approvals plus workflow and recovery state.",
                 },

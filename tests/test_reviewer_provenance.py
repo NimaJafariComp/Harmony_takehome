@@ -62,3 +62,21 @@ def test_deterministic_demo_provenance_distinguishes_staged_and_fixture_cases() 
     assert staged.gate_status is GateStatus.PENDING_APPROVAL
     assert fixture.schema_validation is SchemaValidation.NOT_RUN
     assert fixture.gate_status is GateStatus.NOT_INVOKED_FIXTURE
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    (
+        ("NOT_INVOKED_PLANNER_FAILURE", "Not invoked (planner response was not usable)"),
+        ("NOT_INVOKED_MANUAL_REVIEW", "Not invoked (manual review proposed)"),
+        ("NOT_INVOKED_NO_ACTION", "Not invoked (no action proposed)"),
+        ("DENIED", "Denied by deterministic policy"),
+    ),
+)
+def test_live_demo_non_executable_paths_have_specific_visible_gate_labels(
+    status: str, label: str
+) -> None:
+    """A live result cannot falsely appear approval-ready when validation or policy stopped it."""
+    from enterprise_agent.review_provenance import GateStatus
+
+    assert GateStatus[status].label == label

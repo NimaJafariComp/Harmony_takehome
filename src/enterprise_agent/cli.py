@@ -30,6 +30,15 @@ from enterprise_agent.application.guided_demo import (
     run_guided_demo,
     select_guided_demo_cases,
 )
+from enterprise_agent.application.live_demo import (
+    LiveDemoCase,
+    LiveDemoExecutionError,
+    LiveDemoResult,
+    LiveDemoSelectionError,
+    live_demo_cases,
+    run_live_demo,
+    select_live_demo_case,
+)
 from enterprise_agent.application.llm_evaluation import (
     EvaluationCaseSelectionError,
     LLMEvaluationReport,
@@ -83,7 +92,7 @@ from enterprise_agent.presentation import (
     TerminalTheme,
     WorkflowSummary,
 )
-from enterprise_agent.review_provenance import PlannerProvenance
+from enterprise_agent.review_provenance import GateStatus, PlannerProvenance
 from enterprise_agent.seed import (
     SeedSafetyError,
     _require_local_demo_database,
@@ -871,6 +880,138 @@ def scenario_c() -> None:
     )
 
 
+@app.command(name="live-demo")
+def live_demo(
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help="Configured provider profile: openai, claude, or openrouter.",
+        ),
+    ] = None,
+    case: Annotated[
+        str | None,
+        typer.Option("--case", help="Fixed synthetic Scenario A, B, or C live-demo case ID."),
+    ] = None,
+    list_cases: Annotated[
+        bool,
+        typer.Option(
+            "--list", help="List fixed local cases without reading configuration or a provider."
+        ),
+    ] = False,
+) -> None:
+    """Ask one selected provider for a proposal over fixed local data, then stage review only."""
+    if list_cases:
+        if profile is not None or case is not None:
+            _live_demo_refusal(
+                summary="Live-demo listing cannot be combined with provider or case selection.",
+                code="invalid_arguments",
+                message="Run enterprise-agent live-demo --list by itself.",
+                exit_code=2,
+            )
+        if _emit_json_result(
+            TerminalResult(
+                state=TerminalState.SUCCEEDED,
+                summary="Guarded local live-demo catalogue.",
+                data={"cases": [_live_demo_case_data(item) for item in live_demo_cases()]},
+                next_actions=(
+                    "Run enterprise-agent live-demo --profile PROVIDER --case CASE_ID in an interactive terminal.",
+                ),
+            )
+        ):
+            return
+        _render_live_demo_catalogue()
+        return
+
+    if profile is None:
+        _live_demo_refusal(
+            summary="Guarded live demo requires an explicit provider profile.",
+            code="explicit_profile_required",
+            message="--profile is required; no provider was called and no data was reset.",
+            exit_code=1,
+        )
+    if case is None:
+        _live_demo_refusal(
+            summary="Guarded live demo requires one fixed scenario case.",
+            code="explicit_case_required",
+            message="--case is required; no provider was called and no data was reset.",
+            exit_code=1,
+        )
+    if _uses_json_output():
+        _refuse_json_write(
+            command="live-demo",
+            summary="Live demo requires interactive text confirmation.",
+        )
+    if not _is_interactive_terminal():
+        typer.echo(
+            "live-demo: refused (an interactive terminal is required for explicit confirmation; "
+            "no provider was called and no data was reset)",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    assert profile is not None and case is not None
+    try:
+        selected_case = select_live_demo_case(case)
+        configuration = load_provider_profile(profile, _runtime_environment())
+        database_url = _database_url(action="live-demo")
+        _require_local_demo_database(database_url, allow_test_database=False)
+    except LiveDemoSelectionError as error:
+        _live_demo_refusal(
+            summary="Guarded live-demo case selection was refused.",
+            code="invalid_live_demo_selection",
+            message="Choose one case displayed by enterprise-agent live-demo --list.",
+            exit_code=2,
+            error=error,
+        )
+    except (ConfigurationError, ValueError) as error:
+        if _emit_json_result(_configuration_refusal(action="live demo", error=error)):
+            raise typer.Exit(code=1) from error
+        typer.echo(
+            "configuration: live demo refused (configured provider profile is unavailable)",
+            err=True,
+        )
+        raise typer.Exit(code=1) from error
+    except SeedSafetyError as error:
+        typer.echo(f"live-demo: refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+
+    try:
+        _confirm_local_write(
+            ConfirmationSummary(
+                action=f"Run live {selected_case.title}",
+                target="the local synthetic demo database and one selected provider",
+                effect=(
+                    "Resets and seeds fixed local data, sends one bounded proposal request, and stages "
+                    "at most one human approval."
+                ),
+                freshness=(
+                    "The proposal is schema-validated and deterministically gated; any later workflow "
+                    "execution rechecks freshness."
+                ),
+                write_consequence=(
+                    "Calls the selected provider and writes only local synthetic attention, plan, approval, "
+                    "workflow, schedule, and audit records. No business tool effect is executed."
+                ),
+                confirmation_word="live",
+            )
+        )
+    except InteractiveFlowCancelled:
+        _exit_cancelled("live-demo: cancelled; no provider was called and no data was written")
+
+    try:
+        result = run_live_demo(
+            database_url,
+            configuration=configuration,
+            case_id=selected_case.case_id,
+        )
+    except (LiveDemoExecutionError, SeedSafetyError, ValueError) as error:
+        typer.echo(f"live-demo: refused ({error})", err=True)
+        raise typer.Exit(code=1) from error
+
+    _render_live_demo(result)
+
+
 @app.command()
 def demo(
     case: Annotated[
@@ -1021,6 +1162,10 @@ def _guide_entries() -> tuple[CommandGuideEntry, ...]:
             purpose="Run the unattended local safety tour with no LLM provider call.",
         ),
         CommandGuideEntry(
+            command="enterprise-agent live-demo --list",
+            purpose="Inspect the guarded one-provider local Scenario A, B, and C catalogue before opting in.",
+        ),
+        CommandGuideEntry(
             command="enterprise-agent status",
             purpose="Inspect pending approvals plus workflow and recovery state.",
         ),
@@ -1037,6 +1182,139 @@ def _guide_entries() -> tuple[CommandGuideEntry, ...]:
             purpose="Inspect the optional synthetic no-write live-LLM evaluation pack before opting in.",
         ),
     )
+
+
+def _live_demo_case_data(item: LiveDemoCase) -> dict[str, str]:
+    """Project the fixed live-demo catalogue without exposing a provider prompt or seed payload."""
+    return {
+        "case_id": str(item.case_id),
+        "scenario": item.scenario,
+        "title": item.title,
+        "response_schema": item.response_schema,
+    }
+
+
+def _render_live_demo_catalogue() -> None:
+    """Show fixed live-eligible local stories before configuration, reset, or provider composition."""
+    presenter = _terminal_presenter()
+    presenter.render_header(
+        title="Guarded live local demo",
+        subtitle=(
+            "Fixed synthetic data · one selected provider proposal · schema validation and approval "
+            "gate remain mandatory"
+        ),
+    )
+    presenter.render_status(
+        StatusSummary(
+            state=TerminalState.SUCCEEDED,
+            summary="Listing is local and does not load credentials, reset data, or call a provider.",
+            next_action=(
+                "Run enterprise-agent live-demo --profile PROVIDER --case CASE_ID in an interactive terminal."
+            ),
+        )
+    )
+    presenter.render_text_table(
+        title="Fixed live-demo cases",
+        columns=("Case", "Scenario", "Purpose"),
+        rows=tuple((str(item.case_id), item.scenario, item.title) for item in live_demo_cases()),
+    )
+
+
+def _live_demo_terminal_state(result: LiveDemoResult) -> TerminalState:
+    """Map an already-safe control result to the narrow terminal status vocabulary."""
+    match result.provenance.gate_status:
+        case GateStatus.PENDING_APPROVAL:
+            return TerminalState.PENDING_APPROVAL
+        case GateStatus.NOT_INVOKED_MANUAL_REVIEW:
+            return TerminalState.MANUAL_REVIEW
+        case GateStatus.NOT_INVOKED_NO_ACTION:
+            return TerminalState.SUCCEEDED
+        case GateStatus.NOT_INVOKED_PLANNER_FAILURE:
+            return TerminalState.FAILED
+        case GateStatus.DENIED:
+            return TerminalState.REFUSED
+        case _:
+            return TerminalState.REFUSED
+
+
+def _live_demo_next_action(result: LiveDemoResult) -> str:
+    """State the one safe follow-up without implying that a provider proposal is executable."""
+    match result.provenance.gate_status:
+        case GateStatus.PENDING_APPROVAL:
+            return f"Inspect enterprise-agent audit explain {result.run_id}, then decide the displayed approval."
+        case GateStatus.NOT_INVOKED_MANUAL_REVIEW:
+            return "No plan was created; resolve the ambiguity through the designated human review process."
+        case GateStatus.NOT_INVOKED_NO_ACTION:
+            return "No plan was created because the validated proposal selected no action."
+        case GateStatus.NOT_INVOKED_PLANNER_FAILURE:
+            return "No plan was created; inspect the safe provider status and retry only after correction."
+        case GateStatus.DENIED:
+            return "No plan was created because deterministic policy denied the validated proposal."
+        case _:
+            return "No plan was created."
+
+
+def _render_live_demo(result: LiveDemoResult) -> None:
+    """Render only sanitized result identifiers and metering, never a prompt or provider-owned text."""
+    presenter = _terminal_presenter()
+    presenter.render_header(
+        title="Guarded live local demo",
+        subtitle=(
+            "LIVE provider proposal over fixed synthetic data · no business tool effect is executed "
+            "without a separate approval and freshness check"
+        ),
+    )
+    presenter.render_demo_case(
+        state=_live_demo_terminal_state(result),
+        title=result.case.title,
+        phase="Provider proposal → schema validation → deterministic policy → approval-gated stage",
+        provenance=result.provenance,
+        mode=(
+            "The selected provider made one bounded proposal. It cannot execute a business tool or "
+            "bypass the existing approval and workflow controls."
+        ),
+        outcome=result.outcome or "No usable canonical recommendation was produced.",
+        next_action=_live_demo_next_action(result),
+    )
+    presenter.render_text_table(
+        title="Live-demo control records",
+        columns=(
+            "Provider status",
+            "Run ID",
+            "Attention ID",
+            "Plan ID",
+            "Approval ID",
+            "Workflow ID",
+            "Escalation task ID",
+        ),
+        rows=(
+            (
+                result.planner_status.value,
+                str(result.run_id),
+                str(result.attention_id),
+                str(result.plan_id or "not created"),
+                str(result.approval_id or "not created"),
+                str(result.workflow_id or "not created"),
+                str(result.escalation_task_id or "not created"),
+            ),
+        ),
+    )
+    if result.usage is not None:
+        presenter.render_text_table(
+            title="Selected-provider request metering",
+            columns=("Input tokens", "Output tokens", "Total tokens", "Cost (USD)", "Cost source"),
+            rows=(
+                (
+                    str(result.usage.input_tokens),
+                    str(result.usage.output_tokens),
+                    str(result.usage.total_tokens),
+                    str(result.usage.cost_usd)
+                    if result.usage.cost_usd is not None
+                    else "unavailable",
+                    result.usage.cost_source.value,
+                ),
+            ),
+        )
 
 
 def _guided_demo_case_data(item: GuidedDemoCase) -> dict[str, object]:
@@ -1679,6 +1957,28 @@ def _evaluation_refusal(
     if _emit_json_result(result):
         raise typer.Exit(code=exit_code) from error
     typer.echo(f"llm-evaluate: refused ({message})", err=True)
+    raise typer.Exit(code=exit_code) from error
+
+
+def _live_demo_refusal(
+    *,
+    summary: str,
+    code: str,
+    message: str,
+    exit_code: int,
+    error: Exception | None = None,
+) -> NoReturn:
+    """Refuse a live-demo request before loading a key, resetting data, or composing an adapter."""
+    result = TerminalResult(
+        state=TerminalState.REFUSED,
+        summary=summary,
+        data={},
+        next_actions=("Run enterprise-agent live-demo --list to inspect fixed local cases.",),
+        error=TerminalError(code=code, message=message),
+    )
+    if _emit_json_result(result):
+        raise typer.Exit(code=exit_code) from error
+    typer.echo(f"live-demo: refused ({message})", err=True)
     raise typer.Exit(code=exit_code) from error
 
 

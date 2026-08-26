@@ -43,6 +43,10 @@ class GateStatus(StrEnum):
     PENDING_APPROVAL = "pending_approval"
     NOT_INVOKED_FIXTURE = "not_invoked_fixture"
     NOT_INVOKED_NO_WRITE_EVALUATION = "not_invoked_no_write_evaluation"
+    NOT_INVOKED_PLANNER_FAILURE = "not_invoked_planner_failure"
+    NOT_INVOKED_MANUAL_REVIEW = "not_invoked_manual_review"
+    NOT_INVOKED_NO_ACTION = "not_invoked_no_action"
+    DENIED = "denied"
 
     @property
     def label(self) -> str:
@@ -51,6 +55,10 @@ class GateStatus(StrEnum):
             GateStatus.PENDING_APPROVAL: "Passed to pending approval",
             GateStatus.NOT_INVOKED_FIXTURE: "Not invoked (fixture walkthrough)",
             GateStatus.NOT_INVOKED_NO_WRITE_EVALUATION: "Not invoked (no-write evaluation)",
+            GateStatus.NOT_INVOKED_PLANNER_FAILURE: "Not invoked (planner response was not usable)",
+            GateStatus.NOT_INVOKED_MANUAL_REVIEW: "Not invoked (manual review proposed)",
+            GateStatus.NOT_INVOKED_NO_ACTION: "Not invoked (no action proposed)",
+            GateStatus.DENIED: "Denied by deterministic policy",
         }[self]
 
 

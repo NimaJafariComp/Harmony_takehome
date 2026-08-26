@@ -8,13 +8,24 @@ from sqlalchemy.exc import SQLAlchemyError
 from typer.testing import CliRunner
 
 from enterprise_agent import cli
+from enterprise_agent.application.live_demo import LiveDemoCase, LiveDemoCaseId, LiveDemoResult
+from enterprise_agent.config import ProviderConfiguration
 from enterprise_agent.domain import (
     ApprovalId,
     AttentionId,
     AuditEvent,
     AuditEventId,
+    PlanId,
     RunId,
+    ScheduledTaskId,
     WorkflowId,
+)
+from enterprise_agent.ports import LLMGenerationStatus
+from enterprise_agent.review_provenance import (
+    GateStatus,
+    PlannerMode,
+    PlannerProvenance,
+    SchemaValidation,
 )
 from enterprise_agent.seed import SeedSafetyError
 
@@ -27,6 +38,160 @@ def test_version_command_reports_package_version() -> None:
 
     assert result.exit_code == 0
     assert result.stdout == "enterprise-agent 0.1.0\n"
+
+
+def _live_demo_receipt() -> LiveDemoResult:
+    """Build the only sanitized receipt shape that the CLI is allowed to render in unit tests."""
+    case = LiveDemoCase(
+        case_id=LiveDemoCaseId.SCENARIO_A_REROUTE,
+        scenario="scenario_a",
+        title="Scenario A — supplier reroute proposal",
+        response_schema="scenario_a_recommendation:v1",
+    )
+    return LiveDemoResult(
+        case=case,
+        run_id=RunId("live-demo:scenario-a-reroute"),
+        attention_id=AttentionId("00000000-0000-0000-0000-000000000801"),
+        provider="openai",
+        profile="openai",
+        model="gpt-5.6-luna",
+        planner_status=LLMGenerationStatus.SUCCEEDED,
+        outcome="ENTER_WORKFLOW",
+        provenance=PlannerProvenance(
+            mode=PlannerMode.LIVE,
+            provider="openai",
+            profile="openai",
+            model="gpt-5.6-luna",
+            schema_validation=SchemaValidation.PASSED,
+            gate_status=GateStatus.PENDING_APPROVAL,
+        ),
+        plan_id=PlanId("00000000-0000-0000-0000-000000000802"),
+        approval_id="00000000-0000-0000-0000-000000000803",
+        workflow_id=WorkflowId("00000000-0000-0000-0000-000000000804"),
+        escalation_task_id=ScheduledTaskId("00000000-0000-0000-0000-000000000805"),
+        usage=None,
+    )
+
+
+def test_live_demo_listing_is_read_only_and_does_not_load_a_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live catalogue is reviewable before a credential, database, or provider is touched."""
+    monkeypatch.setattr(
+        cli,
+        "load_provider_profile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not load a profile")),
+    )
+
+    result = CliRunner().invoke(cli.app, ["live-demo", "--list"])
+
+    assert result.exit_code == 0
+    assert "Guarded live local demo" in result.stdout
+    assert "scenario-a-reroute" in result.stdout
+    assert "scenario-b-quality-hold" in result.stdout
+    assert "scenario-c-supplier-risk" in result.stdout
+    assert "does not load credentials" in result.stdout
+
+
+def test_live_demo_refuses_noninteractive_execution_before_configuration_or_provider_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A redirected shell cannot bypass the visible live-provider and local-write confirmation."""
+    monkeypatch.setattr(
+        cli,
+        "load_provider_profile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not load a profile")),
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_live_demo",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not run live demo")),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["live-demo", "--profile", "openai", "--case", "scenario-a-reroute"],
+    )
+
+    assert result.exit_code == 1
+    assert "interactive terminal is required" in result.stderr
+    assert "no provider was called and no data was reset" in result.stderr
+
+
+def test_live_demo_requires_live_confirmation_then_renders_only_the_sanitized_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One interactive confirmation authorizes a bounded live request but does not expose provider content."""
+    calls: list[tuple[object, ...]] = []
+    rendered: list[LiveDemoResult] = []
+    configuration = ProviderConfiguration(
+        profile="openai", model="gpt-5.6-luna", api_key="test-key"
+    )
+    receipt = _live_demo_receipt()
+    database_url = "postgresql+psycopg://agent:agent@db:5432/enterprise_agent"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr("typer.prompt", lambda *_args, **_kwargs: "live")
+    monkeypatch.setattr(cli, "load_provider_profile", lambda *_args, **_kwargs: configuration)
+    monkeypatch.setattr(
+        cli,
+        "_require_local_demo_database",
+        lambda actual_url, **kwargs: calls.append(("guard", actual_url, kwargs)),
+    )
+
+    def run(
+        actual_url: str,
+        *,
+        configuration: ProviderConfiguration,
+        case_id: str,
+    ) -> LiveDemoResult:
+        calls.append(("run", actual_url, configuration, case_id))
+        return receipt
+
+    monkeypatch.setattr(cli, "run_live_demo", run)
+    monkeypatch.setattr(cli, "_render_live_demo", rendered.append)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["live-demo", "--profile", "openai", "--case", "scenario-a-reroute"],
+    )
+
+    assert result.exit_code == 0
+    assert "Run live Scenario A" in result.stdout
+    assert "No business tool effect is executed" in result.stdout
+    assert calls == [
+        ("guard", database_url, {"allow_test_database": False}),
+        ("run", database_url, configuration, "scenario-a-reroute"),
+    ]
+    assert rendered == [receipt]
+    assert "test-key" not in result.stdout
+
+
+def test_live_demo_cancellation_skips_provider_request_and_local_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation occurs after a read-only profile and local-target guard but before the live runner."""
+    configuration = ProviderConfiguration(
+        profile="openai", model="gpt-5.6-luna", api_key="test-key"
+    )
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr("typer.prompt", lambda *_args, **_kwargs: "cancel")
+    monkeypatch.setattr(cli, "load_provider_profile", lambda *_args, **_kwargs: configuration)
+    monkeypatch.setattr(cli, "_require_local_demo_database", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        cli,
+        "run_live_demo",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not run live demo")),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["live-demo", "--profile", "openai", "--case", "scenario-a-reroute"],
+    )
+
+    assert result.exit_code == 130
+    assert "cancelled; no provider was called and no data was written" in result.stdout
 
 
 def test_main_invokes_cli_application(monkeypatch: pytest.MonkeyPatch) -> None:
