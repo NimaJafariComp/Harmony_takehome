@@ -260,6 +260,7 @@ def test_openrouter_adapter_uses_the_declared_scenario_b_schema() -> None:
     assert output_schema["discriminator"]["propertyName"] == "outcome"
     assert output_schema["$defs"]["ReallocateLotInput"]["additionalProperties"] is False
     assert cast(dict[str, Any], request["response_format"])["json_schema"]["strict"] is True
+    assert request["max_tokens"] == 5000
 
 
 def test_openrouter_request_serializes_authorized_uuid_evidence_values() -> None:

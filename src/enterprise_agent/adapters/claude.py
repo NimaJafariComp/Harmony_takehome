@@ -29,7 +29,7 @@ from enterprise_agent.ports import (
 
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
-_MAX_OUTPUT_TOKENS = 1024
+_MAX_OUTPUT_TOKENS = 5000
 _PROVIDER_NAME = "anthropic"
 _STRUCTURED_OUTPUT_INSTRUCTIONS = (
     "Return only JSON that conforms to the requested response schema. "

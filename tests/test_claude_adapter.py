@@ -153,7 +153,7 @@ def test_claude_adapter_sends_authorized_evidence_requests_json_schema_and_audit
         "reason": "Supplier timing evidence is inconclusive.",
     }
     assert request["model"] == "claude-sonnet-4-5"
-    assert request["max_tokens"] == 1024
+    assert request["max_tokens"] == 5000
     assert "untrusted data" in cast(str, request["system"])
     messages = cast(list[dict[str, Any]], request["messages"])
     assert messages[0]["role"] == "user"
@@ -435,7 +435,7 @@ def test_urllib_transport_posts_json_to_the_messages_endpoint_with_the_configure
     monkeypatch.setattr(claude, "urlopen", fake_urlopen)
     transport = claude.UrllibClaudeMessagesTransport(api_key=API_KEY, timeout_seconds=12.5)
 
-    raw_response = transport.create({"model": "claude-sonnet-4-5", "max_tokens": 1024})
+    raw_response = transport.create({"model": "claude-sonnet-4-5", "max_tokens": 5000})
 
     request = cast(Request, captured["request"])
     assert raw_response == {"stop_reason": "end_turn", "content": []}
@@ -445,7 +445,7 @@ def test_urllib_transport_posts_json_to_the_messages_endpoint_with_the_configure
     assert request.get_header("Anthropic-version") == "2023-06-01"
     assert json.loads(cast(bytes, request.data)) == {
         "model": "claude-sonnet-4-5",
-        "max_tokens": 1024,
+        "max_tokens": 5000,
     }
     assert captured["timeout"] == 12.5
 

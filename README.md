@@ -188,6 +188,8 @@ enterprise-agent llm-evaluate --profile openai --case a-unapproved-bait --execut
 
 Live evaluation sends fixed synthetic facts only. It runs with an in-memory audit adapter and cannot read or write the database, enterprise resource planning (ERP) system, mail, workflow, or business audit ledger. It returns only scalar score checks plus normalized token/cost totals; credentials, prompts, provider payloads, and model output are never retained or displayed. A nonzero exit means that a selected scorecard was not fully satisfied, not that the deterministic application controls failed.
 
+Every provider request has a 5,000-output-token ceiling. This is a cost and latency bound, not an execution permission: schema validation, deterministic policy, approval, and freshness checks remain mandatory.
+
 ## Optional local review UI
 
 The UI is a FastAPI/Jinja review surface that publishes only to `127.0.0.1:8080`. Seed the synthetic database first, then start it through Compose:

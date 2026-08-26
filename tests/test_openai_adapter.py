@@ -370,6 +370,7 @@ def test_openai_request_serializes_authorized_uuid_evidence_values() -> None:
     assert payload["evidence"][0]["payload"]["purchase_order_id"] == (
         "00000000-0000-0000-0000-000000000481"
     )
+    assert request["max_output_tokens"] == 5000
 
 
 def test_openai_adapter_rejects_an_undeclared_response_schema_without_calling_the_provider() -> (
