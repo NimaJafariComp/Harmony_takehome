@@ -195,6 +195,39 @@ def test_openrouter_adapter_supplies_output_schema_without_provider_fallbacks_an
     assert API_KEY not in repr(audit.events[0])
 
 
+def test_openrouter_adapter_preserves_provider_reported_metering_cost_in_safe_audit_facts() -> (
+    None
+):
+    """OpenRouter's provider-reported cost is stored as exact metering, never as a raw response."""
+    from enterprise_agent.adapters.openrouter import OpenRouterChatCompletionsAdapter
+    from enterprise_agent.ports import LLMCostSource
+
+    raw_response = completed_response(
+        {"outcome": "MANUAL_REVIEW", "reason": "A person must resolve this exception."}
+    )
+    raw_response["usage"] = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 500,
+        "total_tokens": 1500,
+        "cost": "0.000321",
+    }
+    audit = RecordingAudit()
+
+    result = OpenRouterChatCompletionsAdapter(
+        api_key=API_KEY,
+        model=MODEL,
+        transport=RecordingTransport(raw_response),
+        audit=audit,
+        clock=FixedClock(),
+    ).generate(prompt())
+
+    assert result.usage is not None
+    assert result.usage.cost_source is LLMCostSource.PROVIDER_REPORTED
+    assert result.usage.cost_usd == Decimal("0.000321")
+    assert audit.events[0].payload["cost_usd"] == "0.000321"
+    assert audit.events[0].payload["cost_source"] == "provider_reported"
+
+
 def test_openrouter_adapter_uses_the_declared_scenario_b_schema() -> None:
     """The common adapter selects the other application-owned output contract."""
     from enterprise_agent.adapters.openrouter import OpenRouterChatCompletionsAdapter

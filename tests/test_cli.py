@@ -168,3 +168,55 @@ def test_audit_explain_command_fails_clearly_without_database_configuration(
 
     assert result.exit_code == 1
     assert "database: audit explain refused (DATABASE_URL is required)" in result.stderr
+
+
+def test_llm_usage_command_renders_only_grouped_immutable_metering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The operator-facing usage report reads its safe totals from the ledger without a provider request."""
+    event = AuditEvent(
+        event_id=AuditEventId("event-cli-usage"),
+        occurred_at=datetime(2026, 8, 26, 12, tzinfo=UTC),
+        event_type="llm.completed",
+        run_id=RunId("run-cli-usage"),
+        actor_id=None,
+        attention_id=None,
+        workflow_id=None,
+        plan_id=None,
+        evidence_ids=(),
+        payload={
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "status": "succeeded",
+            "input_tokens": 1000,
+            "cached_input_tokens": 200,
+            "output_tokens": 500,
+            "total_tokens": 1500,
+            "cost_usd": "0.000764",
+            "cost_source": "estimated",
+        },
+        policy_version=None,
+        plan_hash=None,
+        idempotency_key=None,
+        failure_category=None,
+    )
+
+    class RecordingAudit:
+        """Return the ledger event without exposing any mutable or provider-facing operation."""
+
+        def __init__(self, database_url: str) -> None:
+            assert database_url.endswith("enterprise_agent")
+
+        def llm_usage_events(self) -> tuple[AuditEvent, ...]:
+            return (event,)
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "PostgresAuditAdapter", RecordingAudit, raising=False)
+
+    result = CliRunner().invoke(cli.app, ["llm-usage"])
+
+    assert result.exit_code == 0
+    assert "LLM usage (immutable audit ledger)" in result.stdout
+    assert "openai / gpt-5.6-luna: 1 requests" in result.stdout
+    assert "input=1000 (cached=200), output=500, total=1500" in result.stdout
+    assert "estimated cost: $0.000764" in result.stdout

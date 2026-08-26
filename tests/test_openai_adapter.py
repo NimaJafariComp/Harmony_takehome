@@ -210,6 +210,47 @@ def test_openai_adapter_sends_only_authorized_evidence_requests_strict_json_and_
     assert API_KEY not in repr(event)
 
 
+def test_openai_adapter_normalizes_metering_and_audits_only_safe_usage_facts() -> None:
+    """Responses token counts become a labeled estimate without retaining provider output or pricing payloads."""
+    from enterprise_agent.adapters.openai import OpenAIResponsesAdapter
+    from enterprise_agent.ports import LLMCostSource
+
+    raw_response = completed_response(
+        {"outcome": "MANUAL_REVIEW", "reason": "A person must resolve this exception."}
+    )
+    raw_response["usage"] = {
+        "input_tokens": 1000,
+        "output_tokens": 500,
+        "total_tokens": 1500,
+        "input_tokens_details": {"cached_tokens": 200},
+    }
+    audit = RecordingAudit()
+
+    result = OpenAIResponsesAdapter(
+        api_key=API_KEY,
+        model="gpt-5.6-luna",
+        transport=RecordingTransport(raw_response),
+        audit=audit,
+        clock=FixedClock(),
+    ).generate(prompt())
+
+    assert result.usage is not None
+    assert result.usage.cost_source is LLMCostSource.ESTIMATED
+    assert result.usage.cost_usd == Decimal("0.000764")
+    assert audit.events[0].payload == {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "status": "succeeded",
+        "response_schema": "scenario_a_recommendation:v1",
+        "input_tokens": 1000,
+        "cached_input_tokens": 200,
+        "output_tokens": 500,
+        "total_tokens": 1500,
+        "cost_usd": "0.000764",
+        "cost_source": "estimated",
+    }
+
+
 def test_openai_adapter_uses_the_declared_scenario_b_schema() -> None:
     """The common adapter selects and validates the other application-owned recommendation contract."""
     from enterprise_agent.adapters.openai import OpenAIResponsesAdapter

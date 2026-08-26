@@ -212,6 +212,41 @@ def test_claude_adapter_sends_authorized_evidence_requests_json_schema_and_audit
     assert API_KEY not in repr(audit.events[0])
 
 
+def test_claude_adapter_normalizes_metering_and_audits_only_safe_usage_facts() -> None:
+    """Messages token counts become a labeled estimate while raw metering remains outside the ledger."""
+    from enterprise_agent.adapters.claude import ClaudeMessagesAdapter
+    from enterprise_agent.ports import LLMCostSource
+
+    raw_response = completed_response(
+        {
+            "recommendation": {
+                "outcome": "MANUAL_REVIEW",
+                "reason": "A person must resolve this exception.",
+            }
+        }
+    )
+    raw_response["usage"] = {
+        "input_tokens": 1000,
+        "output_tokens": 500,
+        "cache_read_input_tokens": 100,
+    }
+    audit = RecordingAudit()
+
+    result = ClaudeMessagesAdapter(
+        api_key=API_KEY,
+        model="claude-sonnet-5",
+        transport=RecordingTransport(raw_response),
+        audit=audit,
+        clock=FixedClock(),
+    ).generate(prompt())
+
+    assert result.usage is not None
+    assert result.usage.cost_source is LLMCostSource.ESTIMATED
+    assert result.usage.cost_usd == Decimal("0.007020")
+    assert audit.events[0].payload["cached_input_tokens"] == 100
+    assert audit.events[0].payload["cost_usd"] == "0.007020"
+
+
 def test_claude_adapter_uses_the_declared_scenario_b_schema() -> None:
     """The common Claude adapter selects the other application-owned output contract."""
     from enterprise_agent.adapters.claude import ClaudeMessagesAdapter
