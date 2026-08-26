@@ -44,6 +44,17 @@ make tui
 
 This is the recommended command for an interviewer or operator. It starts the private database, applies migrations, and opens the keyboard-first Home screen; profile setup, guided demos, guarded live demos, status, audit, smoke checks, and live evaluations are all available there.
 
+### Start here: the recommended reviewer path
+
+Use the terminal UI (TUI) first. It is the primary operator interface and keeps the available actions, their data boundaries, and required confirmations in one keyboard-first flow.
+
+1. Run `make tui`
+2. Choose **Guided company demo** to inspect the deterministic Scenario A, B, and C stories without an API key
+3. Choose **Normal operator mode** to inspect status, audit evidence, LLM usage, or the fixed live-evaluation catalogue
+4. Configure a provider only when you want to run a deliberate smoke probe, no-write evaluation, or guarded local live demo
+
+Use the optional loopback UI only when a browser view helps a reviewer inspect pending approvals, audit history, recovery state, or the demo form. It is not the primary testing path.
+
 ## Local development
 
 Install Python 3.12 and [uv](https://docs.astral.sh/uv/), then create the development environment:
@@ -161,6 +172,12 @@ See [the terminal interaction contract](docs/terminal-interaction-contract.md) f
 
 The deterministic story catalogue is intentionally small and named. It includes the normal path plus unapproved and too-slow suppliers, stale/current email evidence, malicious text, authority and approver-availability cases, source mutation, restart recovery, Tuesday receipt outcomes, capacity/commitment limits, scope denial, released holds, and unresolved candidate ranking.
 
+### Why Scenario C is included
+
+Scenario C is an optional addition, not a substitute for the required Scenario A and B work. It demonstrates that the same control-plane design can safely handle a different business trigger: a current, authorized supplier-risk bulletin rather than a projected stockout or a quality hold.
+
+It adds three meaningful checks to the demo. The system must correlate the bulletin to the correct open purchase order and production demand, reject superseded or unauthorized bulletins, and treat instruction-like bulletin text as untrusted evidence. When the evidence is valid, the only permitted result is a bounded `HOLD_AND_NOTIFY` plan that still requires approval and freshness revalidation. This shows that a model cannot turn a new kind of text input into arbitrary tool actions.
+
 ## Provider setup and live evaluation
 
 Provider setup is optional. It is required only for a smoke probe or a live synthetic evaluation, not for the deterministic demo or test suite.
@@ -181,6 +198,12 @@ The reviewed default models are:
 | Claude | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | `claude-sonnet-5` |
 | OpenRouter | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | `nvidia/nemotron-3-ultra-550b-a55b:free` |
 
+### Provider recommendations and observed results
+
+Start live testing with the reviewed OpenAI or Claude profiles. In the latest explicit, no-write full-pack checks, OpenAI `gpt-5.6-terra` and Claude `claude-sonnet-5` each passed all 13 fixed synthetic cases and all 51 score checks. They also produced schema-valid, deterministic-gate-approved proposals for the guarded local A, B, and C demos. These are observed results for fixed synthetic inputs, not a claim that either model is deterministic or production-ready.
+
+OpenRouter remains supported through the same closed schema and fail-closed adapter boundary. Its listed model is a free-tier option, but the configured account was rate-limited during the latest recheck. Treat free-tier availability and allowance limits as external constraints. If an OpenRouter request is unavailable or invalid, the app records a safe failure; it does not retry through another provider or weaken validation. See [the recorded provider evidence](TRANSCRIPT.md#live-no-write-provider-evaluation) for the exact observed runs and metering.
+
 Set `LLM_PROFILE` to `openai`, `claude`, or `openrouter`. The legacy `anthropic` value is accepted as an alias for `claude`. Copy `.env.example` only as a local starting point; `.env` is ignored and must never be committed.
 
 Run a harmless connection probe explicitly:
@@ -200,16 +223,39 @@ Live evaluation sends fixed synthetic facts only. It runs with an in-memory audi
 
 Every provider request has a 5,000-output-token ceiling and a 60-second transport timeout. These are cost and latency bounds, not execution permissions: schema validation, deterministic policy, approval, and freshness checks remain mandatory.
 
+### Direct CLI commands and prompts
+
+The TUI is recommended for manual exploration, but direct commands remain available for development and scripted review. Activate the local environment first, then run these commands in an interactive terminal:
+
+```sh
+enterprise-agent run
+enterprise-agent llm-setup
+enterprise-agent llm-smoke
+enterprise-agent llm-evaluate --list
+enterprise-agent llm-evaluate --profile openai --case a-unapproved-bait --execute
+```
+
+When no usable provider profile exists, `enterprise-agent run` starts the hidden-key setup prompt. `enterprise-agent llm-setup` also prompts you to choose OpenAI, Claude, or OpenRouter; enter an API key without echoing it; optionally verify the key; then select a reviewed or custom model before an explicit save. In non-interactive terminals, setup refuses instead of prompting and names the missing setting.
+
+For an interactive, database-backed guarded live proposal, use Compose and follow the `live` confirmation prompt:
+
+```sh
+docker compose --profile tools run --rm app \
+  enterprise-agent live-demo --profile openai --case scenario-a-reroute
+```
+
+This command resets and seeds only the local synthetic database, sends one provider request, and stages at most one local review record. It cannot execute a business-system effect. Use `enterprise-agent live-demo --list` first to inspect the fixed case IDs without calling a provider.
+
 ## Optional local review UI
 
-The UI is a FastAPI/Jinja review surface that publishes only to `127.0.0.1:8080`. Seed the synthetic database first, then start it through Compose:
+The optional UI is a FastAPI/Jinja review surface that publishes only to `127.0.0.1:8080`. It exists for browser-based inspection and reviewer convenience; use the TUI first for normal testing and guided demonstrations. Seed the synthetic database first, then start it through Compose:
 
 ```sh
 make demo
 docker compose --profile tools up --build ui
 ```
 
-Open <http://127.0.0.1:8080>. The UI stays local-only and server-rendered. It has actor-scoped review pages, audit and recovery views, cross-site request forgery (CSRF) protected approval decisions through the same application service as the CLI, a guarded deterministic Demo tab, and a separately explicit live-LLM evaluation form. It never renders a credential, raw provider response, or direct database/tool control.
+Open <http://127.0.0.1:8080>. The UI stays local-only and server-rendered. It has actor-scoped review pages, audit and recovery views, cross-site request forgery (CSRF) protected approval decisions through the same application service as the CLI, a guarded deterministic Demo tab, and separately explicit forms for no-write evaluation and a local A/B/C live proposal. It never renders a credential, raw provider response, or direct database/tool control.
 
 ## Tests and validation
 
