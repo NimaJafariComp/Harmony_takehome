@@ -245,6 +245,43 @@ def test_openai_adapter_uses_the_declared_scenario_b_schema() -> None:
     assert {"type": "null"} in reallocate_lot["properties"]["from_production_order_id"]["anyOf"]
 
 
+def test_openai_adapter_wraps_discriminated_recommendations_in_a_supported_root_schema() -> None:
+    """OpenAI Structured Outputs receives an object root and `anyOf`, then returns its inner proposal."""
+    from enterprise_agent.adapters.openai import OpenAIResponsesAdapter, _request_for
+
+    request = _request_for(prompt(), model="gpt-5.6-luna")
+    text = cast(dict[str, Any], request["text"])
+    schema = cast(dict[str, Any], cast(dict[str, Any], text["format"])["schema"])
+    transport = RecordingTransport(
+        completed_response(
+            {
+                "recommendation": {
+                    "outcome": "MANUAL_REVIEW",
+                    "reason": "A human should review the exception.",
+                }
+            }
+        )
+    )
+
+    result = OpenAIResponsesAdapter(
+        api_key=API_KEY,
+        model="gpt-5.6-luna",
+        transport=transport,
+        audit=RecordingAudit(),
+        clock=FixedClock(),
+    ).generate(prompt())
+
+    assert schema["type"] == "object"
+    assert schema["required"] == ["recommendation"]
+    assert schema["properties"]["recommendation"]["anyOf"]
+    assert "oneOf" not in json.dumps(schema)
+    assert result.status is LLMGenerationStatus.SUCCEEDED
+    assert result.require_output() == {
+        "outcome": "MANUAL_REVIEW",
+        "reason": "A human should review the exception.",
+    }
+
+
 def test_openai_adapter_rejects_an_undeclared_response_schema_without_calling_the_provider() -> (
     None
 ):
