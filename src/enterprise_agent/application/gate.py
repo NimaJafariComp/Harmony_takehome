@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 
@@ -24,6 +25,7 @@ _REQUIRED_CONTEXT_SCOPES = frozenset(
     {Scope("erp:read"), Scope("mail:read"), Scope("calendar:read")}
 )
 _REQUIRED_REROUTE_SCOPE = Scope("erp:po:reroute")
+_ON_SCHEDULE_SHIPMENT_STATUSES = frozenset({"on_schedule", "on_track"})
 
 
 class GateStatus(StrEnum):
@@ -77,6 +79,10 @@ class ScenarioAGate:
         if isinstance(recommendation, ManualReviewRecommendation):
             return _safe_outcome(GateStatus.MANUAL_REVIEW)
         assert isinstance(recommendation, EnterWorkflowRecommendation)
+
+        shipment_outcome = _shipment_update_outcome(context)
+        if shipment_outcome is not None:
+            return _safe_outcome(shipment_outcome)
 
         reasons: list[GateDenialReason] = []
         if not _current_evidence_matches(context, current_source_versions):
@@ -134,6 +140,24 @@ def _safe_outcome(status: GateStatus) -> GateDecision:
         denial_reasons=(),
         estimated_value=None,
         candidate=None,
+    )
+
+
+def _shipment_update_outcome(context: AuthorizedContextBundle) -> GateStatus | None:
+    """Honor a current on-schedule update only when its delivery date coherently meets production."""
+    details = context.shipment_update.payload.get("payload", context.shipment_update.payload)
+    if not isinstance(details, Mapping):
+        return GateStatus.MANUAL_REVIEW
+    shipment_status = str(details.get("shipment_status", "")).strip().lower()
+    if shipment_status not in _ON_SCHEDULE_SHIPMENT_STATUSES:
+        return None
+    try:
+        expected_receipt = date.fromisoformat(str(details["expected_receipt_date"]))
+        production_start = context.trigger.production_start_date
+    except (KeyError, TypeError, ValueError):
+        return GateStatus.MANUAL_REVIEW
+    return (
+        GateStatus.NO_ACTION if expected_receipt <= production_start else GateStatus.MANUAL_REVIEW
     )
 
 

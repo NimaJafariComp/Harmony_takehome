@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from enterprise_agent.application.approvals import PendingPlanApproval, PlanApprovalService
 from enterprise_agent.application.bounded_tool_plan import (
@@ -65,6 +66,7 @@ class ScenarioBControlService:
         workflow_id: WorkflowId | None = None,
     ) -> ScenarioBControlResult:
         """Persist and stage only a fresh, authorized, approval-gated selected-tool plan."""
+        _require_safe_reallocation_coverage(context, recommendation)
         tool_calls = tool_calls_for_scenario_b_recommendation(recommendation)
         if not tool_calls:
             return ScenarioBControlResult(pending=None, workflow=None)
@@ -130,3 +132,63 @@ def tool_calls_for_scenario_b_recommendation(
     if isinstance(recommendation, ManualReviewRecommendation):
         return ()
     raise ScenarioBControlRejectedError("Scenario B recommendation is not recognized")
+
+
+def _require_safe_reallocation_coverage(
+    context: ScenarioBContextBundle,
+    recommendation: ScenarioBRecommendation,
+) -> None:
+    """Reject a claimed full-cover transfer unless one current released lot exactly covers the hold."""
+    if not isinstance(recommendation, ReallocateAndNotifyRecommendation):
+        return
+    if len(context.alternative_lots) != 1:
+        raise ScenarioBControlRejectedError(
+            "Scenario B reallocation is ambiguous without an explicit lot-selection policy"
+        )
+
+    alternative = context.alternative_lots[0]
+    reallocation = recommendation.reallocate_lot
+    if alternative.record_id != reallocation.quality_lot_id:
+        raise ScenarioBControlRejectedError(
+            "Scenario B reallocation selects a lot outside the current authorized alternatives"
+        )
+    if reallocation.to_production_order_id != context.production_impact.record_id:
+        raise ScenarioBControlRejectedError(
+            "Scenario B reallocation does not target the current production impact"
+        )
+
+    required_quantity = _decimal_payload(
+        context.production_allocation.payload, "allocated_quantity"
+    )
+    lot_quantity = _decimal_payload(alternative.payload, "quantity")
+    allocated_quantity = _decimal_payload(
+        alternative.payload, "allocated_quantity", default=Decimal()
+    )
+    available_quantity = (
+        lot_quantity - allocated_quantity
+        if lot_quantity is not None and allocated_quantity is not None
+        else None
+    )
+    if (
+        required_quantity is None
+        or available_quantity is None
+        or available_quantity < required_quantity
+        or reallocation.quantity != required_quantity
+    ):
+        raise ScenarioBControlRejectedError(
+            "Scenario B reallocation does not fully cover current production impact"
+        )
+
+
+def _decimal_payload(
+    payload: Mapping[str, object], name: str, *, default: Decimal | None = None
+) -> Decimal | None:
+    """Read one finite non-negative quantity without treating malformed evidence as safe capacity."""
+    value = payload.get(name, default)
+    if value is None:
+        return None
+    try:
+        quantity = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return quantity if quantity.is_finite() and quantity >= 0 else None

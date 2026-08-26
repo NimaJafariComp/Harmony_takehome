@@ -47,6 +47,7 @@ ID_SUPPLIER_Y = UUID("00000000-0000-0000-0000-000000000201")
 ID_SUPPLIER_Z = UUID("00000000-0000-0000-0000-000000000202")
 ID_SUPPLIER_W = UUID("00000000-0000-0000-0000-000000000203")
 ID_SUPPLIER_SLOW = UUID("00000000-0000-0000-0000-000000000204")
+ID_SUPPLIER_BAIT = UUID("00000000-0000-0000-0000-000000000205")
 ID_PRODUCTION_4812 = UUID("00000000-0000-0000-0000-000000000301")
 ID_PRODUCTION_Q7001 = UUID("00000000-0000-0000-0000-000000000302")
 ID_PRODUCTION_Q7002 = UUID("00000000-0000-0000-0000-000000000303")
@@ -246,6 +247,23 @@ SEED_ROWS = (
             "approved": True,
             "lead_time_days": 4,
             "unit_price": Decimal("14.00"),
+            "currency": "USD",
+            "source_version": 1,
+            "created_at": DEMO_CREATED_AT,
+            "updated_at": DEMO_CREATED_AT,
+        },
+    ),
+    SeedRow(
+        table="suppliers",
+        values={
+            "id": ID_SUPPLIER_BAIT,
+            "supplier_code": "SUP-BAIT",
+            "name": "Supplier Bait",
+            "part_id": ID_PART_X,
+            "plant_id": PLANT_CHICAGO,
+            "approved": False,
+            "lead_time_days": 1,
+            "unit_price": Decimal("4.00"),
             "currency": "USD",
             "source_version": 1,
             "created_at": DEMO_CREATED_AT,
