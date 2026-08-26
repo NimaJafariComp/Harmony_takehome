@@ -235,6 +235,50 @@ def test_scenario_c_command_stages_a_pending_human_review_without_an_llm(
     assert staged_urls == ["postgresql+psycopg://agent:agent@db:5432/enterprise_agent"]
 
 
+def test_demo_list_is_read_only_and_discovers_the_guided_cases() -> None:
+    """Operators can inspect the deterministic tour without a database, key, prompt, or write."""
+    result = CliRunner().invoke(cli.app, ["demo", "--list"])
+
+    assert result.exit_code == 0
+    assert "Guided deterministic demo cases" in result.stdout
+    assert "scenario-a-reroute-bait" in result.stdout
+    assert "scenario-c-pending-review" in result.stdout
+    assert "No live provider is called" in result.stdout
+
+
+def test_demo_unattended_starts_only_the_selected_local_case_without_prompting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit unattended mode supports CI while never loading a provider profile or prompting."""
+    called: list[tuple[str, tuple[str, ...]]] = []
+    rendered: list[object] = []
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://agent:agent@db:5432/enterprise_agent")
+    monkeypatch.setattr(cli, "_is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(
+        "typer.prompt", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no prompt"))
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_guided_demo",
+        lambda database_url, *, case_ids: (
+            called.append((database_url, case_ids)) or object()
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(cli, "_render_guided_demo", rendered.append, raising=False)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["demo", "--case", "scenario-a-reroute-bait", "--unattended"],
+    )
+
+    assert result.exit_code == 0
+    assert called == [
+        ("postgresql+psycopg://agent:agent@db:5432/enterprise_agent", ("scenario-a-reroute-bait",))
+    ]
+    assert len(rendered) == 1
+
+
 def test_interactive_scenario_c_cancellation_creates_no_pending_plan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
