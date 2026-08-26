@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from dataclasses import dataclass, field
 
 import pytest
@@ -112,6 +113,35 @@ class RecordingLocalReviewService:
     def demo_clock(self) -> dict[str, object]:
         self.requests.append(("demo_clock", None))
         return {"current_at": "2026-08-24T09:00:00+00:00"}
+
+
+@dataclass
+class RecordingLocalDecisionService:
+    """Record only the decision supplied through the new application-service boundary."""
+
+    can_decide: bool = True
+    stale: bool = False
+    decisions: list[tuple[str, str]] = field(default_factory=list)
+
+    def availability(self, approval_id: str):
+        from enterprise_agent.application.local_decisions import ApprovalDecisionAvailability
+
+        return ApprovalDecisionAvailability(can_decide=self.can_decide)
+
+    def decide(self, *, approval_id: str, decision):
+        from enterprise_agent.application.local_decisions import (
+            ApprovalDecisionResult,
+            LocalApprovalDecisionStaleError,
+        )
+
+        if self.stale:
+            raise LocalApprovalDecisionStaleError("internal stale source detail")
+        self.decisions.append((approval_id, decision.value))
+        return ApprovalDecisionResult(
+            approval_id=approval_id,
+            decision_state="approved" if decision.value == "approve" else "rejected",
+            audit_run_id="run-a",
+        )
 
 
 @pytest.mark.critical
@@ -231,7 +261,7 @@ async def test_local_ui_exposes_only_selected_actor_read_models_through_the_serv
         for method in getattr(route, "methods", set())
         if method not in {"GET", "HEAD"}
     }
-    assert mutable_routes == set()
+    assert mutable_routes == {"POST"}
 
 
 async def test_local_ui_rejects_unknown_cross_actor_and_unconfigured_read_resources() -> None:
@@ -360,6 +390,91 @@ async def test_local_ui_renders_a_safe_html_error_page_for_a_missing_ledger_reco
     assert "not-a-real-workflow" not in page.text
     assert api.status_code == 404
     assert api.json() == {"detail": "The requested review resource is unavailable."}
+
+
+@pytest.mark.critical
+async def test_local_ui_submits_a_csrf_bound_decision_without_rendering_a_plan_hash() -> None:
+    """The current approver submits a named action through the application boundary and sees its receipt."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    review_service = RecordingLocalReviewService()
+    decision_service = RecordingLocalDecisionService()
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(read_service=review_service, decision_service=decision_service)
+        ),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/approval/approval-a")
+        approve_match = re.search(
+            r'<form[^>]+action="/approval/approval-a/decision"[^>]*>.*?'
+            r'name="csrf_token" value="([^"]+)".*?'
+            r'name="decision" value="approve"',
+            page.text,
+            flags=re.DOTALL,
+        )
+        assert approve_match is not None
+        submitted = await client.post(
+            "/approval/approval-a/decision",
+            data={
+                "approval_id": "approval-a",
+                "csrf_token": approve_match.group(1),
+                "decision": "approve",
+            },
+        )
+
+    assert page.status_code == 200
+    assert 'name="approval_id" value="approval-a"' in page.text
+    assert "plan_hash" not in page.text
+    assert "sha256:" not in page.text
+    assert "Approve plan" in page.text
+    assert "Reject plan" in page.text
+    assert submitted.status_code == 200
+    assert "Approval recorded" in submitted.text
+    assert 'href="/audit/run-a"' in submitted.text
+    assert decision_service.decisions == [("approval-a", "approve")]
+
+
+async def test_local_ui_refuses_missing_csrf_or_stale_decisions_without_leaking_internal_detail() -> None:
+    """Forged submissions and fresh-read failures do not mutate a plan or reveal implementation detail."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    stale_decision_service = RecordingLocalDecisionService(stale=True)
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(
+                read_service=RecordingLocalReviewService(),
+                decision_service=stale_decision_service,
+            )
+        ),
+        base_url="http://testserver",
+    ) as client:
+        missing_csrf = await client.post(
+            "/approval/approval-a/decision",
+            data={"approval_id": "approval-a", "decision": "approve"},
+        )
+        page = await client.get("/approval/approval-a")
+        token = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+        assert token is not None
+        stale = await client.post(
+            "/approval/approval-a/decision",
+            data={
+                "approval_id": "approval-a",
+                "csrf_token": token.group(1),
+                "decision": "approve",
+            },
+        )
+
+    assert missing_csrf.status_code == 403
+    assert "Decision request expired" in missing_csrf.text
+    assert stale.status_code == 409
+    assert "Approval needs a fresh review" in stale.text
+    assert "internal stale source detail" not in stale.text
+    assert stale_decision_service.decisions == []
 
 
 def test_local_ui_module_has_no_direct_database_provider_or_configuration_dependency() -> None:
