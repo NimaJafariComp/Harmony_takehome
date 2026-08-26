@@ -366,6 +366,7 @@ class TerminalPresenter:
         mode: str,
         outcome: str,
         next_action: str,
+        validation_category: str | None = None,
     ) -> None:
         """Render one selected demo outcome as a bounded labelled panel."""
         details = self._detail_grid()
@@ -374,6 +375,8 @@ class TerminalPresenter:
         self._add_planner_provenance_rows(details, provenance)
         details.add_row("Mode", mode)
         details.add_row("Outcome", outcome)
+        if validation_category is not None:
+            details.add_row("Validation", validation_category)
         details.add_row("Next", next_action)
         self.console.print(Panel(details, title=title, border_style=self.theme.status_style(state)))
 

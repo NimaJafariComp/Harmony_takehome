@@ -154,6 +154,7 @@ class LiveDemoResult:
     workflow_id: WorkflowId | None
     escalation_task_id: ScheduledTaskId | None
     usage: LLMUsage | None
+    validation_category: str | None = None
 
 
 _LIVE_DEMO_CASES: tuple[LiveDemoCase, ...] = (
@@ -712,13 +713,14 @@ def _validated_recommendation(
         )
     try:
         recommendation = validator(response.require_output())
-    except ValueError:
+    except ValueError as error:
         return _planner_failure_result(
             case=case,
             run_id=run_id,
             attention_id=attention_id,
             configuration=configuration,
             response=response,
+            validation_category=_validation_category(error),
         )
     return recommendation
 
@@ -754,6 +756,7 @@ def _planner_failure_result(
     attention_id: AttentionId,
     configuration: ProviderConfiguration,
     response: LLMGenerationResult,
+    validation_category: str | None = None,
 ) -> LiveDemoResult:
     """Return a sanitizer-only receipt when a provider result cannot become a canonical recommendation."""
     return _result(
@@ -765,7 +768,20 @@ def _planner_failure_result(
         outcome=None,
         schema_validation=SchemaValidation.FAILED,
         gate_status=GateStatus.NOT_INVOKED_PLANNER_FAILURE,
+        validation_category=validation_category,
     )
+
+
+def _validation_category(error: ValueError) -> str:
+    """Classify local schema rejection without preserving provider output or error detail."""
+    message = str(error).lower()
+    if "field required" in message or "missing" in message:
+        return "missing required field"
+    if "literal" in message or "input should be" in message:
+        return "unrecognized outcome or action"
+    if "json" in message:
+        return "malformed structured response"
+    return "schema fields or values do not match the approved contract"
 
 
 def _non_executable_result(
@@ -861,6 +877,7 @@ def _result(
     approval_id: str | None = None,
     workflow_id: WorkflowId | None = None,
     escalation_task_id: ScheduledTaskId | None = None,
+    validation_category: str | None = None,
 ) -> LiveDemoResult:
     """Project only safe scalar provider/control facts and discard every raw provider-owned field."""
     provenance = PlannerProvenance(
@@ -886,6 +903,7 @@ def _result(
         workflow_id=workflow_id,
         escalation_task_id=escalation_task_id,
         usage=response.usage,
+        validation_category=validation_category,
     )
 
 

@@ -1316,6 +1316,7 @@ def _render_live_demo(result: LiveDemoResult) -> None:
         ),
         outcome=result.outcome or "No usable canonical recommendation was produced.",
         next_action=_live_demo_next_action(result),
+        validation_category=result.validation_category,
     )
     presenter.render_story_brief(
         StoryBrief(result.case.scenario, result.case.story, result.case.safety_rule, result.case.facts)
