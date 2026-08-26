@@ -354,6 +354,8 @@ def test_run_interactively_creates_a_hidden_key_profile_with_the_recommended_mod
     assert "LLM_PROFILE=openai" in env_path.read_text(encoding="utf-8")
     assert "OPENAI_MODEL=gpt-5.6-terra" in env_path.read_text(encoding="utf-8")
     assert env_path.stat().st_mode & 0o777 == 0o600
+    assert cli._runtime_environment()["LLM_PROFILE"] == "openai"
+    assert cli._runtime_environment()["OPENAI_MODEL"] == "gpt-5.6-terra"
     assert "enterprise-agent demo --list" in result.stdout
     assert "not available until M8" not in result.stdout
 

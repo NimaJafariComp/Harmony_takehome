@@ -56,6 +56,7 @@ from enterprise_agent.application.scenario_c_demo import (
     stage_scenario_c_pending,
 )
 from enterprise_agent.config import (
+    PROFILE_ENVIRONMENT_PREFIXES,
     ConfigurationError,
     ProviderConfiguration,
     load_provider_profile,
@@ -1817,6 +1818,15 @@ def _interactive_llm_setup() -> ProviderConfiguration:
     except (OSError, ValueError) as error:
         typer.echo(f"configuration: setup refused ({error})", err=True)
         raise typer.Exit(code=1) from error
+
+    prefix = PROFILE_ENVIRONMENT_PREFIXES[profile]
+    environ.update(
+        {
+            "LLM_PROFILE": profile,
+            f"{prefix}_API_KEY": api_key,
+            f"{prefix}_MODEL": model,
+        }
+    )
 
     typer.echo(f"configuration: saved profile {profile} with model {model}")
     if not verified:
