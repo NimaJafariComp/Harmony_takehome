@@ -91,6 +91,13 @@ SELECT_AUDIT_EVENTS_FOR_RUN = text("""
     WHERE run_id = :run_id
     ORDER BY occurred_at ASC, id ASC
 """)
+SELECT_LATEST_AUDIT_RUN_FOR_PLAN = text("""
+    SELECT run_id
+    FROM audit_events
+    WHERE plan_id = CAST(:plan_id AS UUID)
+    ORDER BY occurred_at DESC, id DESC
+    LIMIT 1
+""")
 SELECT_LLM_USAGE_EVENTS = text("""
     SELECT id, occurred_at, event_type, run_id, actor_id, attention_id, workflow_instance_id,
            plan_id, evidence_ids, payload, policy_version, plan_hash, idempotency_key,
@@ -127,6 +134,15 @@ class PostgresAuditAdapter:
                 .all()
             )
         return tuple(_event_from_row(row) for row in rows)
+
+    def latest_run_for_plan(self, plan_id: PlanId) -> RunId | None:
+        """Find the existing append-only run that owns a later approval decision event."""
+        with self._engine.connect() as connection:
+            run_id = connection.execute(
+                SELECT_LATEST_AUDIT_RUN_FOR_PLAN,
+                {"plan_id": str(plan_id)},
+            ).scalar_one_or_none()
+        return None if run_id is None else RunId(str(run_id))
 
     def llm_usage_events(self) -> Sequence[AuditEvent]:
         """Return immutable LLM completion events for read-only metering aggregation only."""

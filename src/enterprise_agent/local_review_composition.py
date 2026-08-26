@@ -8,12 +8,23 @@ from uuid import UUID
 from enterprise_agent.adapters import (
     PostgresAttentionAdapter,
     PostgresAuditAdapter,
+    PostgresCalendarAdapter,
     PostgresDemoClock,
+    PostgresErpAdapter,
     PostgresIdentityAdapter,
+    PostgresKnowledgeAdapter,
     PostgresLocalReviewAccessAdapter,
+    PostgresMailAdapter,
     PostgresOperatorStatusAdapter,
     PostgresPlanApprovalAdapter,
+    PostgresQualityAdapter,
     PostgresWorkflowStateAdapter,
+)
+from enterprise_agent.application.local_decisions import (
+    CurrentPlanSourceVersionsService,
+    LocalApprovalDecisionPort,
+    LocalApprovalDecisionService,
+    UnconfiguredLocalApprovalDecisionService,
 )
 from enterprise_agent.application.local_review import (
     LocalReviewReadPort,
@@ -48,6 +59,38 @@ def create_local_review_service() -> LocalReviewReadPort:
         demo_clock_reader=PostgresDemoClock(database_url),
         identity=PostgresIdentityAdapter(database_url),
         attention_access=PostgresLocalReviewAccessAdapter(database_url),
+    )
+
+
+def create_local_approval_decision_service() -> LocalApprovalDecisionPort:
+    """Compose one local decision service without loading an LLM profile, key, or write tool adapter."""
+    try:
+        environment = load_local_environment(default_env_path())
+    except ValueError:
+        return UnconfiguredLocalApprovalDecisionService()
+    database_url = environment.get("DATABASE_URL", "").strip()
+    actor_id = _selected_actor_id(environment)
+    if not database_url or actor_id is None:
+        return UnconfiguredLocalApprovalDecisionService()
+
+    identity = PostgresIdentityAdapter(database_url)
+    attention_store = PostgresAttentionAdapter(database_url)
+    audit = PostgresAuditAdapter(database_url)
+    return LocalApprovalDecisionService(
+        actor_id=actor_id,
+        approvals=PostgresPlanApprovalAdapter(database_url),
+        freshness=CurrentPlanSourceVersionsService(
+            identity=identity,
+            attentions=attention_store,
+            erp=PostgresErpAdapter(database_url),
+            quality=PostgresQualityAdapter(database_url),
+            knowledge=PostgresKnowledgeAdapter(database_url),
+            mail=PostgresMailAdapter(database_url),
+            calendar=PostgresCalendarAdapter(database_url),
+        ),
+        clock=PostgresDemoClock(database_url),
+        audit=audit,
+        audit_runs=audit,
     )
 
 

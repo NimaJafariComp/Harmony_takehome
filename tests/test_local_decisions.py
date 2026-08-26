@@ -9,6 +9,10 @@ from typing import Never
 import pytest
 
 from enterprise_agent.application.approvals import recompute_plan_hash
+from enterprise_agent.application.local_decisions import (
+    LocalApprovalDecisionService,
+    UnconfiguredLocalApprovalDecisionService,
+)
 from enterprise_agent.domain import (
     Approval,
     ApprovalId,
@@ -165,18 +169,14 @@ def _service(
     actor_id: UserId = ACTOR_ID,
     current_versions: dict[str, int] | None = None,
     approver_id: UserId = ACTOR_ID,
-):
+) -> tuple[LocalApprovalDecisionService, MemoryApprovalStore, RecordingAudit]:
     """Compose the new local decision boundary only from in-memory ports."""
-    from enterprise_agent.application.local_decisions import LocalApprovalDecisionService
-
     store = MemoryApprovalStore(binding=_binding(approver_id=approver_id))
     audit = RecordingAudit(events=[])
     service = LocalApprovalDecisionService(
         actor_id=actor_id,
         approvals=store,
-        freshness=FixedFreshness(
-            current_versions=current_versions or {"erp:inventory:part-x": 4}
-        ),
+        freshness=FixedFreshness(current_versions=current_versions or {"erp:inventory:part-x": 4}),
         clock=FixedClock(),
         audit=audit,
         audit_runs=audit,
@@ -232,3 +232,50 @@ def test_non_approver_can_review_but_cannot_submit_a_decision() -> None:
         service.decide(approval_id=str(APPROVAL_ID), decision=ApprovalDecision.REJECT)
     assert store.approve_calls == 0
     assert store.reject_calls == 0
+
+
+def test_local_decision_composition_uses_only_local_actor_settings_and_existing_adapters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optional writer depends only on local database/actor settings, never an LLM profile."""
+    from enterprise_agent import local_review_composition
+
+    database_url = "postgresql+psycopg://local/demo"
+    constructed_urls: list[str] = []
+
+    class StubAdapter:
+        """Record only the database URL each local adapter receives."""
+
+        def __init__(self, configured_database_url: str) -> None:
+            constructed_urls.append(configured_database_url)
+
+    monkeypatch.setattr(
+        local_review_composition,
+        "load_local_environment",
+        lambda _path: {"DATABASE_URL": database_url, "LOCAL_REVIEW_ACTOR_ID": str(ACTOR_ID)},
+    )
+    for adapter_name in (
+        "PostgresAttentionAdapter",
+        "PostgresAuditAdapter",
+        "PostgresCalendarAdapter",
+        "PostgresDemoClock",
+        "PostgresErpAdapter",
+        "PostgresIdentityAdapter",
+        "PostgresKnowledgeAdapter",
+        "PostgresMailAdapter",
+        "PostgresPlanApprovalAdapter",
+        "PostgresQualityAdapter",
+    ):
+        monkeypatch.setattr(local_review_composition, adapter_name, StubAdapter)
+
+    configured = local_review_composition.create_local_approval_decision_service()
+
+    assert isinstance(configured, LocalApprovalDecisionService)
+    assert configured.actor_id == ACTOR_ID
+    assert constructed_urls == [database_url] * 10
+
+    monkeypatch.setattr(local_review_composition, "load_local_environment", lambda _path: {})
+    assert isinstance(
+        local_review_composition.create_local_approval_decision_service(),
+        UnconfiguredLocalApprovalDecisionService,
+    )

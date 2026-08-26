@@ -492,6 +492,67 @@ tbody tr:last-child td {
   background: var(--critical-wash);
 }
 
+.decision-panel {
+  max-width: 54rem;
+}
+
+.decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.decision-actions form {
+  margin: 0;
+}
+
+.decision-button {
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid currentcolor;
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.decision-button.approve {
+  color: var(--signal);
+  background: var(--signal-wash);
+}
+
+.decision-button.reject {
+  color: var(--critical);
+  background: var(--critical-wash);
+}
+
+.decision-button:hover {
+  filter: brightness(0.95);
+}
+
+.decision-result {
+  display: grid;
+  grid-template-columns: 0.75rem minmax(0, 1fr);
+  gap: 1.5rem;
+  max-width: 54rem;
+  margin-top: clamp(2rem, 8vw, 5rem);
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 1px solid var(--line);
+  background: var(--signal-wash);
+}
+
+.result-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-top: 1.5rem;
+}
+
 .error-state .trace {
   background: repeating-linear-gradient(
     to bottom,
@@ -570,6 +631,14 @@ tbody tr:last-child td {
   .trace-card {
     border-top: 1px solid var(--line);
     border-left: 0.75rem solid var(--signal);
+  }
+
+  .decision-actions {
+    display: grid;
+  }
+
+  .decision-button {
+    width: 100%;
   }
 }
 

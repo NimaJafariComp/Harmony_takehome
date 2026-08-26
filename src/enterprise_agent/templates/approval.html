@@ -7,7 +7,7 @@
   <header class="page-intro compact">
     <p class="eyebrow">Immutable decision record</p>
     <h1>Approval / {{ approval.approval_id }}</h1>
-    <p class="lede">Review the requester, assigned approver, source versions, and declared action before making any decision elsewhere.</p>
+    <p class="lede">Review the requester, assigned approver, source versions, and declared action before recording a decision.</p>
   </header>
 
   <section class="record-grid" aria-label="Approval record">
@@ -43,5 +43,30 @@
       </table>
     </div>
     <p class="policy-note">Policy: {{ approval.policy_version }}</p>
+  </section>
+
+  <section class="ledger-section decision-panel" aria-labelledby="decision-title">
+    <div class="section-heading">
+      <div><p class="section-label">Human decision</p><h2 id="decision-title">Record this exact plan</h2></div>
+      <p>The server reloads the immutable plan and its current evidence before it records an approval.</p>
+    </div>
+    {% if can_decide and csrf_tokens %}
+      <div class="decision-actions">
+        <form action="/approval/{{ approval.approval_id }}/decision" method="post">
+          <input name="approval_id" value="{{ approval.approval_id }}" type="hidden">
+          <input name="csrf_token" value="{{ csrf_tokens.approve }}" type="hidden">
+          <button class="decision-button approve" name="decision" value="approve" type="submit">Approve plan</button>
+        </form>
+        <form action="/approval/{{ approval.approval_id }}/decision" method="post">
+          <input name="approval_id" value="{{ approval.approval_id }}" type="hidden">
+          <input name="csrf_token" value="{{ csrf_tokens.reject }}" type="hidden">
+          <button class="decision-button reject" name="decision" value="reject" type="submit">Reject plan</button>
+        </form>
+      </div>
+    {% elif approval.decision_state in ["pending", "rerouted"] %}
+      <p class="empty-copy">The selected local actor can review this record but is not its current approver, or decision controls are unavailable.</p>
+    {% else %}
+      <p class="empty-copy">This approval is already {{ approval.decision_state }} and cannot be decided again.</p>
+    {% endif %}
   </section>
 {% endblock %}

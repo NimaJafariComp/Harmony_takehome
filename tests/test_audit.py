@@ -223,6 +223,26 @@ def test_audit_writer_reads_a_chronological_run_ledger_without_mutating_events(
 
 
 @pytest.mark.unit
+def test_audit_writer_finds_the_latest_existing_run_for_one_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later approval decision joins its plan's existing append-only run rather than creating one."""
+    engine = MagicMock()
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value.scalar_one_or_none.return_value = "run-existing-plan"
+    monkeypatch.setattr(audit, "create_engine", lambda _: engine)
+    adapter = audit.PostgresAuditAdapter("postgresql+psycopg://ignored")
+
+    run_id = adapter.latest_run_for_plan(PlanId("00000000-0000-0000-0000-000000000801"))
+
+    assert run_id == RunId("run-existing-plan")
+    assert connection.execute.call_args.args == (
+        audit.SELECT_LATEST_AUDIT_RUN_FOR_PLAN,
+        {"plan_id": "00000000-0000-0000-0000-000000000801"},
+    )
+
+
+@pytest.mark.unit
 def test_audit_writer_reads_only_llm_completion_events_for_usage_reporting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -10,6 +14,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from enterprise_agent.application.local_decisions import (
+    ApprovalDecision,
+    LocalApprovalDecisionConflictError,
+    LocalApprovalDecisionPort,
+    LocalApprovalDecisionStaleError,
+    UnconfiguredLocalApprovalDecisionService,
+)
 from enterprise_agent.application.local_review import (
     LocalReviewAccessDeniedError,
     LocalReviewReadPort,
@@ -18,17 +29,35 @@ from enterprise_agent.application.local_review import (
     ReviewPayload,
     UnconfiguredLocalReviewService,
 )
-from enterprise_agent.local_review_composition import create_local_review_service
+from enterprise_agent.local_review_composition import (
+    create_local_approval_decision_service,
+    create_local_review_service,
+)
 
 LOCAL_UI_HOST = "127.0.0.1"
 LOCAL_UI_PORT = 8080
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 _TEMPLATES = Jinja2Templates(directory=_PACKAGE_ROOT / "templates")
+_CSRF_COOKIE_NAME = "enterprise_agent_local_csrf"
+_MAX_DECISION_FORM_BYTES = 4096
 
 
-def create_app(read_service: LocalReviewReadPort | None = None) -> FastAPI:
-    """Create the local UI with an injected safe read service and no direct persistence dependency."""
+class _DecisionRequestError(ValueError):
+    """Raised when a browser request cannot prove its local page origin and intended decision."""
+
+
+def create_app(
+    read_service: LocalReviewReadPort | None = None,
+    decision_service: LocalApprovalDecisionPort | None = None,
+) -> FastAPI:
+    """Create a loopback UI with injected read and approval-decision service boundaries."""
     review_service = read_service if read_service is not None else UnconfiguredLocalReviewService()
+    decisions = (
+        decision_service
+        if decision_service is not None
+        else UnconfiguredLocalApprovalDecisionService()
+    )
+    csrf_signing_key = secrets.token_bytes(32)
     application = FastAPI(
         title="Enterprise Agent Local Review",
         docs_url=None,
@@ -69,6 +98,65 @@ def create_app(read_service: LocalReviewReadPort | None = None) -> FastAPI:
             error_title=title,
             error_message=message,
         )
+
+    def new_decision_csrf(*, approval_id: str) -> tuple[str, dict[ApprovalDecision, str]]:
+        """Create a fresh cookie value and action-bound fields without putting a plan hash in HTML."""
+        session = secrets.token_urlsafe(32)
+        tokens = {
+            decision: _csrf_token(
+                csrf_signing_key,
+                session=session,
+                approval_id=approval_id,
+                decision=decision,
+            )
+            for decision in ApprovalDecision
+        }
+        return session, tokens
+
+    async def read_decision_form(request: Request, *, approval_id: str) -> ApprovalDecision:
+        """Parse a deliberately tiny URL-encoded form and reject unbound, cross-origin submissions."""
+        content_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0]
+        if content_type != "application/x-www-form-urlencoded":
+            raise _DecisionRequestError("unsupported decision request")
+        body = await request.body()
+        if not body or len(body) > _MAX_DECISION_FORM_BYTES:
+            raise _DecisionRequestError("invalid decision request")
+        try:
+            values = parse_qs(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=3,
+            )
+        except (UnicodeDecodeError, ValueError) as error:
+            raise _DecisionRequestError("invalid decision request") from error
+        if set(values) != {"approval_id", "csrf_token", "decision"}:
+            raise _DecisionRequestError("invalid decision request")
+        submitted_approval_id = _one_form_value(values, "approval_id")
+        csrf_token = _one_form_value(values, "csrf_token")
+        submitted_decision = _one_form_value(values, "decision")
+        if submitted_approval_id != approval_id:
+            raise _DecisionRequestError("approval identity mismatch")
+        try:
+            decision = ApprovalDecision(submitted_decision)
+        except ValueError as error:
+            raise _DecisionRequestError("unsupported decision") from error
+        origin = request.headers.get("origin")
+        expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if origin is not None and not hmac.compare_digest(origin, expected_origin):
+            raise _DecisionRequestError("cross-origin decision request")
+        session = request.cookies.get(_CSRF_COOKIE_NAME)
+        if session is None:
+            raise _DecisionRequestError("missing csrf cookie")
+        expected_token = _csrf_token(
+            csrf_signing_key,
+            session=session,
+            approval_id=approval_id,
+            decision=decision,
+        )
+        if not hmac.compare_digest(csrf_token, expected_token):
+            raise _DecisionRequestError("invalid csrf token")
+        return decision
 
     @application.exception_handler(LocalReviewAccessDeniedError)
     async def local_review_access_denied(
@@ -128,8 +216,66 @@ def create_app(read_service: LocalReviewReadPort | None = None) -> FastAPI:
 
     @application.get("/approval/{approval_id}", response_class=HTMLResponse)
     def approval_page(request: Request, approval_id: str) -> HTMLResponse:
-        """Render one immutable approval record without exposing or deciding its full plan hash."""
-        return render_page(request, "approval.html", approval=review_service.approval(approval_id))
+        """Render one immutable approval plus action controls only for the current active approver."""
+        approval = review_service.approval(approval_id)
+        can_decide = False
+        if not isinstance(decisions, UnconfiguredLocalApprovalDecisionService):
+            can_decide = decisions.availability(approval_id).can_decide
+        csrf_session: str | None = None
+        csrf_tokens: dict[ApprovalDecision, str] | None = None
+        if can_decide:
+            csrf_session, csrf_tokens = new_decision_csrf(approval_id=approval_id)
+        response = render_page(
+            request,
+            "approval.html",
+            approval=approval,
+            can_decide=can_decide,
+            csrf_tokens=csrf_tokens,
+        )
+        if csrf_session is not None:
+            response.set_cookie(
+                _CSRF_COOKIE_NAME,
+                csrf_session,
+                max_age=600,
+                httponly=True,
+                samesite="strict",
+                secure=False,
+                path="/",
+            )
+        return response
+
+    @application.post("/approval/{approval_id}/decision", response_class=HTMLResponse)
+    async def approval_decision_page(request: Request, approval_id: str) -> Response:
+        """Record one CSRF-bound local decision through the shared application approval service."""
+        try:
+            decision = await read_decision_form(request, approval_id=approval_id)
+        except _DecisionRequestError:
+            return review_error(
+                request,
+                status_code=403,
+                title="Decision request expired",
+                message="Reload the approval record before choosing a decision.",
+            )
+        try:
+            result = decisions.decide(approval_id=approval_id, decision=decision)
+        except LocalApprovalDecisionStaleError:
+            return review_error(
+                request,
+                status_code=409,
+                title="Approval needs a fresh review",
+                message=(
+                    "The plan changed or its supporting evidence is no longer current. "
+                    "Reload the review queue."
+                ),
+            )
+        except LocalApprovalDecisionConflictError:
+            return review_error(
+                request,
+                status_code=409,
+                title="Decision could not be recorded",
+                message="This approval is no longer available for a decision. Reload the review queue.",
+            )
+        return render_page(request, "decision.html", result=result)
 
     @application.get("/workflow/{workflow_id}", response_class=HTMLResponse)
     def workflow_page(request: Request, workflow_id: str) -> HTMLResponse:
@@ -190,7 +336,30 @@ app = create_app()
 def main() -> None:
     """Run the optional review surface on loopback, never a network-facing default host."""
     uvicorn.run(
-        create_app(read_service=create_local_review_service()),
+        create_app(
+            read_service=create_local_review_service(),
+            decision_service=create_local_approval_decision_service(),
+        ),
         host=LOCAL_UI_HOST,
         port=LOCAL_UI_PORT,
     )
+
+
+def _csrf_token(
+    signing_key: bytes,
+    *,
+    session: str,
+    approval_id: str,
+    decision: ApprovalDecision,
+) -> str:
+    """Sign a cookie-bound action token without placing a plan hash in the browser response."""
+    payload = f"{session}\x1f{approval_id}\x1f{decision.value}".encode()
+    return hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
+
+
+def _one_form_value(values: dict[str, list[str]], name: str) -> str:
+    """Require exactly one small scalar form value instead of accepting duplicate browser fields."""
+    value = values.get(name)
+    if value is None or len(value) != 1 or not value[0]:
+        raise _DecisionRequestError("missing form value")
+    return value[0]

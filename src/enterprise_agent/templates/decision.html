@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Approval recorded{% endblock %}
+
+{% block content %}
+  <section class="decision-result" aria-labelledby="result-title">
+    <div class="trace" aria-hidden="true"></div>
+    <div>
+      <p class="section-label">Decision receipt</p>
+      <h1 id="result-title">Approval recorded</h1>
+      <p class="lede">This local review recorded the plan as <span class="state-label" data-state="{{ result.decision_state }}">{{ result.decision_state }}</span>. A worker must still recheck freshness before any declared workflow step can run.</p>
+      <div class="result-links">
+        <a class="text-link" href="/approval/{{ result.approval_id }}">Return to approval</a>
+        <a class="text-link" href="/audit/{{ result.audit_run_id }}">Open audit explanation</a>
+        <a class="text-link" href="/">Return to review queue</a>
+      </div>
+    </div>
+  </section>
+{% endblock %}

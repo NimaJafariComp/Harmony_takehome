@@ -8,6 +8,13 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from enterprise_agent.application.local_decisions import (
+    ApprovalDecision,
+    ApprovalDecisionAvailability,
+    ApprovalDecisionResult,
+    LocalApprovalDecisionStaleError,
+)
+
 pytestmark = [pytest.mark.unit, pytest.mark.contract]
 
 
@@ -123,17 +130,11 @@ class RecordingLocalDecisionService:
     stale: bool = False
     decisions: list[tuple[str, str]] = field(default_factory=list)
 
-    def availability(self, approval_id: str):
-        from enterprise_agent.application.local_decisions import ApprovalDecisionAvailability
-
+    def availability(self, approval_id: str) -> ApprovalDecisionAvailability:
+        del approval_id
         return ApprovalDecisionAvailability(can_decide=self.can_decide)
 
-    def decide(self, *, approval_id: str, decision):
-        from enterprise_agent.application.local_decisions import (
-            ApprovalDecisionResult,
-            LocalApprovalDecisionStaleError,
-        )
-
+    def decide(self, *, approval_id: str, decision: ApprovalDecision) -> ApprovalDecisionResult:
         if self.stale:
             raise LocalApprovalDecisionStaleError("internal stale source detail")
         self.decisions.append((approval_id, decision.value))
@@ -437,7 +438,9 @@ async def test_local_ui_submits_a_csrf_bound_decision_without_rendering_a_plan_h
     assert decision_service.decisions == [("approval-a", "approve")]
 
 
-async def test_local_ui_refuses_missing_csrf_or_stale_decisions_without_leaking_internal_detail() -> None:
+async def test_local_ui_refuses_missing_csrf_or_stale_decisions_without_leaking_internal_detail() -> (
+    None
+):
     """Forged submissions and fresh-read failures do not mutate a plan or reveal implementation detail."""
     from httpx import ASGITransport, AsyncClient
 
