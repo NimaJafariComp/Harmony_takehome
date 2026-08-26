@@ -7,7 +7,7 @@
   <header class="page-intro compact">
     <p class="eyebrow">Deterministic local demo</p>
     <h1>Demo mode</h1>
-    <p class="lede">This changes only the local seeded demo clock. It never resets data, reruns a case, executes a workflow, or writes to a business system.</p>
+    <p class="lede">Choose a bounded company story, prepare only the local synthetic data, and review the resulting ledger. Scenario staging uses a deterministic fake planner; no provider is called and no workflow effect is executed.</p>
   </header>
 
   <section class="decision-result" aria-labelledby="clock-title">
@@ -27,13 +27,99 @@
     </div>
   </section>
 
+  <section class="ledger-section" aria-labelledby="guided-demo-title">
+    <div class="section-heading">
+      <div>
+        <p class="section-label">Guided company demo</p>
+        <h2 id="guided-demo-title">Select a story and seeded persona</h2>
+      </div>
+      <p>One confirmed run replaces only the local synthetic demo data, then stages reviewable pending plans where the case defines one. It never approves, executes, or recovers a workflow.</p>
+    </div>
+    {% if guided_demo_availability.can_run and guided_demo_csrf_token %}
+      <form class="guided-demo-form" action="/demo/run" method="post">
+        <input name="csrf_token" value="{{ guided_demo_csrf_token }}" type="hidden">
+        <div class="guided-demo-personas">
+          {% for persona in guided_demo_availability.personas %}
+            <fieldset class="guided-demo-persona">
+              <legend>
+                <label>
+                  <input type="radio" name="persona_id" value="{{ persona.persona_id }}" required>
+                  <span>{{ persona.label }} · {{ persona.role }}</span>
+                </label>
+              </legend>
+              <p class="quiet">Choose one or more compatible stories for this seeded persona.</p>
+              <div class="guided-demo-cases">
+                {% for case in demo_cases if case.case_id in persona.case_ids %}
+                  <label class="guided-demo-case">
+                    <input type="checkbox" name="case_id" value="{{ case.case_id }}">
+                    <span>
+                      <strong>{{ case.title }}</strong>
+                      <span>{{ case.outcome }}</span>
+                    </span>
+                  </label>
+                {% endfor %}
+              </div>
+            </fieldset>
+          {% endfor %}
+        </div>
+        <label class="guided-demo-confirmation">
+          <input type="checkbox" name="confirm" value="run" required>
+          <span>Replace local synthetic demo data and stage the selected review cases.</span>
+        </label>
+        <button class="decision-button approve" type="submit">Prepare selected demo</button>
+      </form>
+    {% else %}
+      <p class="empty-copy">Guided demo launcher is unavailable. Start the local deterministic demo database, then reload this loopback UI.</p>
+    {% endif %}
+  </section>
+
+  <section class="ledger-section" aria-labelledby="llm-evaluation-title">
+    <div class="section-heading">
+      <div>
+        <p class="section-label">Live LLM evaluation</p>
+        <h2 id="llm-evaluation-title">Score one fixed synthetic case</h2>
+      </div>
+      <p>Choose a locally configured profile and one reviewed synthetic case. No database, ERP, mail, workflow, or audit write occurs; only safe outcome checks and token/cost totals are shown.</p>
+    </div>
+    {% if llm_evaluation_availability.can_evaluate and llm_evaluation_csrf_token %}
+      <form class="guided-demo-form" action="/demo/evaluate" method="post">
+        <input name="csrf_token" value="{{ llm_evaluation_csrf_token }}" type="hidden">
+        <div class="llm-evaluation-fields">
+          <label>
+            <span>Configured provider profile</span>
+            <select name="profile_id" required>
+              {% for profile in llm_evaluation_availability.profiles %}
+                <option value="{{ profile.profile }}">{% if profile.profile == 'openai' %}OpenAI{% elif profile.profile == 'openrouter' %}OpenRouter{% else %}Claude{% endif %} · {{ profile.model }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Fixed synthetic case</span>
+            <select name="case_id" required>
+              {% for case in llm_evaluation_availability.cases %}
+                <option value="{{ case.case_id }}">{{ case.scenario | replace('_', ' ') }} · {{ case.title }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <label class="guided-demo-confirmation">
+          <input type="checkbox" name="confirm" value="evaluate" required>
+          <span>Run one no-write evaluation request with the selected profile.</span>
+        </label>
+        <button class="decision-button approve" type="submit">Evaluate selected case</button>
+      </form>
+    {% else %}
+      <p class="empty-copy">No complete locally configured provider profile is available for LLM evaluation.</p>
+    {% endif %}
+  </section>
+
   <section class="ledger-section" aria-labelledby="case-title">
     <div class="section-heading">
       <div>
         <p class="section-label">Shared guided-demo catalogue</p>
         <h2 id="case-title">Scenario A, B, and C review cases</h2>
       </div>
-      <p>These are the same deterministic cases the CLI presents. Guided case selection and the separate no-write LLM lane arrive next; until then, this page does not run or reset the shared demo, configure a provider, or show a credential.</p>
+      <p>These are the same deterministic cases the CLI presents. The guided launcher above runs only selected local stories; the separate no-write LLM lane does not configure a provider or show a credential.</p>
     </div>
     <div class="ledger-table-wrap" tabindex="0">
       <table>

@@ -31,10 +31,25 @@ from enterprise_agent.application.local_demo_controls import (
     LocalDemoClockControlService,
     UnconfiguredLocalDemoClockControlService,
 )
+from enterprise_agent.application.local_guided_demo import (
+    LocalGuidedDemoPort,
+    LocalGuidedDemoService,
+    UnconfiguredLocalGuidedDemoService,
+)
+from enterprise_agent.application.local_llm_evaluation import (
+    LocalLLMEvaluationPort,
+    LocalLLMEvaluationService,
+    UnconfiguredLocalLLMEvaluationService,
+)
 from enterprise_agent.application.local_review import (
     LocalReviewReadPort,
     LocalReviewReadService,
     UnconfiguredLocalReviewService,
+)
+from enterprise_agent.config import (
+    SUPPORTED_LLM_PROFILES,
+    ConfigurationError,
+    load_provider_profile,
 )
 from enterprise_agent.domain import UserId
 from enterprise_agent.llm_setup import default_env_path, load_local_environment
@@ -115,6 +130,39 @@ def create_local_demo_clock_control_service() -> LocalDemoClockControlPort:
     return LocalDemoClockControlService(
         clock=PostgresDemoClock(database_url),
     )
+
+
+def create_local_guided_demo_service() -> LocalGuidedDemoPort:
+    """Compose the reset-and-stage launcher only for the exact local synthetic demo database."""
+    try:
+        environment = load_local_environment(default_env_path())
+    except ValueError:
+        return UnconfiguredLocalGuidedDemoService()
+    database_url = environment.get("DATABASE_URL", "").strip()
+    if not database_url:
+        return UnconfiguredLocalGuidedDemoService()
+    try:
+        _require_local_demo_database(database_url, allow_test_database=False)
+    except SeedSafetyError:
+        return UnconfiguredLocalGuidedDemoService()
+    return LocalGuidedDemoService(database_url=database_url)
+
+
+def create_local_llm_evaluation_service() -> LocalLLMEvaluationPort:
+    """Expose only complete locally configured profiles for an explicit synthetic no-write evaluation."""
+    try:
+        environment = load_local_environment(default_env_path())
+    except ValueError:
+        return UnconfiguredLocalLLMEvaluationService()
+    configurations = []
+    for profile in sorted(SUPPORTED_LLM_PROFILES):
+        try:
+            configurations.append(load_provider_profile(profile, environment))
+        except ConfigurationError:
+            continue
+    if not configurations:
+        return UnconfiguredLocalLLMEvaluationService()
+    return LocalLLMEvaluationService(configurations=tuple(configurations))
 
 
 def _selected_actor_id(environment: Mapping[str, str]) -> UserId | None:

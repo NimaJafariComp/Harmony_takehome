@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · LLM evaluation complete{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/demo">Demo mode</a><span aria-hidden="true">/</span><span>LLM evaluation complete</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Synthetic no-write evaluation</p>
+    <h1>LLM evaluation complete</h1>
+    <p class="lede">{{ receipt.profile }} · {{ receipt.model }} evaluated {{ receipt.case_title }}. The scorecard retains no credential, prompt, raw provider response, or business-system write.</p>
+  </header>
+
+  <section class="record-grid" aria-label="LLM evaluation summary">
+    <dl class="record-list">
+      <div><dt>Case</dt><dd>{{ receipt.case_id }}</dd></div>
+      <div><dt>Outcome</dt><dd><span class="state-label" data-state="{% if receipt.report.passed %}succeeded{% else %}failed{% endif %}">{% if receipt.report.passed %}passed{% else %}needs review{% endif %}</span></dd></div>
+      <div><dt>Token total</dt><dd>{{ receipt.report.usage.total_tokens }}</dd></div>
+      <div><dt>Cost total</dt><dd>${{ receipt.report.usage.total_cost_usd }}</dd></div>
+    </dl>
+    <aside class="trace-card">
+      <p class="section-label">Safety boundary</p>
+      <h2>One fixed no-write call</h2>
+      <p>No database, ERP, mail, workflow, or audit write occurred. The model cannot approve, execute, or alter a plan.</p>
+      <a class="text-link" href="/demo">Run another selected evaluation</a>
+    </aside>
+  </section>
+
+  {% if receipt.report.observations %}
+    <section class="ledger-section" aria-labelledby="check-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Scalar scorecard</p>
+          <h2 id="check-title">Policy checks</h2>
+        </div>
+        <p>Only normalized status, selected outcome label, and pass/fail checks are retained.</p>
+      </div>
+      <div class="ledger-table-wrap" tabindex="0">
+        <table>
+          <caption class="sr-only">Synthetic LLM evaluation checks</caption>
+          <thead><tr><th scope="col">Scenario</th><th scope="col">Observed outcome</th><th scope="col">Checks</th></tr></thead>
+          <tbody>
+            {% for observation in receipt.report.observations %}
+              <tr>
+                <th scope="row">{{ observation.scenario | replace('_', ' ') }}</th>
+                <td>{{ observation.observed_outcome or 'none' }}</td>
+                <td>{% for name, state in observation.checks.items() %}<span class="state-label" data-state="{{ 'succeeded' if state.value == 'pass' else 'failed' }}">{{ name | replace('_', ' ') }}: {{ state.value }}</span>{% endfor %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

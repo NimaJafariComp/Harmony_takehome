@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from enterprise_agent.application.llm_evaluation import LLMEvaluationUsage
 from enterprise_agent.application.local_decisions import (
     ApprovalDecision,
     ApprovalDecisionAvailability,
@@ -18,6 +19,20 @@ from enterprise_agent.application.local_demo_controls import (
     DemoClockAdvanceResult,
     DemoClockControlAvailability,
     LocalDemoClockControlDisabledError,
+)
+from enterprise_agent.application.local_guided_demo import (
+    GuidedDemoAvailability,
+    GuidedDemoPersona,
+    GuidedDemoReceipt,
+    GuidedDemoReceiptCase,
+    LocalGuidedDemoDisabledError,
+)
+from enterprise_agent.application.local_llm_evaluation import (
+    LLMEvaluationAvailability,
+    LLMEvaluationCaseOption,
+    LLMEvaluationProfile,
+    LLMEvaluationReceipt,
+    LocalLLMEvaluationPort,
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.contract]
@@ -169,6 +184,107 @@ class RecordingLocalDemoClockControlService:
         return DemoClockAdvanceResult(current_at="2026-08-25T09:00:00+00:00")
 
 
+@dataclass
+class RecordingLocalGuidedDemoService:
+    """Capture only explicit local demo-launch requests received through the UI boundary."""
+
+    can_run: bool = True
+    runs: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
+
+    def availability(self) -> GuidedDemoAvailability:
+        return GuidedDemoAvailability(
+            can_run=self.can_run,
+            personas=(
+                GuidedDemoPersona(
+                    persona_id="dana-buyer",
+                    label="Dana Buyer",
+                    role="Purchasing",
+                    case_ids=("scenario-a-reroute-bait", "scenario-c-pending-review"),
+                ),
+                GuidedDemoPersona(
+                    persona_id="quinn-quality-manager",
+                    label="Quinn Quality Manager",
+                    role="Quality",
+                    case_ids=("scenario-b-capacity",),
+                ),
+            ),
+        )
+
+    def run(self, *, persona_id: str, case_ids: tuple[str, ...]) -> GuidedDemoReceipt:
+        if not self.can_run:
+            raise LocalGuidedDemoDisabledError("unavailable")
+        self.runs.append((persona_id, case_ids))
+        return GuidedDemoReceipt(
+            persona_label="Dana Buyer",
+            cases=(
+                GuidedDemoReceiptCase(
+                    case_id="scenario-a-reroute-bait",
+                    title="Scenario A — viable reroute rejects the tempting supplier",
+                    execution_mode="stage_pending",
+                    outcome="Supplier Z remains the only viable alternate.",
+                    next_safe_action="Review the pending approval.",
+                    run_id="demo-scenario-a-reroute",
+                    approval_id="approval-a",
+                    workflow_id=None,
+                ),
+            ),
+        )
+
+
+@dataclass
+class RecordingLocalLLMEvaluationService(LocalLLMEvaluationPort):
+    """Capture one explicitly submitted fixed synthetic evaluation without making a provider call."""
+
+    can_evaluate: bool = True
+    evaluations: list[tuple[str, str]] = field(default_factory=list)
+
+    def availability(self) -> LLMEvaluationAvailability:
+        return LLMEvaluationAvailability(
+            can_evaluate=self.can_evaluate,
+            profiles=(LLMEvaluationProfile(profile="openai", model="gpt-5.6-luna"),),
+            cases=(
+                LLMEvaluationCaseOption(
+                    case_id="a-unapproved-bait",
+                    scenario="scenario_a",
+                    title="Unapproved supplier bait",
+                ),
+            ),
+        )
+
+    def evaluate(self, *, profile_id: str, case_id: str) -> LLMEvaluationReceipt:
+        self.evaluations.append((profile_id, case_id))
+        from enterprise_agent.application.llm_evaluation import LLMEvaluationReport
+
+        report = LLMEvaluationReport(
+            observations=(),
+            usage=_evaluation_usage(),
+        )
+        return LLMEvaluationReceipt(
+            profile="openai",
+            model="gpt-5.6-luna",
+            case_id=case_id,
+            case_title="Unapproved supplier bait",
+            report=report,
+        )
+
+
+def _evaluation_usage() -> LLMEvaluationUsage:
+    """Build an empty scalar-only report usage summary for the presentation contract."""
+    from decimal import Decimal
+
+    return LLMEvaluationUsage(
+        request_count=1,
+        metered_request_count=1,
+        unmetered_request_count=0,
+        unknown_cost_request_count=0,
+        input_tokens=120,
+        cached_input_tokens=0,
+        output_tokens=30,
+        total_tokens=150,
+        total_cost_usd=Decimal("0.000060"),
+    )
+
+
 @pytest.mark.critical
 async def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local_assets() -> None:
     """A reviewer gets a useful local entry point without credentials, provider setup, or write controls."""
@@ -187,7 +303,10 @@ async def test_local_ui_landing_page_is_explicitly_read_only_and_uses_only_local
     assert "Enterprise Agent / Local Review" in response.text
     assert 'href="/demo"' in response.text
     assert "Local verification surface" in response.text
-    assert "No provider call · no credential display · no business-system write" in response.text
+    assert (
+        "No automatic provider call · no credential display · no business-system write"
+        in response.text
+    )
     assert "API key" not in response.text
     assert "<script" not in response.text
     assert stylesheet.status_code == 200
@@ -292,6 +411,8 @@ async def test_local_ui_exposes_only_selected_actor_read_models_through_the_serv
     assert mutable_routes == {
         ("/approval/{approval_id}/decision", "POST"),
         ("/demo-clock/advance", "POST"),
+        ("/demo/run", "POST"),
+        ("/demo/evaluate", "POST"),
     }
 
 
@@ -528,8 +649,203 @@ async def test_local_ui_exposes_a_demo_tab_without_a_demo_mode_environment_setti
     assert "DEMO_MODE" not in demo.text
 
 
+async def test_local_ui_runs_only_an_explicit_csrf_bound_persona_matched_guided_demo() -> None:
+    """A reviewer chooses visible scenario cards and a seeded persona before the bounded reset/stage run."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    launcher = RecordingLocalGuidedDemoService()
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(
+                read_service=RecordingLocalReviewService(),
+                guided_demo_service=launcher,
+            )
+        ),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/demo")
+        token = re.search(
+            r'<form[^>]+action="/demo/run"[^>]*>.*?name="csrf_token" value="([^"]+)"',
+            page.text,
+            flags=re.DOTALL,
+        )
+        assert token is not None
+        submitted = await client.post(
+            "/demo/run",
+            data={
+                "csrf_token": token.group(1),
+                "persona_id": "dana-buyer",
+                "case_id": ["scenario-a-reroute-bait", "scenario-c-pending-review"],
+                "confirm": "run",
+            },
+        )
+        replay = await client.post(
+            "/demo/run",
+            data={
+                "csrf_token": token.group(1),
+                "persona_id": "dana-buyer",
+                "case_id": "scenario-a-reroute-bait",
+                "confirm": "run",
+            },
+        )
+
+    assert page.status_code == 200
+    assert "Dana Buyer · Purchasing" in page.text
+    assert "Quinn Quality Manager · Quality" in page.text
+    assert "Replace local synthetic demo data" in page.text
+    assert submitted.status_code == 200
+    assert "Guided demo ready" in submitted.text
+    assert 'href="/approval/approval-a"' in submitted.text
+    assert 'href="/audit/demo-scenario-a-reroute"' in submitted.text
+    assert replay.status_code == 403
+    assert launcher.runs == [
+        ("dana-buyer", ("scenario-a-reroute-bait", "scenario-c-pending-review"))
+    ]
+
+
+async def test_local_ui_fails_closed_when_guided_demo_is_not_composed() -> None:
+    """The page may show stories, but cannot expose a reset/stage form without strict composition."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=create_app(read_service=RecordingLocalReviewService())),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/demo")
+        forged = await client.post(
+            "/demo/run",
+            data={
+                "csrf_token": "forged",
+                "persona_id": "dana-buyer",
+                "case_id": "scenario-a-reroute-bait",
+                "confirm": "run",
+            },
+        )
+
+    assert page.status_code == 200
+    assert "Guided demo launcher is unavailable" in page.text
+    assert 'action="/demo/run"' not in page.text
+    assert forged.status_code == 403
+
+
+async def test_local_ui_runs_one_explicit_csrf_bound_no_write_llm_evaluation() -> None:
+    """A configured profile and one fixed synthetic case are selected without exposing a key or model output."""
+    from httpx import ASGITransport, AsyncClient
+
+    from enterprise_agent.web import create_app
+
+    evaluator = RecordingLocalLLMEvaluationService()
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(
+                read_service=RecordingLocalReviewService(),
+                llm_evaluation_service=evaluator,
+            )
+        ),
+        base_url="http://testserver",
+    ) as client:
+        page = await client.get("/demo")
+        token = re.search(
+            r'<form[^>]+action="/demo/evaluate"[^>]*>.*?name="csrf_token" value="([^"]+)"',
+            page.text,
+            flags=re.DOTALL,
+        )
+        assert token is not None
+        result = await client.post(
+            "/demo/evaluate",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "a-unapproved-bait",
+                "confirm": "evaluate",
+            },
+        )
+
+    assert page.status_code == 200
+    assert "OpenAI · gpt-5.6-luna" in page.text
+    assert "No database, ERP, mail, workflow, or audit write" in page.text
+    assert "API key" not in page.text
+    assert result.status_code == 200
+    assert "LLM evaluation complete" in result.text
+    assert "Token total" in result.text
+    assert "Cost total" in result.text
+    assert evaluator.evaluations == [("openai", "a-unapproved-bait")]
+
+
+def test_fastapi_testclient_keeps_live_llm_evaluation_tokens_action_bound_and_one_time() -> None:
+    """A live-evaluation token cannot authorize a local reset, cross-origin request, or replayed cost."""
+    from fastapi.testclient import TestClient
+
+    from enterprise_agent.web import create_app
+
+    launcher = RecordingLocalGuidedDemoService()
+    evaluator = RecordingLocalLLMEvaluationService()
+    with TestClient(
+        create_app(
+            read_service=RecordingLocalReviewService(),
+            guided_demo_service=launcher,
+            llm_evaluation_service=evaluator,
+        )
+    ) as client:
+        page = client.get("/demo")
+        token = re.search(
+            r'<form[^>]+action="/demo/evaluate"[^>]*>.*?name="csrf_token" value="([^"]+)"',
+            page.text,
+            flags=re.DOTALL,
+        )
+        assert token is not None
+        reset_attempt = client.post(
+            "/demo/run",
+            data={
+                "csrf_token": token.group(1),
+                "persona_id": "dana-buyer",
+                "case_id": "scenario-a-reroute-bait",
+                "confirm": "run",
+            },
+        )
+        cross_origin = client.post(
+            "/demo/evaluate",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "a-unapproved-bait",
+                "confirm": "evaluate",
+            },
+            headers={"Origin": "https://untrusted.example"},
+        )
+        completed = client.post(
+            "/demo/evaluate",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "a-unapproved-bait",
+                "confirm": "evaluate",
+            },
+        )
+        replay = client.post(
+            "/demo/evaluate",
+            data={
+                "csrf_token": token.group(1),
+                "profile_id": "openai",
+                "case_id": "a-unapproved-bait",
+                "confirm": "evaluate",
+            },
+        )
+
+    assert reset_attempt.status_code == 403
+    assert cross_origin.status_code == 403
+    assert completed.status_code == 200
+    assert replay.status_code == 403
+    assert launcher.runs == []
+    assert evaluator.evaluations == [("openai", "a-unapproved-bait")]
+
+
 async def test_local_ui_reuses_the_shared_a_b_c_demo_catalogue_without_running_it() -> None:
-    """All three scenarios are understandable in one UI view while only the existing CLI owns staging."""
+    """All three scenarios stay understandable in one UI view before an explicit launcher request."""
     from httpx import ASGITransport, AsyncClient
 
     from enterprise_agent.web import create_app
@@ -545,7 +861,7 @@ async def test_local_ui_reuses_the_shared_a_b_c_demo_catalogue_without_running_i
     assert "Scenario B — quality-lot capacity respects commitments" in page.text
     assert "Scenario C — supplier-risk bulletin awaits review" in page.text
     assert "fixed acceptance-case walkthrough" in page.text
-    assert "does not run or reset the shared demo" in page.text
+    assert "Guided demo launcher is unavailable" in page.text
 
 
 async def test_local_ui_renders_a_safe_html_error_page_for_a_missing_ledger_record() -> None:

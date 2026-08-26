@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Local Review · Guided demo ready{% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/demo">Demo mode</a><span aria-hidden="true">/</span><span>Guided demo ready</span></nav>
+  <header class="page-intro compact">
+    <p class="eyebrow">Deterministic local demo</p>
+    <h1>Guided demo ready</h1>
+    <p class="lede">{{ receipt.persona_label }}'s selected stories are prepared in the local synthetic database. Review the durable records below; no approval or workflow effect has been executed.</p>
+  </header>
+
+  <section class="ledger-section" aria-labelledby="result-title">
+    <h2 id="result-title">Selected stories</h2>
+    <div class="guided-demo-results">
+      {% for case in receipt.cases %}
+        <article class="guided-demo-result">
+          <p class="section-label">{{ case.execution_mode | replace('_', ' ') }}</p>
+          <h3>{{ case.title }}</h3>
+          <p>{{ case.outcome }}</p>
+          <p class="quiet">Next safe action: {{ case.next_safe_action }}</p>
+          {% if case.run_id or case.approval_id or case.workflow_id %}
+            <div class="result-links" aria-label="Durable review records">
+              {% if case.approval_id %}<a class="text-link" href="/approval/{{ case.approval_id }}">Review approval</a>{% endif %}
+              {% if case.workflow_id %}<a class="text-link" href="/workflow/{{ case.workflow_id }}">Review workflow</a>{% endif %}
+              {% if case.run_id %}<a class="text-link" href="/audit/{{ case.run_id }}">Review audit</a>{% endif %}
+            </div>
+          {% else %}
+            <p class="quiet">This fixed acceptance-case walkthrough does not stage a durable workflow.</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

@@ -523,6 +523,110 @@ tbody tr:last-child td {
   margin: 0;
 }
 
+.guided-demo-form {
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.guided-demo-personas,
+.guided-demo-cases,
+.guided-demo-results {
+  display: grid;
+  gap: 1rem;
+}
+
+.guided-demo-personas {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 1rem;
+}
+
+.guided-demo-persona,
+.guided-demo-result {
+  min-width: 0;
+  margin: 0;
+  padding: 1.1rem;
+  border: 1px solid var(--line);
+}
+
+.guided-demo-persona legend {
+  padding: 0 0.25rem;
+  font-family: var(--display);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.guided-demo-persona label,
+.guided-demo-confirmation,
+.guided-demo-case {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+}
+
+.guided-demo-case {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+}
+
+.guided-demo-case > span {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.guided-demo-case strong {
+  font-family: var(--display);
+}
+
+.guided-demo-case span span {
+  color: var(--muted-ink);
+  font-size: 0.9rem;
+}
+
+.guided-demo-confirmation {
+  max-width: 62ch;
+  margin: 1rem 0;
+  font-weight: 700;
+}
+
+.llm-evaluation-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.llm-evaluation-fields label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--muted-ink);
+  font-family: var(--utility);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.llm-evaluation-fields select {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.5rem;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+
+.guided-demo-results {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.guided-demo-result {
+  background: var(--panel);
+}
+
+.guided-demo-result > p:last-of-type {
+  margin-bottom: 0;
+}
+
 .decision-button {
   min-height: 2.75rem;
   padding: 0.65rem 1rem;
@@ -649,6 +753,14 @@ tbody tr:last-child td {
 
   .decision-actions {
     display: grid;
+  }
+
+  .guided-demo-personas {
+    grid-template-columns: 1fr;
+  }
+
+  .llm-evaluation-fields {
+    grid-template-columns: 1fr;
   }
 
   .decision-button {

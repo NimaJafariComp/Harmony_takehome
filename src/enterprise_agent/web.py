@@ -31,6 +31,19 @@ from enterprise_agent.application.local_demo_controls import (
     LocalDemoClockControlUnavailableError,
     UnconfiguredLocalDemoClockControlService,
 )
+from enterprise_agent.application.local_guided_demo import (
+    GuidedDemoSelectionError,
+    LocalGuidedDemoDisabledError,
+    LocalGuidedDemoPort,
+    LocalGuidedDemoUnavailableError,
+    UnconfiguredLocalGuidedDemoService,
+)
+from enterprise_agent.application.local_llm_evaluation import (
+    LocalLLMEvaluationPort,
+    LocalLLMEvaluationSelectionError,
+    LocalLLMEvaluationUnavailableError,
+    UnconfiguredLocalLLMEvaluationService,
+)
 from enterprise_agent.application.local_review import (
     LocalReviewAccessDeniedError,
     LocalReviewReadPort,
@@ -42,6 +55,8 @@ from enterprise_agent.application.local_review import (
 from enterprise_agent.local_review_composition import (
     create_local_approval_decision_service,
     create_local_demo_clock_control_service,
+    create_local_guided_demo_service,
+    create_local_llm_evaluation_service,
     create_local_review_service,
 )
 
@@ -51,6 +66,7 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent
 _TEMPLATES = Jinja2Templates(directory=_PACKAGE_ROOT / "templates")
 _CSRF_COOKIE_NAME = "enterprise_agent_local_csrf"
 _MAX_DECISION_FORM_BYTES = 4096
+_MAX_GUIDED_DEMO_FORM_BYTES = 4096
 
 
 class _DecisionRequestError(ValueError):
@@ -62,6 +78,8 @@ def create_app(
     decision_service: LocalApprovalDecisionPort | None = None,
     demo_clock_control_service: LocalDemoClockControlPort | None = None,
     demo_catalogue_service: LocalDemoCataloguePort | None = None,
+    guided_demo_service: LocalGuidedDemoPort | None = None,
+    llm_evaluation_service: LocalLLMEvaluationPort | None = None,
 ) -> FastAPI:
     """Create a loopback UI with injected read and approval-decision service boundaries."""
     review_service = read_service if read_service is not None else UnconfiguredLocalReviewService()
@@ -79,6 +97,16 @@ def create_app(
         demo_catalogue_service
         if demo_catalogue_service is not None
         else LocalDemoCatalogueService()
+    )
+    guided_demo = (
+        guided_demo_service
+        if guided_demo_service is not None
+        else UnconfiguredLocalGuidedDemoService()
+    )
+    llm_evaluation = (
+        llm_evaluation_service
+        if llm_evaluation_service is not None
+        else UnconfiguredLocalLLMEvaluationService()
     )
     csrf_signing_key = secrets.token_bytes(32)
     application = FastAPI(
@@ -181,11 +209,6 @@ def create_app(
             raise _DecisionRequestError("invalid csrf token")
         return decision
 
-    def new_demo_clock_csrf() -> tuple[str, str]:
-        """Create one fresh cookie-bound token for the sole fixed-duration demo-clock action."""
-        session = secrets.token_urlsafe(32)
-        return session, _demo_clock_csrf_token(csrf_signing_key, session=session)
-
     async def read_demo_clock_form(request: Request) -> None:
         """Require a same-origin one-field form whose token cannot authorize any other action."""
         content_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0]
@@ -216,6 +239,80 @@ def create_app(
             _demo_clock_csrf_token(csrf_signing_key, session=session),
         ):
             raise _DecisionRequestError("invalid demo-clock token")
+
+    async def read_guided_demo_form(request: Request) -> tuple[str, tuple[str, ...]]:
+        """Accept only a confirmed, same-origin seeded-persona and case selection."""
+        content_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0]
+        if content_type != "application/x-www-form-urlencoded":
+            raise _DecisionRequestError("unsupported guided-demo request")
+        body = await request.body()
+        if not body or len(body) > _MAX_GUIDED_DEMO_FORM_BYTES:
+            raise _DecisionRequestError("invalid guided-demo request")
+        try:
+            values = parse_qs(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=8,
+            )
+        except (UnicodeDecodeError, ValueError) as error:
+            raise _DecisionRequestError("invalid guided-demo request") from error
+        if set(values) != {"csrf_token", "persona_id", "case_id", "confirm"}:
+            raise _DecisionRequestError("invalid guided-demo request")
+        csrf_token = _one_form_value(values, "csrf_token")
+        persona_id = _one_form_value(values, "persona_id")
+        confirmation = _one_form_value(values, "confirm")
+        case_ids = tuple(values["case_id"])
+        if confirmation != "run" or not case_ids or any(not case_id for case_id in case_ids):
+            raise _DecisionRequestError("invalid guided-demo request")
+        origin = request.headers.get("origin")
+        expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if origin is not None and not hmac.compare_digest(origin, expected_origin):
+            raise _DecisionRequestError("cross-origin guided-demo request")
+        session = request.cookies.get(_CSRF_COOKIE_NAME)
+        if session is None or not hmac.compare_digest(
+            csrf_token,
+            _guided_demo_csrf_token(csrf_signing_key, session=session),
+        ):
+            raise _DecisionRequestError("invalid guided-demo token")
+        return persona_id, case_ids
+
+    async def read_llm_evaluation_form(request: Request) -> tuple[str, str]:
+        """Accept only a confirmed, same-origin configured-profile and fixed-case evaluation request."""
+        content_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0]
+        if content_type != "application/x-www-form-urlencoded":
+            raise _DecisionRequestError("unsupported LLM evaluation request")
+        body = await request.body()
+        if not body or len(body) > _MAX_GUIDED_DEMO_FORM_BYTES:
+            raise _DecisionRequestError("invalid LLM evaluation request")
+        try:
+            values = parse_qs(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=4,
+            )
+        except (UnicodeDecodeError, ValueError) as error:
+            raise _DecisionRequestError("invalid LLM evaluation request") from error
+        if set(values) != {"csrf_token", "profile_id", "case_id", "confirm"}:
+            raise _DecisionRequestError("invalid LLM evaluation request")
+        csrf_token = _one_form_value(values, "csrf_token")
+        profile_id = _one_form_value(values, "profile_id")
+        case_id = _one_form_value(values, "case_id")
+        confirmation = _one_form_value(values, "confirm")
+        if confirmation != "evaluate":
+            raise _DecisionRequestError("invalid LLM evaluation request")
+        origin = request.headers.get("origin")
+        expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if origin is not None and not hmac.compare_digest(origin, expected_origin):
+            raise _DecisionRequestError("cross-origin LLM evaluation request")
+        session = request.cookies.get(_CSRF_COOKIE_NAME)
+        if session is None or not hmac.compare_digest(
+            csrf_token,
+            _llm_evaluation_csrf_token(csrf_signing_key, session=session),
+        ):
+            raise _DecisionRequestError("invalid LLM evaluation token")
+        return profile_id, case_id
 
     @application.exception_handler(LocalReviewAccessDeniedError)
     async def local_review_access_denied(
@@ -347,10 +444,26 @@ def create_app(
         """Render the discoverable local demo page plus its one bounded time control."""
         demo_clock = review_service.demo_clock()
         controls = demo_clock_controls.availability()
+        guided_demo_availability = guided_demo.availability()
+        llm_evaluation_availability = llm_evaluation.availability()
         csrf_session: str | None = None
         csrf_token: str | None = None
-        if controls.can_advance:
-            csrf_session, csrf_token = new_demo_clock_csrf()
+        guided_demo_csrf_token: str | None = None
+        llm_evaluation_csrf_token: str | None = None
+        if (
+            controls.can_advance
+            or guided_demo_availability.can_run
+            or llm_evaluation_availability.can_evaluate
+        ):
+            csrf_session = secrets.token_urlsafe(32)
+        if csrf_session is not None and controls.can_advance:
+            csrf_token = _demo_clock_csrf_token(csrf_signing_key, session=csrf_session)
+        if csrf_session is not None and guided_demo_availability.can_run:
+            guided_demo_csrf_token = _guided_demo_csrf_token(csrf_signing_key, session=csrf_session)
+        if csrf_session is not None and llm_evaluation_availability.can_evaluate:
+            llm_evaluation_csrf_token = _llm_evaluation_csrf_token(
+                csrf_signing_key, session=csrf_session
+            )
         response = render_page(
             request,
             "demo_clock.html",
@@ -358,6 +471,10 @@ def create_app(
             demo_cases=demo_catalogue.cases(),
             can_advance=controls.can_advance,
             csrf_token=csrf_token,
+            guided_demo_availability=guided_demo_availability,
+            guided_demo_csrf_token=guided_demo_csrf_token,
+            llm_evaluation_availability=llm_evaluation_availability,
+            llm_evaluation_csrf_token=llm_evaluation_csrf_token,
         )
         if csrf_session is not None:
             response.set_cookie(
@@ -369,6 +486,77 @@ def create_app(
                 secure=False,
                 path="/",
             )
+        return response
+
+    @application.post("/demo/run", response_class=HTMLResponse)
+    async def run_guided_demo_page(request: Request) -> Response:
+        """Reset, seed, and stage only a confirmed strict-local deterministic demo selection."""
+        try:
+            persona_id, case_ids = await read_guided_demo_form(request)
+        except _DecisionRequestError:
+            return review_error(
+                request,
+                status_code=403,
+                title="Guided demo request expired",
+                message="Reload Demo mode before selecting a local guided scenario.",
+            )
+        try:
+            receipt = guided_demo.run(persona_id=persona_id, case_ids=case_ids)
+        except LocalGuidedDemoDisabledError:
+            return review_error(
+                request,
+                status_code=403,
+                title="Guided demo launcher is unavailable",
+                message="Start the local deterministic demo database, then reload Demo mode.",
+            )
+        except GuidedDemoSelectionError:
+            return review_error(
+                request,
+                status_code=400,
+                title="Guided demo selection is invalid",
+                message="Choose one listed persona and one or more compatible scenario cards.",
+            )
+        except LocalGuidedDemoUnavailableError:
+            return review_error(
+                request,
+                status_code=503,
+                title="Guided demo could not be prepared",
+                message="Start the local deterministic demo database, then retry from Demo mode.",
+            )
+        response = render_page(request, "guided_demo_result.html", receipt=receipt)
+        response.delete_cookie(_CSRF_COOKIE_NAME, path="/")
+        return response
+
+    @application.post("/demo/evaluate", response_class=HTMLResponse)
+    async def run_llm_evaluation_page(request: Request) -> Response:
+        """Evaluate one fixed synthetic case through one selected profile and no-write adapter only."""
+        try:
+            profile_id, case_id = await read_llm_evaluation_form(request)
+        except _DecisionRequestError:
+            return review_error(
+                request,
+                status_code=403,
+                title="LLM evaluation request expired",
+                message="Reload Demo mode before selecting a configured profile and synthetic case.",
+            )
+        try:
+            receipt = llm_evaluation.evaluate(profile_id=profile_id, case_id=case_id)
+        except LocalLLMEvaluationSelectionError:
+            return review_error(
+                request,
+                status_code=400,
+                title="LLM evaluation selection is invalid",
+                message="Choose one listed configured profile and one fixed synthetic case.",
+            )
+        except LocalLLMEvaluationUnavailableError:
+            return review_error(
+                request,
+                status_code=503,
+                title="LLM evaluation is unavailable",
+                message="Configure a supported local provider profile, then reload Demo mode.",
+            )
+        response = render_page(request, "llm_evaluation_result.html", receipt=receipt)
+        response.delete_cookie(_CSRF_COOKIE_NAME, path="/")
         return response
 
     @application.post("/demo-clock/advance", response_class=HTMLResponse)
@@ -459,6 +647,8 @@ def main() -> None:
             read_service=create_local_review_service(),
             decision_service=create_local_approval_decision_service(),
             demo_clock_control_service=create_local_demo_clock_control_service(),
+            guided_demo_service=create_local_guided_demo_service(),
+            llm_evaluation_service=create_local_llm_evaluation_service(),
         ),
         host=LOCAL_UI_HOST,
         port=LOCAL_UI_PORT,
@@ -481,6 +671,20 @@ def _demo_clock_csrf_token(signing_key: bytes, *, session: str) -> str:
     """Sign a token that applies only to the one-day local-demo clock operation."""
     return hmac.new(
         signing_key, f"{session}\x1fdemo-clock.advance-one-day".encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def _guided_demo_csrf_token(signing_key: bytes, *, session: str) -> str:
+    """Sign a token that applies only to the local deterministic reset-and-stage action."""
+    return hmac.new(
+        signing_key, f"{session}\x1fguided-demo.run".encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def _llm_evaluation_csrf_token(signing_key: bytes, *, session: str) -> str:
+    """Sign a token that applies only to one synthetic no-write provider evaluation action."""
+    return hmac.new(
+        signing_key, f"{session}\x1fllm-evaluation.run".encode(), hashlib.sha256
     ).hexdigest()
 
 
